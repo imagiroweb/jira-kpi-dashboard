@@ -1,0 +1,101 @@
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:7
+    container_name: jira-kpi-mongodb
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+      - mongo_config:/data/configdb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:-securepassword123}
+      MONGO_INITDB_DATABASE: jira-kpi
+    ports:
+      - "27017:27017"
+    networks:
+      - jira-kpi-network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+
+  # Backend API
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: jira-kpi-backend
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - MONGODB_URI=mongodb://admin:${MONGO_PASSWORD:-securepassword123}@mongodb:27017/jira-kpi?authSource=admin
+      - REDIS_URL=redis://redis:6379
+      - JIRA_URL=${JIRA_URL}
+      - JIRA_EMAIL=${JIRA_EMAIL}
+      - JIRA_API_TOKEN=${JIRA_API_TOKEN}
+      - JIRA_PROJECT_KEY=${JIRA_PROJECT_KEY}
+      - JIRA_BOARD_ID=${JIRA_BOARD_ID}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - CORS_ORIGIN=http://localhost
+    volumes:
+      - backend_uploads:/app/uploads
+      - backend_logs:/app/logs
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - jira-kpi-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: jira-kpi-frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - jira-kpi-network
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+networks:
+  jira-kpi-network:
+    driver: bridge
+    name: jira-kpi-network
+
+volumes:
+  mongo_data:
+    name: jira-kpi-mongo-data
+  mongo_config:
+    name: jira-kpi-mongo-config
+  redis_data:
+    name: jira-kpi-redis-data
+  backend_uploads:
+    name: jira-kpi-uploads
+  backend_logs:
+    name: jira-kpi-logs
+
