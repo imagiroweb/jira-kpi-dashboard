@@ -1,0 +1,10 @@
+# Override pour utiliser les images GitHub Container Registry (ghcr.io)
+# Usage: docker compose -f docker-compose.prod.yml -f docker-compose.prod.ghcr.yml up -d
+# À utiliser avec un .env contenant MONGO_PASSWORD, JIRA_*, etc. (sans AWS_ACCOUNT_ID / AWS_REGION)
+
+services:
+  backend:
+    image: ghcr.io/imagiroweb/jira-kpi-backend:latest
+
+  frontend:
+    image: ghcr.io/imagiroweb/jira-kpi-frontend:latest
