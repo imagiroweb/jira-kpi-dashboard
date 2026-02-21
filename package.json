@@ -1,0 +1,15 @@
+{
+  "name": "jira-kpi-dashboard",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Jira KPI Dashboard - monorepo root",
+  "scripts": {
+    "prepare": "husky",
+    "lint": "npm run lint --prefix backend && npm run lint --prefix frontend",
+    "lint:backend": "npm run lint --prefix backend",
+    "lint:frontend": "npm run lint --prefix frontend"
+  },
+  "devDependencies": {
+    "husky": "^9.0.11"
+  }
+}

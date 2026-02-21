@@ -54,6 +54,8 @@ git clone <repository-url>
 cd jira-kpi-dashboard
 ```
 
+**Hooks Git (Husky)** : à la racine, exécuter `npm install` une fois pour installer Husky. Les commits déclencheront alors le lint backend + frontend automatiquement.
+
 ### 2. Configuration
 Créez un fichier `.env` à la racine du projet :
 
@@ -162,6 +164,7 @@ Deux options, contrôlées par la **variable de dépôt** `DEPLOY_METHOD` (Setti
 ```
 jira-kpi-dashboard/
 ├── .github/workflows/        # CI/CD (ci.yml, cd.yml)
+├── .husky/                   # Hooks Git (pre-commit = lint backend + frontend)
 ├── docs/
 │   └── DEPLOIEMENT.md        # Guide détaillé secrets + Portainer
 ├── frontend/                 # Application React
@@ -184,7 +187,8 @@ jira-kpi-dashboard/
 │   ├── Dockerfile
 │   └── package.json
 ├── docker-compose.yml        # Production
-├── docker-compose.dev.yml    # Développement
+├── docker-compose.dev.yml   # Développement
+├── package.json             # Racine (Husky + scripts lint unifiés)
 └── README.md
 ```
 
