@@ -471,7 +471,7 @@ export class AuthService {
   async buildUserWithPermissions(user: IUser): Promise<{ id: string; email: string; firstName?: string; lastName?: string; provider: string; role: 'super_admin' | string | null; roleName: string; visiblePages: IPageVisibilities }> {
     const visiblePages = await this.getVisiblePages(user);
     let roleName = 'Utilisateur';
-    let role: 'super_admin' | string | null = user.role ?? (user.roleId ? user.roleId.toString() : null);
+    const role: 'super_admin' | string | null = user.role ?? (user.roleId ? user.roleId.toString() : null);
     if (user.role === 'super_admin') roleName = 'Super admin';
     else if (user.roleId) {
       const r = await Role.findById(user.roleId);

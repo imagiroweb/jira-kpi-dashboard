@@ -12,7 +12,7 @@ const connectedClients = new Map<string, ConnectedClient>();
 export function setupSocketHandlers(io: Server): void {
   // Middleware for authentication (optional)
   io.use((socket, next) => {
-    const token = socket.handshake.auth.token;
+    const _token = socket.handshake.auth.token;
     // TODO: Implement token validation if needed
     logger.debug(`Socket auth attempt from ${socket.id}`);
     next();

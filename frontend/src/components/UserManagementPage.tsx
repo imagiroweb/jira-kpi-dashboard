@@ -33,8 +33,9 @@ export function UserManagementPage() {
       const data = await authApi.getUsersAndRoles();
       setUsers(data.users);
       setRoles(data.roles);
-    } catch (e: any) {
-      setError(e?.response?.data?.error || e?.message || 'Erreur chargement');
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } }; message?: string };
+      setError(err?.response?.data?.error || err?.message || 'Erreur chargement');
     } finally {
       setLoading(false);
     }
@@ -60,8 +61,9 @@ export function UserManagementPage() {
             : u
         )
       );
-    } catch (e: any) {
-      setError(e?.response?.data?.error || e?.message || 'Erreur mise à jour');
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } }; message?: string };
+      setError(err?.response?.data?.error || err?.message || 'Erreur mise à jour');
     } finally {
       setSavingUserId(null);
     }
@@ -72,8 +74,9 @@ export function UserManagementPage() {
       await authApi.updateRole(roleId, { name, pageVisibilities });
       setRoles((prev) => prev.map((r) => (r.id === roleId ? { ...r, name, pageVisibilities } : r)));
       setEditingRoleId(null);
-    } catch (e: any) {
-      setError(e?.response?.data?.error || e?.message || 'Erreur sauvegarde rôle');
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } }; message?: string };
+      setError(err?.response?.data?.error || err?.message || 'Erreur sauvegarde rôle');
     }
   };
 
@@ -93,8 +96,9 @@ export function UserManagementPage() {
       setRoles((prev) => [...prev, created]);
       setNewRoleName('');
       setShowNewRole(false);
-    } catch (e: any) {
-      setError(e?.response?.data?.error || e?.message || 'Erreur création rôle');
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } }; message?: string };
+      setError(err?.response?.data?.error || err?.message || 'Erreur création rôle');
     }
   };
 

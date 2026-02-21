@@ -1,4 +1,5 @@
-export { DateRangePicker, getDefaultDateRange } from './DateRangePicker';
+export { DateRangePicker } from './DateRangePicker';
+export { getDefaultDateRange } from '../utils/dateUtils';
 export { ProjectSelector } from './ProjectSelector';
 export { UserWorkloadChart } from './UserWorkloadChart';
 export { UserTicketsChart } from './UserTicketsChart';

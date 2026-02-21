@@ -2,8 +2,6 @@ import { container } from '../../infrastructure/Container';
 import { DateRange } from '../../domain/worklog/value-objects/DateRange';
 import { Worklog } from '../../domain/worklog/entities/Worklog';
 import { SprintIssue } from '../../domain/sprint/entities/SprintIssue';
-import { WorklogMetrics } from '../../domain/kpi/services/WorklogMetricsCalculator';
-import { SprintMetrics } from '../../domain/kpi/services/SprintMetricsCalculator';
 import { logger } from '../../utils/logger';
 
 /**
@@ -162,7 +160,7 @@ export class WorklogApplicationService {
     
     // Transform issues to SupportIssue format
     const supportIssues: SupportIssue[] = issues.map(issue => {
-      const fields = issue.fields as Record<string, any>;
+      const fields = issue.fields as Record<string, unknown>;
       const status = fields.status as { name: string; statusCategory?: { key: string } } | undefined;
       const assignee = fields.assignee as { displayName: string } | null;
       const issueType = fields.issuetype as { name: string } | undefined;
@@ -388,7 +386,7 @@ export class WorklogApplicationService {
     const backlogStats = {
       ticketCount: backlogIssues.length,
       totalPonderation: backlogIssues.reduce((sum, issue) => {
-        const fields = issue.fields as Record<string, any>;
+        const fields = issue.fields as Record<string, unknown>;
         return sum + ((fields[ponderationField] as number) || 0);
       }, 0)
     };
@@ -419,7 +417,7 @@ export class WorklogApplicationService {
   async testConnection(): Promise<{ success: boolean; endpoint?: string; version?: string }> {
     try {
       const jiraClient = container().jiraClient;
-      const projects = await jiraClient.getProjects();
+      await jiraClient.getProjects();
       return {
         success: true,
         endpoint: 'Jira Cloud REST API',
@@ -606,7 +604,7 @@ export class WorklogApplicationService {
         const obj = raw as { name?: string; value?: string };
         return (obj.name ?? obj.value ?? '').toString().trim() || null;
       };
-      for (const [projectKey, boardList] of projectToBoards) {
+      for (const [projectKey, _boardList] of projectToBoards) {
         if (!projectKey || projectKey.startsWith('board_')) continue;
         const projectJql = `project = "${projectKey}" AND ${resolvedAndDateClause}`;
         try {
@@ -742,8 +740,8 @@ export class WorklogApplicationService {
     try {
       const response = await jiraClient.searchIssuesWithPagination(jql, fields, 100);
       const allIssues = response.issues;
-      const sprintIssues = allIssues.map((issue: any) => {
-        const fieldsData = issue.fields as Record<string, any>;
+      const sprintIssues = allIssues.map((issue: { key: string; fields?: Record<string, unknown> }) => {
+        const fieldsData = issue.fields as Record<string, unknown>;
         const status = fieldsData.status as { name?: string; statusCategory?: { key?: string; name?: string } } | undefined;
         const issueType = fieldsData.issuetype as { name?: string } | undefined;
         const storyPoints = (fieldsData[storyPointsField] as number) || (fieldsData[storyPointEstimateField] as number) || null;
@@ -853,7 +851,7 @@ export class WorklogApplicationService {
     const storyPointEstimateField = process.env.JIRA_STORY_POINT_ESTIMATE_FIELD || 'customfield_10016';
     const fields = `key,summary,issuetype,status,timeoriginalestimate,${storyPointsField},${storyPointEstimateField}`;
     
-    const issueMap = new Map<string, any>(); // Deduplicate by issue key
+    const issueMap = new Map<string, { key: string; fields?: Record<string, unknown> }>(); // Deduplicate by issue key
     for (const sprint of sprintsToUse) {
       logger.info(`[Board ${boardId}] Fetching issues for sprint "${sprint.name}" (ID: ${sprint.id}) filtered by board...`);
       let issues = await jiraClient.getBoardSprintIssues(boardId, sprint.id, fields);
@@ -874,7 +872,7 @@ export class WorklogApplicationService {
 
     // Map issues to SprintIssue domain objects (normalize status from Jira category or status name)
     const sprintIssues = allIssues.map(issue => {
-      const fieldsData = issue.fields as Record<string, any>;
+      const fieldsData = issue.fields as Record<string, unknown>;
       const status = fieldsData.status as { name?: string; statusCategory?: { key?: string; name?: string } } | undefined;
       const issueType = fieldsData.issuetype as { name?: string } | undefined;
       const statusName = (status?.name ?? (typeof status === 'string' ? status : '')) || 'Unknown';
@@ -895,7 +893,7 @@ export class WorklogApplicationService {
     const metrics = calculator.calculate(sprintIssues);
 
     // Get backlog issues and calculate time spent for this board's issues in parallel
-    let backlogIssues: any[] = [];
+    let backlogIssues: { key: string; fields?: Record<string, unknown> }[] = [];
     let totalTimeSeconds = 0;
     
     const board = await jiraClient.getBoard(boardId);
@@ -1045,7 +1043,7 @@ export class WorklogApplicationService {
     
     // Log all epic keys with their types for debugging
     logger.info(`Found ${epics.length} epics: ${epics.map(e => {
-      const fields = e.fields as Record<string, any>;
+      const fields = e.fields as Record<string, unknown>;
       const issueType = (fields?.issuetype as { name?: string })?.name || 'Unknown';
       const statusCat = (fields?.status as { statusCategory?: { key?: string } })?.statusCategory?.key || 'unknown';
       return `${e.key}(${issueType}, ${statusCat})`;
@@ -1072,8 +1070,8 @@ export class WorklogApplicationService {
     };
   }
 
-  private async fetchEpicProgress(epic: { key: string; fields: Record<string, any> }): Promise<EpicProgressItem> {
-    const epicFields = epic.fields as Record<string, any>;
+  private async fetchEpicProgress(epic: { key: string; fields: Record<string, unknown> }): Promise<EpicProgressItem> {
+    const epicFields = epic.fields;
     const issueType = epicFields?.issuetype as { name?: string } | undefined;
     const issueTypeName = issueType?.name || 'Epic';
     const isLegend = issueTypeName.toLowerCase().includes('legend') || issueTypeName.toLowerCase().includes('légende');
@@ -1200,7 +1198,7 @@ export class WorklogApplicationService {
     const response = await jiraClient.searchIssuesLimited(jql, 'key,summary,issuetype,status', 20);
     
     const results = response.issues.map(issue => {
-      const fields = issue.fields as Record<string, any>;
+      const fields = issue.fields as Record<string, unknown>;
       const status = fields.status as { name?: string; statusCategory?: { key?: string } } | undefined;
       const issueType = fields.issuetype as { name?: string } | undefined;
       
@@ -1235,7 +1233,7 @@ export class WorklogApplicationService {
     }
 
     const epic = epicResponse.issues[0];
-    const epicFields = epic.fields as Record<string, any>;
+    const epicFields = epic.fields as Record<string, unknown>;
     const issueType = epicFields?.issuetype as { name?: string } | undefined;
     const issueTypeName = issueType?.name || 'Epic';
     const isLegend = issueTypeName.toLowerCase().includes('legend') || issueTypeName.toLowerCase().includes('légende');
@@ -1313,7 +1311,7 @@ export class WorklogApplicationService {
     const children: EpicChildIssue[] = [];
 
     for (const childEpic of epicResponse.issues) {
-      const epicFields = childEpic.fields as Record<string, any>;
+      const epicFields = childEpic.fields as Record<string, unknown>;
       const status = epicFields?.status as { name?: string; statusCategory?: { key?: string } } | undefined;
       const issueType = epicFields?.issuetype as { name?: string } | undefined;
 
@@ -1363,7 +1361,7 @@ export class WorklogApplicationService {
     const subtaskKeyMap = new Map<string, string>(); // subtaskKey -> parentKey
     
     for (const issue of childResponse.issues) {
-      const fields = issue.fields as Record<string, any>;
+      const fields = issue.fields as Record<string, unknown>;
       const subtasks = fields.subtasks as Array<{ key: string }> | undefined;
       if (subtasks) {
         for (const st of subtasks) {
@@ -1387,7 +1385,7 @@ export class WorklogApplicationService {
         );
         
         for (const st of subtaskResponse.issues) {
-          const stFields = st.fields as Record<string, any>;
+          const stFields = st.fields as Record<string, unknown>;
           const stStatus = stFields?.status as { name?: string; statusCategory?: { key?: string } } | undefined;
           const stIssueType = stFields?.issuetype as { name?: string } | undefined;
           const parentKey = subtaskKeyMap.get(st.key) || null;
@@ -1414,7 +1412,7 @@ export class WorklogApplicationService {
     // Note: Each item stores ONLY its own values, not aggregated.
     // calculateTotals() will do the recursive aggregation.
     for (const issue of childResponse.issues) {
-      const fields = issue.fields as Record<string, any>;
+      const fields = issue.fields as Record<string, unknown>;
       const status = fields?.status as { name?: string; statusCategory?: { key?: string } } | undefined;
       const issueType = fields?.issuetype as { name?: string } | undefined;
       const subtasks = fields.subtasks as Array<{ key: string }> | undefined;
@@ -1487,7 +1485,7 @@ export class WorklogApplicationService {
     const subtaskKeys: string[] = [];
     
     childIssues.forEach(issue => {
-      const fields = issue.fields as Record<string, any>;
+      const fields = issue.fields as Record<string, unknown>;
       
       // Collect subtask keys
       const subtasks = fields.subtasks as Array<{ key: string }> | undefined;
@@ -1523,7 +1521,7 @@ export class WorklogApplicationService {
         const subtaskResponse = await jiraClient.searchIssuesWithPagination(subtaskJql, `key,timeoriginalestimate,timespent,${storyPointsField},${storyPointEstimateField}`);
         
         subtaskResponse.issues.forEach(st => {
-          const stFields = st.fields as Record<string, any>;
+          const stFields = st.fields as Record<string, unknown>;
           const stEstimate = (stFields.timeoriginalestimate as number) || 0;
           const stSpent = (stFields.timespent as number) || 0;
           const stStoryPoints = (stFields[storyPointsField] as number) || (stFields[storyPointEstimateField] as number) || 0;

@@ -1,32 +1,11 @@
 import { useState, useEffect } from 'react';
 import { Calendar, ChevronDown } from 'lucide-react';
-
-interface DateRange {
-  from: string;
-  to: string;
-}
+import { formatDate, type DateRange } from '../utils/dateUtils';
 
 interface DateRangePickerProps {
   value: DateRange;
   onChange: (range: DateRange) => void;
   className?: string;
-}
-
-// Helper to format date as YYYY-MM-DD
-function formatDate(date: Date): string {
-  return date.toISOString().split('T')[0];
-}
-
-// Helper to get default date range (last 8 days)
-export function getDefaultDateRange(): DateRange {
-  const today = new Date();
-  const from = new Date(today);
-  from.setDate(from.getDate() - 8);
-  
-  return {
-    from: formatDate(from),
-    to: formatDate(today)
-  };
 }
 
 // Preset ranges

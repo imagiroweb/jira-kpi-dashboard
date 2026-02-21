@@ -1,7 +1,7 @@
 import { Worklog } from '../../../domain/worklog/entities/Worklog';
 import { TimeSpent } from '../../../domain/worklog/value-objects/TimeSpent';
 import { Author } from '../../../domain/worklog/value-objects/Author';
-import { JiraWorklog, JiraIssue } from '../JiraClient';
+import { JiraWorklog } from '../JiraClient';
 
 /**
  * Mapper to convert Jira API responses to Domain entities

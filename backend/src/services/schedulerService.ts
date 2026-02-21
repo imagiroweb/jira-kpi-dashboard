@@ -1,6 +1,6 @@
 import { Server } from 'socket.io';
 import { logger } from '../utils/logger';
-import { emitKPIUpdate, emitSyncProgress, emitAlert } from '../websocket/socketHandler';
+import { emitKPIUpdate, emitAlert } from '../websocket/socketHandler';
 import { worklogAppService } from '../application/services/WorklogApplicationService';
 import { globalCache } from '../infrastructure/cache/CacheDecorator';
 
@@ -76,7 +76,7 @@ class SchedulerService {
       
       const totalProjects = projects.length + (supportProjectKey ? 1 : 0);
       let completedProjects = 0;
-      let errors: string[] = [];
+      const errors: string[] = [];
 
       // Sync each main project
       for (const projectKey of projects) {

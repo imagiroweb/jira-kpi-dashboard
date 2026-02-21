@@ -100,7 +100,7 @@ export function UserTicketsChart({ dateRange, selectedProjects, useActiveSprint 
         const result = await response.json();
 
         if (result.success && Array.isArray(result.data)) {
-          const userList = result.data.map((user: any) => ({
+          const userList = result.data.map((user: { accountId?: string; displayName?: string; timeSpentHours?: number }) => ({
             accountId: user.accountId,
             displayName: user.displayName,
             totalHours: user.timeSpentHours || 0

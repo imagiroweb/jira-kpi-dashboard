@@ -92,8 +92,6 @@ export function UserWorkloadChart({ dateRange, selectedProjects, useActiveSprint
       setError(null);
       
       try {
-        let result;
-
         let response;
         
         if (selectedReportId) {
@@ -136,7 +134,7 @@ export function UserWorkloadChart({ dateRange, selectedProjects, useActiveSprint
           return;
         }
         
-        result = await response.json();
+        const result = await response.json();
 
         console.log('Workload API response:', result);
 
@@ -145,7 +143,7 @@ export function UserWorkloadChart({ dateRange, selectedProjects, useActiveSprint
           
           // Handle different response formats
           if (Array.isArray(result.data)) {
-            userData = result.data.map((user: any) => ({
+            userData = result.data.map((user: { accountId?: string; displayName?: string; timeSpentHours?: number; totalHours?: number; worklogCount?: number }) => ({
               accountId: user.accountId || user.displayName,
               displayName: user.displayName || 'Unknown',
               totalHours: user.timeSpentHours || user.totalHours || 0,

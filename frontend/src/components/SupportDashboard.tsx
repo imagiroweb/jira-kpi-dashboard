@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useCallback, useState } from 'react';
+import { useEffect, useMemo, useCallback, useState, useRef } from 'react';
 import { 
   Headphones, Scale, Ticket, PlayCircle, FlaskConical, 
   Clock, CheckCircle, ListTodo, User, PieChart as PieChartIcon,
@@ -118,6 +118,7 @@ export function SupportDashboard() {
   
   // Resolution details modal state
   const [showResolutionDetails, setShowResolutionDetails] = useState(false);
+  const didMountLoad = useRef(false);
 
   // silent = true means no loading state (for background refreshes)
   const loadKPIs = useCallback(async (silent = false) => {
@@ -158,22 +159,24 @@ export function SupportDashboard() {
     }
   }, [dateRange, useActiveSprint, kpiData]);
 
-  // Load on mount
+  // Load once on mount (ref avoids re-run when loadKPIs identity changes after first load)
   useEffect(() => {
+    if (didMountLoad.current) return;
+    didMountLoad.current = true;
     loadKPIs(false);
-  }, []);
+  }, [loadKPIs]);
 
   // Reload when date range or mode changes (with loading indicator)
   useEffect(() => {
     loadKPIs(false);
-  }, [dateRange.from, dateRange.to, useActiveSprint]);
+  }, [dateRange.from, dateRange.to, useActiveSprint, loadKPIs]);
 
   // Silent refresh when kpiRefreshTrigger changes (no loading indicator)
   useEffect(() => {
     if (kpiRefreshTrigger > 0) {
-      loadKPIs(true); // silent = true
+      loadKPIs(true);
     }
-  }, [kpiRefreshTrigger]);
+  }, [kpiRefreshTrigger, loadKPIs]);
 
   // Handle date change - switch to custom date mode
   const handleDateChange = useCallback((newRange: { from: string; to: string }) => {
@@ -684,7 +687,7 @@ export function SupportDashboard() {
                     );
                   })
                 ) : (
-                  <p className="text-surface-500 text-center py-4">Aucune donnée d'équipe</p>
+                  <p className="text-surface-500 text-center py-4">Aucune donnée d&apos;équipe</p>
                 )}
               </div>
             </div>
@@ -884,9 +887,9 @@ export function SupportDashboard() {
                           borderRadius: '8px',
                           padding: '12px'
                         }}
-                        formatter={(value: number, _name: string, props: any) => [
+                        formatter={(value: number, _name: string, props: { payload?: { total?: number } }) => [
                           <span key="value">
-                            <strong>{value}</strong> tickets ({props.payload.total} pond.)
+                            <strong>{value}</strong> tickets ({props.payload?.total ?? 0} pond.)
                           </span>,
                           _name
                         ]}
@@ -1332,7 +1335,7 @@ export function SupportDashboard() {
                             })} par {snapshot.savedBy.name || snapshot.savedBy.email}
                           </p>
                           {snapshot.notes && (
-                            <p className="text-sm text-surface-400 mt-2 italic">"{snapshot.notes}"</p>
+                            <p className="text-sm text-surface-400 mt-2 italic">&quot;{snapshot.notes}&quot;</p>
                           )}
                           <div className="flex gap-4 mt-3 text-sm">
                             <span className="text-surface-400">
@@ -1502,7 +1505,7 @@ export function SupportDashboard() {
             <div className="flex-1 overflow-y-auto space-y-6">
               {selectedSnapshot.notes && (
                 <div className="bg-surface-800/50 rounded-lg p-4 border border-surface-700">
-                  <p className="text-sm text-surface-400 italic">"{selectedSnapshot.notes}"</p>
+                  <p className="text-sm text-surface-400 italic">&quot;{selectedSnapshot.notes}&quot;</p>
                 </div>
               )}
               

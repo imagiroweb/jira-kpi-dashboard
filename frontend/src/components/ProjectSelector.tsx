@@ -50,8 +50,7 @@ export function ProjectSelector({ value, onChange, className = '' }: ProjectSele
     };
 
     loadProjects();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [value.length, onChange]);
 
   const toggleProject = useCallback((projectKey: string) => {
     if (value.includes(projectKey)) {

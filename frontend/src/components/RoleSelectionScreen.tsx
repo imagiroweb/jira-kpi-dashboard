@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { ShieldCheck, Loader2, ArrowRight } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { authApi, RoleForSignup } from '../services/authApi';
@@ -12,6 +12,7 @@ export function RoleSelectionScreen() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const initialRoleSet = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -20,7 +21,10 @@ export function RoleSelectionScreen() {
       .then((list) => {
         if (!cancelled) {
           setRoles(list);
-          if (list.length > 0 && !selectedRoleId) setSelectedRoleId(list[0].id);
+          if (list.length > 0 && !initialRoleSet.current) {
+            setSelectedRoleId(list[0].id);
+            initialRoleSet.current = true;
+          }
         }
       })
       .catch(() => {
@@ -41,8 +45,9 @@ export function RoleSelectionScreen() {
       const updated = await authApi.updateMyRole(selectedRoleId);
       updateUser(updated);
       setPendingRoleSelection(false);
-    } catch (err: any) {
-      setError(err?.response?.data?.error || err?.message || 'Erreur lors de l\'enregistrement');
+    } catch (err: unknown) {
+      const errObj = err as { response?: { data?: { error?: string } }; message?: string };
+      setError(errObj?.response?.data?.error || errObj?.message || 'Erreur lors de l\'enregistrement');
     } finally {
       setSubmitting(false);
     }
