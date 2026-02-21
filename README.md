@@ -107,10 +107,63 @@ docker-compose up -d
 
 L'application sera accessible sur http://localhost
 
+## 🔄 CI/CD (GitHub Actions)
+
+Le dépôt est configuré avec deux workflows :
+
+| Workflow | Déclencheur | Actions |
+|----------|-------------|---------|
+| **CI** (`.github/workflows/ci.yml`) | Push / PR sur `main` ou `develop` | Lint + build backend & frontend, validation des Dockerfiles |
+| **CD** (`.github/workflows/cd.yml`) | Push sur `main` (ou manuel) | Build des images Docker, push vers **GitHub Container Registry** (ghcr.io) |
+
+### Schéma
+
+```
+Push/PR (main | develop)  →  CI : lint + build + docker build
+         ↓
+Push main                 →  CD : build images → push ghcr.io
+         ↓
+(optionnel) Déploiement    →  SSH sur le serveur → docker compose pull & up
+```
+
+### Images publiées
+
+- `ghcr.io/imagiroweb/jira-kpi-backend:latest`
+- `ghcr.io/imagiroweb/jira-kpi-frontend:latest`
+
+### Déployer en prod (serveur avec Docker)
+
+1. Sur le serveur, créer un `.env` (MONGO_PASSWORD, JIRA_*, etc.) et récupérer le projet (ou seulement les fichiers compose).
+2. Rendre les images GHCR **publices** (Settings du repo → Packages → chaque package → Change visibility), **ou** sur le serveur se connecter à GHCR :
+   ```bash
+   echo $GITHUB_PAT | docker login ghcr.io -u VOTRE_USER --password-stdin
+   ```
+3. Lancer la stack avec les images GHCR :
+   ```bash
+   docker compose -f docker-compose.prod.yml -f docker-compose.prod.ghcr.yml up -d
+   ```
+
+### Déploiement automatique (optionnel)
+
+Deux options, contrôlées par la **variable de dépôt** `DEPLOY_METHOD` (Settings → Secrets and variables → Actions → Variables) :
+
+| Méthode | Variable `DEPLOY_METHOD` | Secrets à configurer |
+|--------|---------------------------|----------------------|
+| **SSH** | `ssh` | `SSH_HOST`, `SSH_USER`, `SSH_PRIVATE_KEY`, `GHCR_TOKEN` |
+| **Portainer (webhook)** | `portainer` | `PORTAINER_WEBHOOK_URL` |
+
+- **SSH** : le workflow se connecte au serveur, fait `docker login ghcr.io`, puis `docker compose pull` et `up -d` (chemin par défaut : `/opt/jira-kpi-dashboard`, modifiable via la variable `SSH_DEPLOY_PATH`).
+- **Portainer** : le workflow appelle l’URL du webhook Portainer après le push des images ; Portainer fait alors un pull et redéploie la stack.
+
+**Guide détaillé** (création des secrets, stack Portainer, webhook) : [docs/DEPLOIEMENT.md](docs/DEPLOIEMENT.md).
+
 ## 📁 Structure du Projet
 
 ```
 jira-kpi-dashboard/
+├── .github/workflows/        # CI/CD (ci.yml, cd.yml)
+├── docs/
+│   └── DEPLOIEMENT.md        # Guide détaillé secrets + Portainer
 ├── frontend/                 # Application React
 │   ├── src/
 │   │   ├── components/      # Composants UI
