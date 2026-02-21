@@ -105,8 +105,8 @@ export class AuthService {
       if ((password.match(/[0-9]/g) || []).length >= 2) score += 5;
     }
 
-    // Check for special characters
-    const specialCharRegex = new RegExp(`[${PASSWORD_RULES.specialChars.replace(/[[\]\\^$.|?*+(){}]/g, '\\$&')}]`);
+    // Check for special characters (escape - so it is not interpreted as range in character class)
+    const specialCharRegex = new RegExp(`[${PASSWORD_RULES.specialChars.replace(/[[\]\\^$.|?*+(){}-]/g, '\\$&')}]`);
     if (PASSWORD_RULES.requireSpecialChars && !specialCharRegex.test(password)) {
       errors.push('Le mot de passe doit contenir au moins un caractère spécial (!@#$%^&*...)');
     } else if (specialCharRegex.test(password)) {
