@@ -818,10 +818,10 @@ export function ProduitDashboard() {
               </div>
             </div>
           )}
-          {!npsLoading && npsBoardId && !npsKpis && npsData?.items.length === 0 && (
+          {!npsLoading && npsBoardId && !npsKpis && (npsData?.items?.length ?? 0) === 0 && (
             <div className="p-6 text-surface-500 text-sm">Aucune donnée dans ce board.</div>
           )}
-          {!npsLoading && npsBoardId && npsData?.items.length > 0 && !npsKpis && (
+          {!npsLoading && npsBoardId && (npsData?.items?.length ?? 0) > 0 && !npsKpis && (
             <div className="p-6 text-amber-200/90 text-sm">
               Aucune colonne NPS trouvée. Utilisez une colonne « Score NPS » / « Note » (0-10) ou « Catégorie NPS » (Promoteur, Passif, Détracteur).
             </div>
