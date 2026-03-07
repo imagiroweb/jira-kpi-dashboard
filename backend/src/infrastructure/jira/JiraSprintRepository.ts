@@ -11,17 +11,12 @@ import { logger } from '../../utils/logger';
  */
 export class JiraSprintRepository implements ISprintRepository {
   private readonly storyPointsField: string;
-  private readonly storyPointEstimateField: string;
   private boardIdCache: Map<string, number> = new Map();
   private readonly projectBoardMapping: Map<string, number> = new Map();
 
   constructor(private readonly jiraClient: JiraClient) {
-    // Story Points field (classic Jira)
-    this.storyPointsField = process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10535';
-    // Story Point Estimate field (next-gen/team-managed projects like Adoria26)
-    this.storyPointEstimateField = process.env.JIRA_STORY_POINT_ESTIMATE_FIELD || 'customfield_10016';
-    
-    logger.info(`Using story points fields: ${this.storyPointsField}, ${this.storyPointEstimateField}`);
+    this.storyPointsField = process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10127';
+    logger.info(`Using story points field: ${this.storyPointsField}`);
     
     // Build project → board mapping from environment variables
     const projectKeys = process.env.JIRA_PROJECT_KEY?.split(',').map(k => k.trim()) || [];
@@ -83,26 +78,25 @@ export class JiraSprintRepository implements ISprintRepository {
   }
 
   async findSprintIssues(sprintId: number): Promise<SprintIssue[]> {
-    const fields = `key,summary,issuetype,status,timeoriginalestimate,${this.storyPointsField},${this.storyPointEstimateField}`;
+    const fields = `key,summary,issuetype,status,timeoriginalestimate,${this.storyPointsField}`;
     const jiraIssues = await this.jiraClient.getSprintIssues(sprintId, fields);
-    return SprintMapper.issuesToDomain(jiraIssues, this.storyPointsField, this.storyPointEstimateField);
+    return SprintMapper.issuesToDomain(jiraIssues, this.storyPointsField);
   }
 
   async findOpenSprintIssues(projectKey: string): Promise<SprintIssue[]> {
     const jql = `project = "${projectKey}" AND Sprint in openSprints()`;
-    const fields = `key,summary,issuetype,status,timeoriginalestimate,${this.storyPointsField},${this.storyPointEstimateField}`;
+    const fields = `key,summary,issuetype,status,timeoriginalestimate,${this.storyPointsField}`;
     
     const response = await this.jiraClient.searchIssuesWithPagination(jql, fields);
-    return SprintMapper.issuesToDomain(response.issues, this.storyPointsField, this.storyPointEstimateField);
+    return SprintMapper.issuesToDomain(response.issues, this.storyPointsField);
   }
 
   async findBacklogIssues(projectKey: string, _maxResults: number = 1000): Promise<SprintIssue[]> {
     const jql = `project = "${projectKey}" AND Sprint is EMPTY AND statusCategory != Done ORDER BY created DESC`;
-    const fields = `key,summary,issuetype,status,${this.storyPointsField},${this.storyPointEstimateField}`;
+    const fields = `key,summary,issuetype,status,${this.storyPointsField}`;
     
-    // Use paginated search to fetch all backlog issues
     const response = await this.jiraClient.searchIssuesWithPagination(jql, fields);
-    return SprintMapper.issuesToDomain(response.issues, this.storyPointsField, this.storyPointEstimateField);
+    return SprintMapper.issuesToDomain(response.issues, this.storyPointsField);
   }
 
   private async getBoardIdForProject(projectKey: string): Promise<number | null> {

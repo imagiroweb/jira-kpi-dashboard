@@ -11,22 +11,23 @@ export function MicrosoftCallback() {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        // Parse the fragment (hash) from URL
+        // Parse the fragment (hash) from URL - Microsoft returns token in hash
         const hash = window.location.hash.substring(1);
         const params = new URLSearchParams(hash);
-        
-        const accessToken = params.get('access_token');
-        const errorCode = params.get('error');
-        const errorDescription = params.get('error_description');
+        // Some flows may put error in query string
+        const queryParams = new URLSearchParams(window.location.search);
+        const errorCode = params.get('error') || queryParams.get('error');
+        const errorDescription = params.get('error_description') || queryParams.get('error_description');
 
         if (errorCode) {
-          setError(errorDescription || 'Erreur lors de la connexion Microsoft');
+          setError(errorDescription || errorCode || 'Erreur lors de la connexion Microsoft');
           setStatus('error');
           return;
         }
 
+        const accessToken = params.get('access_token');
         if (!accessToken) {
-          setError('Token d\'accès manquant');
+          setError('Token d\'accès manquant. Vérifiez que l\'URI de redirection dans Azure correspond à cette page.');
           setStatus('error');
           return;
         }
@@ -44,11 +45,14 @@ export function MicrosoftCallback() {
           setError(result.error || 'Erreur de connexion');
           setStatus('error');
         }
-      } catch (err) {
-        console.error('Microsoft callback error:', err);
-        setError('Erreur de connexion au serveur');
-        setStatus('error');
-      }
+    } catch (err: unknown) {
+      console.error('Microsoft callback error:', err);
+      const msg = (err as { response?: { data?: { error?: string } }; message?: string })?.response?.data?.error
+        || (err as Error)?.message
+        || 'Erreur de connexion au serveur';
+      setError(msg);
+      setStatus('error');
+    }
     };
 
     handleCallback();

@@ -1,1 +1,1 @@
-npm run lint && npm run test
+npm run lint && (cd frontend && npm run typecheck && (test -x node_modules/.bin/vitest || npm install) && npm run test) && (cd backend && (test -x node_modules/.bin/jest || npm install) && npm run test)

@@ -29,9 +29,9 @@ import { Role } from './domain/user/entities/Role';
 // MongoDB connection
 const connectMongoDB = async () => {
   const mongoUri = process.env.MONGODB_URI || 'mongodb://localhost:27017/jira-kpi';
-  
+  const opts = { serverSelectionTimeoutMS: 10000 };
   try {
-    await mongoose.connect(mongoUri);
+    await mongoose.connect(mongoUri, opts);
     logger.info('MongoDB connected successfully');
     // Seed default roles (create or update)
     const defaultRoles = [
@@ -106,7 +106,7 @@ const connectMongoDB = async () => {
     logger.info('Default roles seeded: Utilisateur, Dev, PO, Product, Marketing');
   } catch (error) {
     logger.error('MongoDB connection error:', error);
-    // Continue without MongoDB - auth features will be unavailable
+    logger.warn('Vérifiez que MongoDB tourne (ex: docker-compose -f docker-compose.dev.yml up -d) et que MONGODB_URI contient ?authSource=admin si vous utilisez un utilisateur root.');
     logger.warn('Authentication features will be unavailable');
   }
 };

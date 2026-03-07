@@ -3,6 +3,7 @@ import {
   Package,
   Loader2,
   AlertCircle,
+  AlertTriangle,
   CheckCircle,
   LayoutGrid,
   User,
@@ -18,8 +19,10 @@ import {
   Clock,
   BarChart3,
   X,
+  TrendingUp,
+  MessageSquare,
 } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, RadialBarChart, RadialBar } from 'recharts';
 import { mondayApi, MondayUser, MondayBoard, MondayColumn, MondayItem, MondayWorkspace } from '../services/api';
 
 const PAYS_COLUMN_KEYS = ['pays', 'country', 'country code', 'nationalité'];
@@ -38,15 +41,62 @@ const SATISFACTION_KEYS = [
 const DATE_MISE_EN_PROD_KEYS = ['date mise en production', 'mise en production', 'go live', 'lancement production', 'date de lancement en production', 'date lancement production', 'production'];
 const PROJECT_START_DATE_KEYS = ['project start date', 'date début projet', 'start date', 'date de début', 'début projet', 'date start', 'date début'];
 const TOTAL_PROJETS_KEYS = ['total projets', 'nb projets', 'nombre projets', 'total'];
+const UTILISATEURS_ACTIFS_KEYS = ["kpi adoria - nbre d'utilisateurs actifs", 'utilisateurs actifs', 'nb utilisateurs actifs', 'nombre utilisateurs actifs', 'users actifs', 'active users'];
+const UTILISATEURS_BRUTS_KEYS = ["kpi adoria - nbre d'utilisateurs bruts", 'utilisateurs bruts', 'nb utilisateurs bruts', 'nombre utilisateurs bruts'];
+const REFERENCES_MERCURIAL_KEYS = ['références mercurial', 'references mercurial', 'ref mercurial', 'mercurial', 'nb ref mercurial'];
+const FICHES_TECHNIQUES_ACTIVES_KEYS = ['fiches techniques actives', 'fiche technique active', 'ft actives', 'nb ft actives'];
+const FICHES_TECHNIQUES_BRUT_KEYS = ['kpi adoria - nombre brut de fiches techniques', 'fiches techniques brut', 'fiches techniques brutes', 'ft brut', 'ft brutes', 'nb ft brut'];
+
+/** Workspace name for NPS Fev 2026 Monday (exact or partial match). */
+const NPS_FEV_2026_WORKSPACE_NAME = 'NPS Fev 2026 Monday';
+/** Flexible match: NPS + (Fev|Fév|Feb) + 2026 + Monday so different spellings still show the NPS KPIs. */
+function isNpsFev2026Workspace(name: string): boolean {
+  if (!name || typeof name !== 'string') return false;
+  const n = name.toLowerCase().trim();
+  const hasNps = n.includes('nps');
+  const hasMonth = n.includes('fev') || n.includes('fév') || n.includes('feb');
+  const hasYear = n.includes('2026');
+  const hasMonday = n.includes('monday');
+  return !!(hasNps && hasYear && (hasMonday || hasMonth));
+}
+const NPS_SCORE_KEYS = ['nps', 'score nps', 'note nps', 'recommandation', 'note', 'score', 'note recommandation', 'how likely'];
+const NPS_CATEGORY_KEYS = ['catégorie nps', 'statut nps', 'type nps', 'segment', 'promoteur', 'détracteur', 'passif', 'nps category'];
 
 function findColumn(columns: MondayColumn[], keywords: string[]): MondayColumn | null {
-  const lower = (s: string) => s.toLowerCase().trim();
-  return columns.find((c) => keywords.some((k) => lower(c.title).includes(k))) ?? null;
+  const normalize = (s: string) =>
+    s
+      .toLowerCase()
+      .trim()
+      .replace(/\u2019/g, "'")
+      .replace(/\u2018/g, "'");
+  return columns.find((c) => keywords.some((k) => normalize(c.title).includes(normalize(k)))) ?? null;
 }
 
 function getItemValue(item: MondayItem, columnId: string): string {
   const cv = item.column_values?.find((c) => c.id === columnId);
   return (cv?.text ?? cv?.value ?? '').toString().trim();
+}
+
+/** Extract numeric value from a Monday column (handles "numbers" type with value as JSON e.g. {"number": "5"}). */
+function getItemNumericValue(item: MondayItem, columnId: string): number {
+  const cv = item.column_values?.find((c) => c.id === columnId);
+  if (!cv) return 0;
+  const text = (cv.text ?? '').toString().trim();
+  const rawValue = (cv.value ?? '').toString().trim();
+  // Monday "numbers" column often returns value as JSON {"number": "5"} or similar
+  if (rawValue.startsWith('{')) {
+    try {
+      const o = JSON.parse(rawValue) as Record<string, unknown>;
+      const num = o.number ?? o.value ?? o.num;
+      if (num !== undefined && num !== null) {
+        const n = typeof num === 'number' ? num : parseNum(String(num));
+        return Number.isFinite(n) ? n : 0;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  return parseNum(text || rawValue);
 }
 
 /** Binary satisfaction column: returns 'satisfait' | 'pas satisfait' | null (empty). Uses text or JSON label. */
@@ -125,6 +175,11 @@ function computeSuiviKpis(
   delaiByClient: { clientName: string; dureeJours: number }[];
   totalProjets: number;
   byPays: { name: string; value: number }[];
+  totalUtilisateursActifs: number;
+  totalUtilisateursBruts: number;
+  totalReferencesMercurial: number;
+  totalFichesTechniquesActives: number;
+  totalFichesTechniquesBrut: number;
 } {
   const colSitesActifs = findColumn(columns, SITES_ACTIFS_KEYS);
   const colTarget = findColumn(columns, TARGET_KEYS);
@@ -134,10 +189,20 @@ function computeSuiviKpis(
   const colStartDate = findColumn(columns, PROJECT_START_DATE_KEYS);
   const colTotalProjets = findColumn(columns, TOTAL_PROJETS_KEYS);
   const colPays = findColumn(columns, PAYS_COLUMN_KEYS);
+  const colUtilisateursActifs = findColumn(columns, UTILISATEURS_ACTIFS_KEYS);
+  const colUtilisateursBruts = findColumn(columns, UTILISATEURS_BRUTS_KEYS);
+  const colReferencesMercurial = findColumn(columns, REFERENCES_MERCURIAL_KEYS);
+  const colFichesTechniquesActives = findColumn(columns, FICHES_TECHNIQUES_ACTIVES_KEYS);
+  const colFichesTechniquesBrut = findColumn(columns, FICHES_TECHNIQUES_BRUT_KEYS);
 
   let sitesActifs = 0;
   let target = 0;
   let cdcDeploye = 0;
+  let totalUtilisateursActifs = 0;
+  let totalUtilisateursBruts = 0;
+  let totalReferencesMercurial = 0;
+  let totalFichesTechniquesActives = 0;
+  let totalFichesTechniquesBrut = 0;
   let satisfactionSatisfaitCount = 0;
   const satisfactionByClient: { clientName: string; status: 'satisfait' | 'pas satisfait' }[] = [];
   let totalProjets = 0;
@@ -160,6 +225,11 @@ function computeSuiviKpis(
       }
     }
     if (colTotalProjets) totalProjets += parseNum(getItemValue(item, colTotalProjets.id));
+    if (colUtilisateursActifs) totalUtilisateursActifs += getItemNumericValue(item, colUtilisateursActifs.id);
+    if (colUtilisateursBruts) totalUtilisateursBruts += getItemNumericValue(item, colUtilisateursBruts.id);
+    if (colReferencesMercurial) totalReferencesMercurial += getItemNumericValue(item, colReferencesMercurial.id);
+    if (colFichesTechniquesActives) totalFichesTechniquesActives += getItemNumericValue(item, colFichesTechniquesActives.id);
+    if (colFichesTechniquesBrut) totalFichesTechniquesBrut += getItemNumericValue(item, colFichesTechniquesBrut.id);
     if (colPays) {
       const pays = getItemValue(item, colPays.id) || 'Non renseigné';
       paysCount.set(pays, (paysCount.get(pays) ?? 0) + 1);
@@ -219,6 +289,127 @@ function computeSuiviKpis(
     delaiByClient,
     totalProjets,
     byPays,
+    totalUtilisateursActifs,
+    totalUtilisateursBruts,
+    totalReferencesMercurial,
+    totalFichesTechniquesActives,
+    totalFichesTechniquesBrut,
+  };
+}
+
+export type NpsCategory = 'promoteur' | 'passif' | 'détracteur';
+
+function getNpsCategoryFromScore(score: number): NpsCategory {
+  if (score >= 9) return 'promoteur';
+  if (score >= 7) return 'passif';
+  return 'détracteur';
+}
+
+function getNpsCategoryFromItem(item: MondayItem, scoreColumnId: string, categoryColumnId: string | null): NpsCategory | null {
+  if (categoryColumnId) {
+    const text = getItemValue(item, categoryColumnId).toLowerCase();
+    if (text.includes('promoteur')) return 'promoteur';
+    if (text.includes('passif')) return 'passif';
+    if (text.includes('détracteur') || text.includes('detracteur')) return 'détracteur';
+  }
+  if (!scoreColumnId) return null;
+  const raw = getItemValue(item, scoreColumnId).trim();
+  if (!raw) return null;
+  const num = parseNum(raw);
+  const parsed = Number.isFinite(num) ? num : parseInt(raw.replace(/\D/g, ''), 10);
+  if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 10) return getNpsCategoryFromScore(parsed);
+  return null;
+}
+
+export interface NpsKpis {
+  totalReponses: number;
+  promoteurs: number;
+  passifs: number;
+  detracteurs: number;
+  pctPromoteurs: number;
+  pctPassifs: number;
+  pctDetracteurs: number;
+  scoreNps: number; // -100 à +100
+  scoreNpsSur10: number | null; // moyenne des notes si disponible
+  alerts: { id: string; level: 'danger' | 'warning' | 'info'; message: string }[];
+}
+
+function computeNpsKpis(items: MondayItem[], columns: MondayColumn[]): NpsKpis | null {
+  const colScore = findColumn(columns, NPS_SCORE_KEYS);
+  const colCategory = findColumn(columns, NPS_CATEGORY_KEYS);
+  if (!colScore && !colCategory) return null;
+
+  let promoteurs = 0;
+  let passifs = 0;
+  let detracteurs = 0;
+  let sumScore = 0;
+  let countScore = 0;
+
+  for (const item of items) {
+    const cat = getNpsCategoryFromItem(item, colScore?.id ?? '', colCategory?.id ?? null);
+    if (!cat) continue;
+    if (cat === 'promoteur') promoteurs += 1;
+    else if (cat === 'passif') passifs += 1;
+    else detracteurs += 1;
+    if (colScore) {
+      const raw = getItemValue(item, colScore.id);
+      const n = parseNum(raw) || (raw ? parseInt(raw.replace(/\D/g, ''), 10) : NaN);
+      if (Number.isFinite(n) && n >= 0 && n <= 10) {
+        sumScore += n;
+        countScore += 1;
+      }
+    }
+  }
+
+  const totalReponses = promoteurs + passifs + detracteurs;
+  if (totalReponses === 0) {
+    return {
+      totalReponses: 0,
+      promoteurs: 0,
+      passifs: 0,
+      detracteurs: 0,
+      pctPromoteurs: 0,
+      pctPassifs: 0,
+      pctDetracteurs: 0,
+      scoreNps: 0,
+      scoreNpsSur10: null,
+      alerts: [{ id: 'no-data', level: 'info', message: 'Aucune réponse NPS trouvée dans ce board.' }],
+    };
+  }
+
+  const pctPromoteurs = (promoteurs / totalReponses) * 100;
+  const pctPassifs = (passifs / totalReponses) * 100;
+  const pctDetracteurs = (detracteurs / totalReponses) * 100;
+  const scoreNps = pctPromoteurs - pctDetracteurs; // -100 à +100
+  const scoreNpsSur10 = countScore > 0 ? sumScore / countScore : null;
+
+  const alerts: { id: string; level: 'danger' | 'warning' | 'info'; message: string }[] = [];
+  if (scoreNps < 0) {
+    alerts.push({ id: 'nps-negative', level: 'danger', message: 'Score NPS négatif : plus de détracteurs que de promoteurs.' });
+  } else if (scoreNps < 30) {
+    alerts.push({ id: 'nps-low', level: 'warning', message: 'Score NPS sous 30 : marge de progression importante.' });
+  }
+  if (pctDetracteurs > 20) {
+    alerts.push({ id: 'detracteurs-high', level: 'warning', message: `Taux de détracteurs élevé (${pctDetracteurs.toFixed(0)} %) : prioriser les actions correctives.` });
+  }
+  if (pctPromoteurs >= 50 && scoreNps >= 50) {
+    alerts.push({ id: 'nps-good', level: 'info', message: 'Score NPS satisfaisant : maintenir l’effort.' });
+  }
+  if (totalReponses < 10) {
+    alerts.push({ id: 'low-responses', level: 'info', message: `Peu de réponses (${totalReponses}) : les indicateurs sont à prendre avec précaution.` });
+  }
+
+  return {
+    totalReponses,
+    promoteurs,
+    passifs,
+    detracteurs,
+    pctPromoteurs,
+    pctPassifs,
+    pctDetracteurs,
+    scoreNps,
+    scoreNpsSur10,
+    alerts,
   };
 }
 
@@ -243,6 +434,22 @@ export function ProduitDashboard() {
   const [suiviLoading, setSuiviLoading] = useState(false);
   const [showSatisfactionModal, setShowSatisfactionModal] = useState(false);
   const [showDelaiModal, setShowDelaiModal] = useState(false);
+  const [npsBoardId, setNpsBoardId] = useState<string>('');
+  const [npsData, setNpsData] = useState<{ columns: MondayColumn[]; items: MondayItem[] } | null>(null);
+  const [npsLoading, setNpsLoading] = useState(false);
+
+  const npsWorkspace = useMemo(
+    () =>
+      workspaces.find(
+        (w) =>
+          w.name === NPS_FEV_2026_WORKSPACE_NAME ||
+          w.name.includes('NPS Fev 2026') ||
+          w.name.includes('NPS Fev 2026 Monday') ||
+          isNpsFev2026Workspace(w.name)
+      ) ?? null,
+    [workspaces]
+  );
+  const isNpsWorkspaceSelected = Boolean(selectedWorkspaceId && npsWorkspace && selectedWorkspaceId === npsWorkspace.id);
 
   const fetchStatusAndMe = useCallback(async () => {
     setLoading(true);
@@ -311,10 +518,32 @@ export function ProduitDashboard() {
       .finally(() => setSuiviLoading(false));
   }, [suiviBoardId, configured]);
 
+  useEffect(() => {
+    if (!npsBoardId || !configured) {
+      setNpsData(null);
+      return;
+    }
+    setNpsLoading(true);
+    setNpsData(null);
+    mondayApi
+      .getBoard(npsBoardId, 500)
+      .then((res) => {
+        if (res.success && res.columns && res.items) {
+          setNpsData({ columns: res.columns, items: res.items });
+        }
+      })
+      .finally(() => setNpsLoading(false));
+  }, [npsBoardId, configured]);
+
   const suiviKpis = useMemo(() => {
     if (!suiviData?.items.length) return null;
     return computeSuiviKpis(suiviData.items, suiviData.columns);
   }, [suiviData]);
+
+  const npsKpis = useMemo(() => {
+    if (!npsData?.items?.length) return null;
+    return computeNpsKpis(npsData.items, npsData.columns);
+  }, [npsData]);
 
   const openBoard = async (board: MondayBoard) => {
     setBoardLoading(true);
@@ -427,9 +656,178 @@ export function ProduitDashboard() {
                 </option>
               ))}
             </select>
+            {npsWorkspace && selectedWorkspaceId !== npsWorkspace.id && (
+              <span className="text-xs text-surface-500">
+                → Pour les KPI NPS Fev 2026 Monday, sélectionnez l&apos;espace « {npsWorkspace.name} »
+              </span>
+            )}
           </div>
         )}
       </div>
+
+      {/* NPS Fev 2026 Monday — KPI + indicateurs d'alerte */}
+      {!selectedBoard && isNpsWorkspaceSelected && npsWorkspace && (
+        <section className="mb-8 rounded-2xl border border-surface-700/50 bg-surface-900/30 overflow-hidden">
+          <div className="p-4 border-b border-surface-700/50 bg-surface-800/30 flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <MessageSquare className="w-5 h-5 text-amber-400/80" />
+              <h2 className="text-lg font-semibold text-surface-100">{npsWorkspace.name}</h2>
+            </div>
+            <select
+              value={npsBoardId}
+              onChange={(e) => setNpsBoardId(e.target.value)}
+              className="rounded-xl bg-surface-800 border border-surface-600 text-surface-200 px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50"
+            >
+              <option value="">Choisir un board NPS…</option>
+              {boards.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          {boards.length === 0 && (
+            <div className="p-6 text-surface-500 text-sm">
+              Aucun board dans cet espace. Vérifiez les droits d&apos;accès sur Monday.com ou le nom de l&apos;espace.
+            </div>
+          )}
+          {!npsLoading && boards.length > 0 && !npsBoardId && (
+            <div className="p-6 text-surface-400 text-sm">
+              Sélectionnez un board ci-dessus pour afficher les KPI NPS.
+            </div>
+          )}
+          {npsLoading && (
+            <div className="p-8 flex justify-center">
+              <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
+            </div>
+          )}
+          {!npsLoading && npsKpis && (
+            <div className="p-6 space-y-6">
+              {/* Indicateurs d'alerte */}
+              {npsKpis.alerts.length > 0 && (
+                <div className="space-y-2">
+                  {npsKpis.alerts.map((a) => (
+                    <div
+                      key={a.id}
+                      className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${
+                        a.level === 'danger'
+                          ? 'bg-red-500/10 border-red-500/40 text-red-200'
+                          : a.level === 'warning'
+                            ? 'bg-amber-500/10 border-amber-500/40 text-amber-200'
+                            : 'bg-blue-500/10 border-blue-500/40 text-surface-200'
+                      }`}
+                    >
+                      {a.level === 'danger' ? (
+                        <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
+                      ) : a.level === 'warning' ? (
+                        <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
+                      ) : (
+                        <TrendingUp className="w-5 h-5 text-blue-400 shrink-0" />
+                      )}
+                      <span className="text-sm font-medium">{a.message}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <TrendingUp className="w-4 h-4 text-amber-400" />
+                    <span className="text-xs font-medium text-surface-500">Score NPS</span>
+                  </div>
+                  <div
+                    className={`text-2xl font-bold tabular-nums ${
+                      npsKpis.scoreNps < 0
+                        ? 'text-red-400'
+                        : npsKpis.scoreNps < 30
+                          ? 'text-amber-400'
+                          : 'text-green-400'
+                    }`}
+                  >
+                    {npsKpis.scoreNps > 0 ? '+' : ''}
+                    {npsKpis.scoreNps.toFixed(0)}
+                  </div>
+                  <div className="text-[10px] text-surface-500 mt-0.5">-100 à +100</div>
+                </div>
+                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <MessageSquare className="w-4 h-4 text-primary-400" />
+                    <span className="text-xs font-medium text-surface-500">Réponses</span>
+                  </div>
+                  <div className="text-xl font-bold text-surface-100 tabular-nums">{npsKpis.totalReponses}</div>
+                </div>
+                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-medium text-surface-500">Promoteurs</span>
+                  </div>
+                  <div className="text-xl font-bold text-green-400 tabular-nums">{npsKpis.pctPromoteurs.toFixed(1)} %</div>
+                  <div className="text-[10px] text-surface-500 mt-0.5">{npsKpis.promoteurs} réponses</div>
+                </div>
+                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-medium text-surface-500">Passifs</span>
+                  </div>
+                  <div className="text-xl font-bold text-surface-300 tabular-nums">{npsKpis.pctPassifs.toFixed(1)} %</div>
+                  <div className="text-[10px] text-surface-500 mt-0.5">{npsKpis.passifs} réponses</div>
+                </div>
+                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-medium text-surface-500">Détracteurs</span>
+                  </div>
+                  <div className="text-xl font-bold text-red-400 tabular-nums">{npsKpis.pctDetracteurs.toFixed(1)} %</div>
+                  <div className="text-[10px] text-surface-500 mt-0.5">{npsKpis.detracteurs} réponses</div>
+                </div>
+                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <BarChart3 className="w-4 h-4 text-surface-400" />
+                    <span className="text-xs font-medium text-surface-500">Note moy.</span>
+                  </div>
+                  <div className="text-xl font-bold text-surface-100 tabular-nums">
+                    {npsKpis.scoreNpsSur10 != null ? npsKpis.scoreNpsSur10.toFixed(1) : '—'} / 10
+                  </div>
+                </div>
+              </div>
+              {/* Répartition NPS (barre visuelle) */}
+              <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                <h3 className="text-sm font-semibold text-surface-200 mb-3 flex items-center gap-2">
+                  <BarChart3 className="w-4 h-4 text-amber-400" />
+                  Répartition NPS
+                </h3>
+                <div className="flex h-8 rounded-lg overflow-hidden border border-surface-600/50">
+                  <div
+                    className="bg-green-500/80 transition-all"
+                    style={{ width: `${npsKpis.pctPromoteurs}%` }}
+                    title={`Promoteurs ${npsKpis.pctPromoteurs.toFixed(1)}%`}
+                  />
+                  <div
+                    className="bg-surface-500/80 transition-all"
+                    style={{ width: `${npsKpis.pctPassifs}%` }}
+                    title={`Passifs ${npsKpis.pctPassifs.toFixed(1)}%`}
+                  />
+                  <div
+                    className="bg-red-500/80 transition-all"
+                    style={{ width: `${npsKpis.pctDetracteurs}%` }}
+                    title={`Détracteurs ${npsKpis.pctDetracteurs.toFixed(1)}%`}
+                  />
+                </div>
+                <div className="flex justify-between mt-2 text-xs text-surface-500">
+                  <span>Promoteurs (9-10)</span>
+                  <span>Passifs (7-8)</span>
+                  <span>Détracteurs (0-6)</span>
+                </div>
+              </div>
+            </div>
+          )}
+          {!npsLoading && npsBoardId && !npsKpis && (npsData?.items?.length ?? 0) === 0 && (
+            <div className="p-6 text-surface-500 text-sm">Aucune donnée dans ce board.</div>
+          )}
+          {!npsLoading && npsBoardId && (npsData?.items?.length ?? 0) > 0 && !npsKpis && (
+            <div className="p-6 text-amber-200/90 text-sm">
+              Aucune colonne NPS trouvée. Utilisez une colonne « Score NPS » / « Note » (0-10) ou « Catégorie NPS » (Promoteur, Passif, Détracteur).
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Suivi clients par CP — KPI + donut par pays */}
       {!selectedBoard && boards.length > 0 && (
@@ -459,7 +857,7 @@ export function ProduitDashboard() {
           )}
           {!suiviLoading && suiviKpis && (
             <div className="p-6 space-y-6">
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-4">
                 <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
                   <div className="flex items-center gap-2 mb-1">
                     <Building2 className="w-4 h-4 text-amber-400" />
@@ -521,6 +919,68 @@ export function ProduitDashboard() {
                     <span className="text-xs font-medium text-surface-500">Total projets</span>
                   </div>
                   <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.totalProjets}</div>
+                </div>
+                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <User className="w-4 h-4 text-blue-400" />
+                    <span className="text-xs font-medium text-surface-500">Utilisateurs actifs</span>
+                  </div>
+                  <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.totalUtilisateursActifs}</div>
+                  <div className="text-[10px] text-surface-500 mt-0.5">somme par site (Nbre d&apos;utilisateurs actifs)</div>
+                </div>
+                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <User className="w-4 h-4 text-surface-400" />
+                    <span className="text-xs font-medium text-surface-500">Total des utilisateurs</span>
+                  </div>
+                  <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.totalUtilisateursBruts}</div>
+                  <div className="text-[10px] text-surface-500 mt-0.5">somme par site (Nbre utilisateurs bruts)</div>
+                </div>
+                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Globe className="w-4 h-4 text-cyan-400" />
+                    <span className="text-xs font-medium text-surface-500">Références Mercurial</span>
+                  </div>
+                  <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.totalReferencesMercurial}</div>
+                </div>
+                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 flex flex-col items-center">
+                  <div className="flex items-center gap-2 mb-1 self-start">
+                    <List className="w-4 h-4 text-green-400" />
+                    <span className="text-xs font-medium text-surface-500">Fiches techniques</span>
+                  </div>
+                  <div className="w-full flex-1 min-h-[100px] flex flex-col items-center justify-center">
+                    {suiviKpis.totalFichesTechniquesBrut > 0 ? (
+                      <>
+                        <ResponsiveContainer width="100%" height={100}>
+                          <RadialBarChart
+                            cx="50%"
+                            cy="55%"
+                            innerRadius="50%"
+                            outerRadius="90%"
+                            barSize={8}
+                            data={[
+                              { name: 'total', value: 100, fill: '#475569' },
+                              {
+                                name: 'actives',
+                                value: Math.min(100, (suiviKpis.totalFichesTechniquesActives / suiviKpis.totalFichesTechniquesBrut) * 100),
+                                fill: '#4ade80',
+                              },
+                            ]}
+                            startAngle={180}
+                            endAngle={0}
+                          >
+                            <RadialBar background dataKey="value" cornerRadius={4} />
+                          </RadialBarChart>
+                        </ResponsiveContainer>
+                        <div className="text-surface-100 text-sm font-bold tabular-nums mt-0.5">
+                          {suiviKpis.totalFichesTechniquesActives} / {suiviKpis.totalFichesTechniquesBrut}
+                        </div>
+                        <div className="text-[10px] text-surface-500">actives / brut</div>
+                      </>
+                    ) : (
+                      <div className="text-surface-500 text-sm">—</div>
+                    )}
+                  </div>
                 </div>
               </div>
               {suiviKpis.projectsByYear.length > 0 && (
