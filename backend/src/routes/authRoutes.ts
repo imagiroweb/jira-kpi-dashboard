@@ -499,17 +499,33 @@ router.get('/users', authenticate, requireSuperAdmin, async (req: Request, res: 
   try {
     const users = await User.find().select('-password').populate('roleId', 'name').lean();
     const roles = await Role.find().lean();
-    const list = users.map((u: { _id: { toString: () => string }; email: string; firstName?: string; lastName?: string; roleId?: { toString: () => string }; role?: string }) => ({
-      id: u._id.toString(),
-      email: u.email,
-      firstName: u.firstName,
-      lastName: u.lastName,
-      provider: u.provider,
-      isActive: u.isActive,
-      role: u.role ?? null,
-      roleId: u.roleId ? (u.roleId._id ?? u.roleId).toString() : null,
-      roleName: u.role === 'super_admin' ? 'Super admin' : (u.roleId?.name ?? '—')
-    }));
+    const list = users.map((u: {
+      _id: { toString: () => string };
+      email: string;
+      firstName?: string;
+      lastName?: string;
+      roleId?: { _id?: { toString: () => string }; name?: string; toString: () => string };
+      role?: string;
+      provider?: string;
+      isActive?: boolean;
+    }) => {
+      const roleIdVal = u.roleId;
+      const roleIdStr = roleIdVal
+        ? (typeof roleIdVal === 'object' && '_id' in roleIdVal ? (roleIdVal._id ?? roleIdVal) : roleIdVal).toString()
+        : null;
+      const roleName = u.role === 'super_admin' ? 'Super admin' : (roleIdVal && typeof roleIdVal === 'object' && 'name' in roleIdVal ? roleIdVal.name : '—');
+      return {
+        id: u._id.toString(),
+        email: u.email,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        provider: u.provider,
+        isActive: u.isActive,
+        role: u.role ?? null,
+        roleId: roleIdStr,
+        roleName
+      };
+    });
     res.json({ success: true, users: list, roles: roles.map((r: { _id: { toString: () => string }; name: string; pageVisibilities?: unknown }) => ({ id: r._id.toString(), name: r.name, pageVisibilities: r.pageVisibilities })) });
   } catch (error) {
     logger.error('List users error:', error);

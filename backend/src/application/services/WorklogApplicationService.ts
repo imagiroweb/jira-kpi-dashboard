@@ -755,7 +755,7 @@ export class WorklogApplicationService {
           statusCategory: category,
           statusCategoryKey: categoryKey,
           storyPoints,
-          originalEstimateSeconds: fieldsData.timeoriginalestimate || null
+          originalEstimateSeconds: typeof fieldsData.timeoriginalestimate === 'number' ? fieldsData.timeoriginalestimate : null
         });
       });
       const metrics = calculator.calculate(sprintIssues);
@@ -886,14 +886,14 @@ export class WorklogApplicationService {
         statusCategory: category,
         statusCategoryKey: categoryKey,
         storyPoints,
-        originalEstimateSeconds: fieldsData.timeoriginalestimate || null
+        originalEstimateSeconds: typeof fieldsData.timeoriginalestimate === 'number' ? fieldsData.timeoriginalestimate : null
       });
     });
 
     const metrics = calculator.calculate(sprintIssues);
 
     // Get backlog issues and calculate time spent for this board's issues in parallel
-    let backlogIssues: { key: string; fields?: Record<string, unknown> }[] = [];
+    let backlogIssues: SprintIssue[] = [];
     let totalTimeSeconds = 0;
     
     const board = await jiraClient.getBoard(boardId);
@@ -961,7 +961,7 @@ export class WorklogApplicationService {
       totalTimeSeconds,
       backlog: {
         ticketCount: backlogIssues.length,
-        storyPoints: backlogIssues.reduce((sum, issue) => sum + (issue.storyPoints || 0), 0)
+        storyPoints: backlogIssues.reduce((sum, issue) => sum + (issue.storyPoints ?? 0), 0)
       }
     };
   }
