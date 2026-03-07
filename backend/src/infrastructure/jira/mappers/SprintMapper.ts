@@ -32,17 +32,12 @@ export class SprintMapper {
 
   /**
    * Map Jira issue to SprintIssue entity
-   * Supports both "Story Points" and "Story Point Estimate" fields
+   * Uses JIRA_STORY_POINTS_FIELD (customfield_10127) for story points
    */
-  static issueToDomin(jiraIssue: JiraIssue, storyPointsField: string, storyPointEstimateField?: string): SprintIssue {
+  static issueToDomin(jiraIssue: JiraIssue, storyPointsField: string): SprintIssue {
     const fields = jiraIssue.fields;
     const status = fields.status as { name?: string; statusCategory?: { name?: string; key?: string } } | undefined;
-    
-    // Try Story Points field first, then Story Point Estimate field as fallback
-    let storyPoints = fields[storyPointsField] as number | null;
-    if ((storyPoints === null || storyPoints === undefined) && storyPointEstimateField) {
-      storyPoints = fields[storyPointEstimateField] as number | null;
-    }
+    const storyPoints = fields[storyPointsField] as number | null;
     
     return SprintIssue.create({
       issueKey: jiraIssue.key,
@@ -59,8 +54,8 @@ export class SprintMapper {
   /**
    * Map multiple issues
    */
-  static issuesToDomain(jiraIssues: JiraIssue[], storyPointsField: string, storyPointEstimateField?: string): SprintIssue[] {
-    return jiraIssues.map(i => this.issueToDomin(i, storyPointsField, storyPointEstimateField));
+  static issuesToDomain(jiraIssues: JiraIssue[], storyPointsField: string): SprintIssue[] {
+    return jiraIssues.map(i => this.issueToDomin(i, storyPointsField));
   }
 }
 

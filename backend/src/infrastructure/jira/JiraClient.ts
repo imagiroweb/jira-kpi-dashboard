@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosError } from 'axios';
+import axios, { AxiosInstance, AxiosError, AxiosResponse } from 'axios';
 import { logger } from '../../utils/logger';
 
 /**
@@ -210,6 +210,37 @@ export class JiraClient {
   }
 
   /**
+   * Fetch ALL issues matching JQL by paginating with "id > lastId" to go beyond the
+   * Jira search limit (often 1000). Use this when you need complete worklog coverage.
+   * Appends " order by id ASC" to the JQL.
+   */
+  async searchAllIssuesByJql(jql: string, fields: string = 'key,summary,status,issuetype'): Promise<JiraIssue[]> {
+    const pageSize = 1000;
+    const baseJql = jql.trim().replace(/\s*order\s+by\s+id\s+(ASC|DESC)\s*$/i, '');
+    const orderedJql = `${baseJql} order by id ASC`;
+    const allIssues: JiraIssue[] = [];
+    let lastId: string | null = null;
+
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const jqlWithCursor: string = lastId ? `${baseJql} AND id > ${lastId} order by id ASC` : orderedJql;
+      const response: AxiosResponse<JiraSearchResponse> = await this.client.get<JiraSearchResponse>('/rest/api/3/search/jql', {
+        params: { jql: jqlWithCursor, fields, maxResults: pageSize, startAt: 0 }
+      });
+      const issues: JiraIssue[] = response.data.issues ?? [];
+      allIssues.push(...issues);
+      if (issues.length === 0) break;
+      const last: JiraIssue = issues[issues.length - 1];
+      lastId = typeof last.id === 'string' ? last.id : String(last.id);
+      if (issues.length < pageSize) break;
+      await this.delay(100);
+    }
+
+    logger.info(`Fetched ${allIssues.length} issues (id pagination) with JQL: ${jql.substring(0, 60)}...`);
+    return allIssues;
+  }
+
+  /**
    * Search issues using JQL with a hard limit (no pagination, single request)
    * Use this for backlog queries to avoid timeout on large result sets
    */
@@ -241,13 +272,32 @@ export class JiraClient {
   }
 
   /**
-   * Get worklogs for a specific issue
+   * Get all worklogs for a specific issue (paginated: Jira returns max 100 per page).
+   * Fetches all pages so no hours are missing for issues with many worklogs.
    */
   async getIssueWorklogs(issueKey: string): Promise<JiraWorklog[]> {
-    const response = await this.client.get<{ worklogs: JiraWorklog[] }>(
-      `/rest/api/3/issue/${issueKey}/worklog`
-    );
-    return response.data.worklogs || [];
+    const pageSize = 100;
+    const allWorklogs: JiraWorklog[] = [];
+    let startAt = 0;
+    let total = 0;
+
+    do {
+      const response = await this.client.get<{
+        worklogs: JiraWorklog[];
+        total: number;
+        startAt: number;
+        maxResults: number;
+      }>(`/rest/api/3/issue/${issueKey}/worklog`, {
+        params: { startAt, maxResults: pageSize }
+      });
+      const worklogs = response.data.worklogs || [];
+      total = response.data.total ?? worklogs.length;
+      startAt = (response.data.startAt ?? 0) + worklogs.length;
+      allWorklogs.push(...worklogs);
+      if (worklogs.length === 0) break;
+    } while (allWorklogs.length < total);
+
+    return allWorklogs;
   }
 
   /**

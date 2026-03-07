@@ -1,6 +1,7 @@
 import axios from 'axios';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3002';
+// Use relative URL in dev so Vite proxies /api to backend (avoids CORS on SSO callback)
+const API_URL = import.meta.env.VITE_API_URL ?? '';
 
 const api = axios.create({
   baseURL: API_URL,

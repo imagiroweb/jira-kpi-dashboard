@@ -62,9 +62,10 @@ router.get('/configured-boards', async (req: Request, res: Response) => {
 });
 
 /**
- * Get sprint issues for a specific board
+ * Get issues for a specific board (SprintDashboard).
  * GET /api/jira/board/:boardId/sprint-issues
- * Query: from, to (optional) - when provided, returns issues updated in that date range
+ * Query: from, to (optional) - when provided, returns all project issues updated in that date range (no sprint filter).
+ * When from/to are omitted, returns issues from the board's active sprint (or last closed sprint).
  */
 router.get('/board/:boardId/sprint-issues', async (req: Request, res: Response) => {
   try {
@@ -96,17 +97,18 @@ router.get('/board/:boardId/sprint-issues', async (req: Request, res: Response) 
 });
 
 /**
- * Get resolved tickets per day by board (for ResolvedByDayChart)
- * GET /api/jira/resolved-by-day?from=YYYY-MM-DD&to=YYYY-MM-DD&issueType=all|Story
- * or  ?activeSprint=true&issueType=all|Story  (uses sprint actif / last closed sprint dates)
+ * Get resolved tickets or story points per day by board (for ResolvedByDayChart)
+ * GET /api/jira/resolved-by-day?from=YYYY-MM-DD&to=YYYY-MM-DD&mode=tickets|points
+ * or  ?activeSprint=true&mode=tickets|points  (uses sprint actif / last closed sprint dates)
  */
 router.get('/resolved-by-day', async (req: Request, res: Response) => {
   try {
     const from = req.query.from as string | undefined;
     const to = req.query.to as string | undefined;
     const activeSprint = req.query.activeSprint === 'true';
-    const issueType = (req.query.issueType as string) === 'Story' ? 'Story' as const : 'all' as const;
+    const mode = (req.query.mode as string) === 'points' ? 'points' as const : 'tickets' as const;
 
+    // Date début / fin : sprint actif (ou dernier fermé) ou période personnalisée (from/to)
     let fromFinal = from;
     let toFinal = to;
 
@@ -118,9 +120,10 @@ router.get('/resolved-by-day', async (req: Request, res: Response) => {
           message: 'Aucun sprint actif ou dernier sprint fermé trouvé pour les boards configurés'
         });
       }
-      fromFinal = range.from;
-      toFinal = range.to;
+      fromFinal = range.from; // date de début du sprint
+      toFinal = range.to;     // date de fin du sprint
     }
+    // Sinon fromFinal / toFinal = date début / fin de la période choisie (query from, to)
 
     if (!fromFinal || !toFinal) {
       return res.status(400).json({
@@ -129,13 +132,25 @@ router.get('/resolved-by-day', async (req: Request, res: Response) => {
       });
     }
 
-    const result = await worklogAppService.getResolvedByDay(fromFinal, toFinal, issueType);
+    const result = await worklogAppService.getResolvedByDay(fromFinal, toFinal, mode, activeSprint) as {
+      byDay: Array<Record<string, string | number>>;
+      boards: Array<{ id: number; name: string; color?: string }>;
+      types?: Array<{ name: string; color: string }>;
+      totalResolvedTickets?: number;
+      totalsBySeries?: Array<{ name: string; total: number }>;
+      totalsBySeriesPoints?: Array<{ name: string; total: number }>;
+    };
 
     res.json({
       success: true,
       byDay: result.byDay,
-      boards: result.boards,
-      dateRange: { from: fromFinal, to: toFinal }
+      boards: result.boards ?? undefined,
+      types: result.types ?? undefined,
+      totalResolvedTickets: result.totalResolvedTickets,
+      totalsBySeries: result.totalsBySeries,
+      totalsBySeriesPoints: result.totalsBySeriesPoints,
+      dateRange: { from: fromFinal, to: toFinal },
+      mode
     });
   } catch (error) {
     logger.error('Error fetching resolved-by-day:', error);

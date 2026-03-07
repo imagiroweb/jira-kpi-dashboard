@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
-import { BarChart3, RefreshCw, Ticket, BookMarked } from 'lucide-react';
+import { BarChart3, RefreshCw, Ticket, Zap } from 'lucide-react';
 import {
   Bar,
   XAxis,
@@ -17,6 +17,11 @@ interface BoardInfo {
   color?: string;
 }
 
+interface TypeInfo {
+  name: string;
+  color: string;
+}
+
 interface ResolvedByDayProps {
   dateRange: { from: string; to: string };
   boards: BoardInfo[];
@@ -26,13 +31,17 @@ interface ResolvedByDayProps {
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
-type IssueTypeFilter = 'all' | 'Story';
+type ModeFilter = 'tickets' | 'points';
 
 export function ResolvedByDayChart({ dateRange, boards, useActiveSprint = false }: ResolvedByDayProps) {
-  const [issueTypeFilter, setIssueTypeFilter] = useState<IssueTypeFilter>('all');
+  const [mode, setMode] = useState<ModeFilter>('tickets');
   const [byDay, setByDay] = useState<Array<Record<string, string | number>>>([]);
   const [boardList, setBoardList] = useState<BoardInfo[]>([]);
+  const [typeList, setTypeList] = useState<TypeInfo[]>([]);
   const [effectiveDateRange, setEffectiveDateRange] = useState<{ from: string; to: string } | null>(null);
+  const [totalResolvedTickets, setTotalResolvedTickets] = useState<number | null>(null);
+  const [totalsBySeries, setTotalsBySeries] = useState<Array<{ name: string; total: number }>>([]);
+  const [totalsBySeriesPoints, setTotalsBySeriesPoints] = useState<Array<{ name: string; total: number }>>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -41,7 +50,7 @@ export function ResolvedByDayChart({ dateRange, boards, useActiveSprint = false 
     setIsLoading(true);
     setError(null);
     try {
-      const params = new URLSearchParams({ issueType: issueTypeFilter });
+      const params = new URLSearchParams({ mode: 'tickets' });
       if (useActiveSprint) {
         params.set('activeSprint', 'true');
       } else {
@@ -54,6 +63,10 @@ export function ResolvedByDayChart({ dateRange, boards, useActiveSprint = false 
       if (result.success) {
         setByDay(result.byDay || []);
         setBoardList(result.boards || []);
+        setTypeList(result.types || []);
+        setTotalResolvedTickets(result.totalResolvedTickets ?? null);
+        setTotalsBySeries(result.totalsBySeries || []);
+        setTotalsBySeriesPoints(result.totalsBySeriesPoints || []);
         setEffectiveDateRange(result.dateRange || { from: dateRange.from, to: dateRange.to });
       } else {
         throw new Error(result.message || 'Erreur inconnue');
@@ -62,11 +75,15 @@ export function ResolvedByDayChart({ dateRange, boards, useActiveSprint = false 
       setError(err instanceof Error ? err.message : 'Erreur chargement');
       setByDay([]);
       setBoardList([]);
+      setTypeList([]);
+      setTotalResolvedTickets(null);
+      setTotalsBySeries([]);
+      setTotalsBySeriesPoints([]);
       setEffectiveDateRange(null);
     } finally {
       setIsLoading(false);
     }
-  }, [dateRange.from, dateRange.to, useActiveSprint, issueTypeFilter]);
+  }, [dateRange.from, dateRange.to, useActiveSprint]);
 
   const displayRange = effectiveDateRange || dateRange;
 
@@ -74,28 +91,42 @@ export function ResolvedByDayChart({ dateRange, boards, useActiveSprint = false 
     loadData();
   }, [loadData]);
 
+  const byType = typeList.length > 0;
+
   const chartData = useMemo(() => {
     return byDay.map((row) => {
       const out: Record<string, string | number> = {
         date: row.date as string,
         dateShort: formatDateShort(row.date as string)
       };
-      boardList.forEach((b) => {
-        out[`board_${b.id}`] = (row[`board_${b.id}`] as number) ?? 0;
-      });
+      if (byType) {
+        typeList.forEach((t) => {
+          const key = mode === 'points' ? `${t.name}_points` : t.name;
+          out[key] = (row[key] as number) ?? 0;
+        });
+      } else {
+        boardList.forEach((b) => {
+          out[`board_${b.id}`] = (row[`board_${b.id}`] as number) ?? 0;
+        });
+      }
       return out;
     });
-  }, [byDay, boardList]);
+  }, [byDay, boardList, typeList, byType, mode]);
 
-  const barConfig = useMemo(
-    () =>
-      boardList.map((b) => ({
-        key: `board_${b.id}`,
-        name: b.name,
-        color: b.color || '#8b5cf6'
-      })),
-    [boardList]
-  );
+  const barConfig = useMemo(() => {
+    if (byType) {
+      return typeList.map((t) => ({
+        key: mode === 'points' ? `${t.name}_points` : t.name,
+        name: t.name,
+        color: t.color
+      }));
+    }
+    return boardList.map((b) => ({
+      key: `board_${b.id}`,
+      name: b.name,
+      color: b.color || '#8b5cf6'
+    }));
+  }, [byType, typeList, boardList, mode]);
 
   if (boards.length === 0) {
     return null;
@@ -137,22 +168,41 @@ export function ResolvedByDayChart({ dateRange, boards, useActiveSprint = false 
           </div>
           <div>
             <h2 className="text-xl font-semibold text-surface-100">
-              Tickets résolus par jour
+              {mode === 'tickets' ? 'Tickets résolus par jour' : 'Story points résolus par jour'}
             </h2>
             <p className="text-sm text-surface-400">
               Par équipe • {useActiveSprint ? 'Sprint actif' : 'Période'} {displayRange.from} → {displayRange.to}
             </p>
+            {totalResolvedTickets !== null && (
+              <p className="text-sm font-medium text-primary-400 mt-1">
+                Résultat de la requête : <span className="tabular-nums font-bold">{totalResolvedTickets}</span> ticket{totalResolvedTickets !== 1 ? 's' : ''} résolu{totalResolvedTickets !== 1 ? 's' : ''} sur la période
+              </p>
+            )}
+            {(mode === 'points' ? totalsBySeriesPoints : totalsBySeries).length > 0 && (
+              <p className="text-xs text-surface-400 mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="text-surface-500">
+                  {mode === 'points' ? 'Story points par équipe :' : 'Répartition (tickets) :'}
+                </span>
+                {(mode === 'points' ? totalsBySeriesPoints : totalsBySeries).map(({ name, total }, i) => (
+                  <span key={name} className="tabular-nums">
+                    {i > 0 && <span className="text-surface-600 mr-1">·</span>}
+                    <span className="text-surface-300">{name}</span>
+                    <span className="text-surface-200 font-medium ml-0.5">{total}</span>
+                  </span>
+                ))}
+              </p>
+            )}
           </div>
         </div>
 
         <div className="flex items-center gap-3">
-          {/* Toggle: Tous les tickets / US uniquement */}
+          {/* Switch: tickets count vs story points sum */}
           <div className="flex rounded-lg bg-surface-800 p-0.5 border border-surface-600">
             <button
               type="button"
-              onClick={() => setIssueTypeFilter('all')}
+              onClick={() => setMode('tickets')}
               className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                issueTypeFilter === 'all'
+                mode === 'tickets'
                   ? 'bg-primary-500/30 text-primary-300 border border-primary-500/50'
                   : 'text-surface-400 hover:text-surface-200'
               }`}
@@ -162,15 +212,15 @@ export function ResolvedByDayChart({ dateRange, boards, useActiveSprint = false 
             </button>
             <button
               type="button"
-              onClick={() => setIssueTypeFilter('Story')}
+              onClick={() => setMode('points')}
               className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
-                issueTypeFilter === 'Story'
+                mode === 'points'
                   ? 'bg-primary-500/30 text-primary-300 border border-primary-500/50'
                   : 'text-surface-400 hover:text-surface-200'
               }`}
             >
-              <BookMarked className="w-4 h-4" />
-              US uniquement
+              <Zap className="w-4 h-4" />
+              Story points
             </button>
           </div>
 
@@ -189,15 +239,15 @@ export function ResolvedByDayChart({ dateRange, boards, useActiveSprint = false 
       {chartData.length === 0 && !isLoading ? (
         <div className="text-center py-12 text-surface-500">
           <BarChart3 className="w-12 h-12 mx-auto mb-3 opacity-40" />
-          <p className="text-sm">Aucun ticket résolu sur cette période</p>
-          <p className="text-xs mt-1 text-surface-600">
-            {issueTypeFilter === 'Story' ? 'User Stories uniquement' : 'Tous types de tickets'}
+          <p className="text-sm">
+            {mode === 'points' ? 'Aucun story point résolu sur cette période' : 'Aucun ticket résolu sur cette période'}
           </p>
         </div>
       ) : (
         <div className="h-80">
           <ResponsiveContainer width="100%" height="100%">
             <BarChart
+              key={mode}
               data={chartData}
               margin={{ top: 10, right: 20, left: 0, bottom: 0 }}
             >
@@ -212,9 +262,9 @@ export function ResolvedByDayChart({ dateRange, boards, useActiveSprint = false 
                 tick={{ fill: '#94a3b8', fontSize: 11 }}
                 tickLine={{ stroke: '#475569' }}
                 axisLine={{ stroke: '#475569' }}
-                allowDecimals={false}
+                allowDecimals={mode === 'points'}
                 label={{
-                  value: 'Tickets résolus',
+                  value: mode === 'points' ? 'Story points résolus' : 'Tickets résolus',
                   angle: -90,
                   position: 'insideLeft',
                   fill: '#64748b',
@@ -233,15 +283,15 @@ export function ResolvedByDayChart({ dateRange, boards, useActiveSprint = false 
                   return p?.date ? formatDateLong(p.date as string) : '';
                 }}
                 formatter={(value: number, name: string) => {
-                  const board = boardList.find((b) => `board_${b.id}` === name);
-                  return [value, board?.name ?? name];
+                  const bar = barConfig.find((b) => b.key === name);
+                  return [value, bar?.name ?? name];
                 }}
               />
               <Legend
                 wrapperStyle={{ fontSize: 12 }}
                 formatter={(value) => {
-                  const b = boardList.find((x) => `board_${x.id}` === value);
-                  return b?.name ?? value;
+                  const bar = barConfig.find((b) => b.key === value);
+                  return bar?.name ?? value;
                 }}
               />
               {barConfig.map(({ key, color }) => (

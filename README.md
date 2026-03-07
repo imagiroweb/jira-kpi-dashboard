@@ -228,7 +228,7 @@ jira-kpi-dashboard/
 2. L'URL contiendra `/boards/XXX` où XXX est le Board ID
 
 ### Champ Story Points
-Par défaut, le champ story points est `customfield_10016`. Pour trouver le vôtre :
+Par défaut, le champ story points est `customfield_10127` (variable `JIRA_STORY_POINTS_FIELD`). Pour trouver le vôtre :
 1. Ouvrez une issue avec des story points
 2. Utilisez l'API : `GET /rest/api/3/issue/{issueKey}?expand=names`
 3. Cherchez le champ contenant vos story points

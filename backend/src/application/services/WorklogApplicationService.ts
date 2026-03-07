@@ -125,6 +125,133 @@ export class WorklogApplicationService {
   }
 
   /**
+   * Compute support/build ratio: SB hours / (REL + AD + SB) as percentage.
+   * Returns ratio for active sprint and for current year (YTD), with detail per project/board.
+   * Projects = JIRA_PROJECT_KEY (comma-separated) + JIRA_REL_PROJECT_KEY (if set) + JIRA_SUPPORT_PROJECT_KEY.
+   */
+  private async getSupportBuildRatio(): Promise<{
+    activeSprintPercent: number;
+    yearToDatePercent: number;
+    activeSprintByProject: Array<{ projectKey: string; hours: number; percent: number }>;
+    yearToDateByProject: Array<{ projectKey: string; hours: number; percent: number }>;
+    retrievalDetail: Array<{
+      projectKey: string;
+      sprint: { jql: string; issueCount: number; worklogCount: number; totalHours: number };
+      ytd: { jql: string; issueCount: number; worklogCount: number; totalHours: number; from: string; to: string };
+    }>;
+  }> {
+    const repo = container().worklogRepository;
+    const configured = await this.getConfiguredProjects();
+    const supportProjectKey = process.env.JIRA_SUPPORT_PROJECT_KEY || 'SB';
+    const relKey = process.env.JIRA_REL_PROJECT_KEY?.trim();
+    const allProjectKeys = Array.from(
+      new Set([...configured, ...(relKey ? [relKey] : []), supportProjectKey])
+    ).filter(Boolean);
+
+    let activeSprintPercent = 0;
+    let yearToDatePercent = 0;
+    const activeSprintByProject: Array<{ projectKey: string; hours: number; percent: number }> = [];
+    const yearToDateByProject: Array<{ projectKey: string; hours: number; percent: number }> = [];
+    const retrievalDetail: Array<{
+      projectKey: string;
+      sprint: { jql: string; issueCount: number; worklogCount: number; totalHours: number };
+      ytd: { jql: string; issueCount: number; worklogCount: number; totalHours: number; from: string; to: string };
+    }> = [];
+
+    const year = new Date().getFullYear();
+    const ytdFrom = `${year}-01-01`;
+    const ytdTo = new Date().toISOString().slice(0, 10);
+    const rangeYtd = DateRange.create(ytdFrom, ytdTo);
+
+    try {
+      // Active sprint: JQL project = "X" AND Sprint in openSprints() → toutes les issues du sprint ouvert → pour chaque issue, tous les worklogs (paginés)
+      const hoursByProjectSprint = new Map<string, number>();
+      for (const projectKey of allProjectKeys) {
+        const worklogs = await repo.findByOpenSprints(projectKey);
+        const issueCount = new Set(worklogs.map((w) => w.issueKey)).size;
+        const hours = worklogs.reduce((sum, w) => sum + w.timeSpent.toHours, 0);
+        hoursByProjectSprint.set(projectKey, hours);
+        const jqlSprint = `project = "${projectKey}" AND Sprint in openSprints()`;
+        retrievalDetail.push({
+          projectKey,
+          sprint: {
+            jql: jqlSprint,
+            issueCount,
+            worklogCount: worklogs.length,
+            totalHours: Math.round(hours * 10) / 10,
+          },
+          ytd: {
+            jql: `project = "${projectKey}" AND worklogDate >= "${ytdFrom}" AND worklogDate <= "${ytdTo}"`,
+            issueCount: 0,
+            worklogCount: 0,
+            totalHours: 0,
+            from: ytdFrom,
+            to: ytdTo,
+          },
+        });
+      }
+
+      const totalSprint = Array.from(hoursByProjectSprint.values()).reduce((a, b) => a + b, 0);
+      const sbSprint = hoursByProjectSprint.get(supportProjectKey) ?? 0;
+      if (totalSprint > 0) {
+        activeSprintPercent = Math.round((sbSprint / totalSprint) * 1000) / 10;
+        for (const projectKey of allProjectKeys) {
+          const h = hoursByProjectSprint.get(projectKey) ?? 0;
+          activeSprintByProject.push({
+            projectKey,
+            hours: Math.round(h * 10) / 10,
+            percent: Math.round((h / totalSprint) * 1000) / 10,
+          });
+        }
+      }
+
+      // Year to date: JQL project = "X" AND worklogDate >= "YYYY-01-01" AND worklogDate <= "today" → issues avec au moins un worklog dans la plage → pour chaque issue, worklogs filtrés par date
+      const hoursByProjectYtd = new Map<string, number>();
+      for (let i = 0; i < allProjectKeys.length; i++) {
+        const projectKey = allProjectKeys[i];
+        const worklogs = await repo.findByProject(projectKey, rangeYtd);
+        const issueCount = new Set(worklogs.map((w) => w.issueKey)).size;
+        const hours = worklogs.reduce((sum, w) => sum + w.timeSpent.toHours, 0);
+        hoursByProjectYtd.set(projectKey, hours);
+        if (retrievalDetail[i]) {
+          retrievalDetail[i].ytd = {
+            jql: `project = "${projectKey}" AND worklogDate >= "${ytdFrom}" AND worklogDate <= "${ytdTo}"`,
+            issueCount,
+            worklogCount: worklogs.length,
+            totalHours: Math.round(hours * 10) / 10,
+            from: ytdFrom,
+            to: ytdTo,
+          };
+        }
+      }
+
+      const totalYtd = Array.from(hoursByProjectYtd.values()).reduce((a, b) => a + b, 0);
+      const sbYtd = hoursByProjectYtd.get(supportProjectKey) ?? 0;
+      if (totalYtd > 0) {
+        yearToDatePercent = Math.round((sbYtd / totalYtd) * 1000) / 10;
+        for (const projectKey of allProjectKeys) {
+          const h = hoursByProjectYtd.get(projectKey) ?? 0;
+          yearToDateByProject.push({
+            projectKey,
+            hours: Math.round(h * 10) / 10,
+            percent: Math.round((h / totalYtd) * 1000) / 10,
+          });
+        }
+      }
+    } catch (e) {
+      logger.warn('getSupportBuildRatio failed:', e);
+    }
+
+    return {
+      activeSprintPercent,
+      yearToDatePercent,
+      activeSprintByProject,
+      yearToDateByProject,
+      retrievalDetail,
+    };
+  }
+
+  /**
    * Get support board KPI (for SupportDashboard)
    * Fetches issues from Support project and calculates ponderation-based metrics
    */
@@ -384,6 +511,21 @@ export class WorklogApplicationService {
     
     logger.info(`Average first response time: ${avgFirstResponseWorkingDays.toFixed(1)} working days (${avgFirstResponseTimeHours.toFixed(1)}h) over ${issuesWithFirstResponse.length} tickets`);
     
+    // First response details (created -> beginDate, working days) for modal, sorted descending
+    const firstResponseDetails = issuesWithFirstResponse.map(issue => {
+      const created = new Date(issue.created);
+      const beginDate = new Date(issue.beginDate!);
+      const workingDays = calculateWorkingDays(created, beginDate);
+      return {
+        issueKey: issue.issueKey,
+        summary: issue.summary,
+        created: issue.created,
+        beginDate: issue.beginDate!,
+        workingDays
+      };
+    });
+    firstResponseDetails.sort((a, b) => b.workingDays - a.workingDays);
+    
     // Backlog stats
     const backlogStats = {
       ticketCount: backlogIssues.length,
@@ -393,6 +535,8 @@ export class WorklogApplicationService {
       }, 0)
     };
     
+    const supportBuildRatio = await this.getSupportBuildRatio();
+
     return {
       issues: supportIssues,
       statusCounts,
@@ -409,7 +553,15 @@ export class WorklogApplicationService {
       highPondFastResolutionPercent: highPondTotal > 0 ? Math.round((highPondFastCount / highPondTotal) * 100) : 0,
       veryHighPondFastResolutionPercent: veryHighPondTotal > 0 ? Math.round((veryHighPondFastCount / veryHighPondTotal) * 100) : 0,
       totalPonderation: ponderationByStatus.total,
-      resolutionDetails
+      resolutionDetails,
+      firstResponseDetails,
+      supportBuildRatio: {
+        activeSprintPercent: supportBuildRatio.activeSprintPercent,
+        yearToDatePercent: supportBuildRatio.yearToDatePercent,
+        activeSprintByProject: supportBuildRatio.activeSprintByProject,
+        yearToDateByProject: supportBuildRatio.yearToDateByProject,
+        retrievalDetail: supportBuildRatio.retrievalDetail,
+      },
     };
   }
 
@@ -517,16 +669,357 @@ export class WorklogApplicationService {
   }
 
   /**
-   * Get resolved tickets count per day per board (for ResolvedByDayChart).
-   * Uses each board's filter (not project) so each team has distinct counts.
-   * issueType: 'all' = all resolved issues, 'Story' = User Stories only.
+   * Parse JIRA_RESOLVED_BY_DAY_TYPES into type names (e.g. US,"Tâche Tech","Bug dev" -> ["US", "Tâche Tech", "Bug dev"]).
+   */
+  private parseResolvedByDayTypes(raw: string): string[] {
+    const out: string[] = [];
+    let i = 0;
+    while (i < raw.length) {
+      if (raw[i] === '"' || raw[i] === "'") {
+        const quote = raw[i];
+        i++;
+        const start = i;
+        while (i < raw.length && raw[i] !== quote) i++;
+        out.push(raw.substring(start, i).trim());
+        if (raw[i] === quote) i++;
+      } else {
+        const start = i;
+        while (i < raw.length && raw[i] !== ',') i++;
+        const s = raw.substring(start, i).trim();
+        if (s) out.push(s);
+      }
+      while (i < raw.length && (raw[i] === ',' || raw[i] === ' ')) i++;
+    }
+    return out.filter(Boolean);
+  }
+
+  /**
+   * Resolved by day aggregated by issue type (US, Tâche Tech, Bug dev) for project ADORIA26-style filter.
+   * JQL: project = X and type in (...) and resolution = Resolved and resolutiondate in range [and Sprint in openSprints()] order by cf[10108] asc.
+   * Returns byDay with both count and points per type so frontend can switch without refetch.
+   */
+  private async getResolvedByDayByType(
+    jiraClient: { searchIssuesWithPagination: (jql: string, fields: string, pageSize?: number) => Promise<{ issues: Array<{ key: string; fields: Record<string, unknown> }>; total: number }> },
+    from: string,
+    to: string,
+    project: string,
+    typesRaw: string,
+    activeSprint: boolean
+  ): Promise<{
+    byDay: Array<Record<string, string | number>>;
+    boards: Array<{ id: number; name: string; color?: string }>;
+    types: Array<{ name: string; color: string }>;
+    totalResolvedTickets: number;
+    totalsBySeries: Array<{ name: string; total: number }>;
+    totalsBySeriesPoints: Array<{ name: string; total: number }>;
+  } | null> {
+    const typeNames = this.parseResolvedByDayTypes(typesRaw);
+    if (typeNames.length === 0) return null;
+
+    // Dynamically use sprint start/end or chosen period start/end (from/to are already set by the route)
+    const periodStartDate = from.replace(/-/g, '/'); // YYYY/MM/DD for JQL (sprint start or period start)
+    const periodEndDate = to.replace(/-/g, '/');    // YYYY/MM/DD for JQL (sprint end or period end)
+    const typeInClause = typeNames.map((t) => `"${t.replace(/"/g, '')}"`).join(', ');
+    let jql = `project = "${project}" AND type in (${typeInClause}) AND resolution = Resolved AND resolutiondate >= "${periodStartDate}" AND resolutiondate <= "${periodEndDate}"`;
+    if (activeSprint) {
+      jql += ' AND Sprint in openSprints()';
+    }
+    jql += ' order by cf[10108] asc';
+    logger.info(`getResolvedByDayByType: resolutiondate from ${periodStartDate} to ${periodEndDate} (${activeSprint ? 'sprint' : 'période custom'})`);
+
+    const storyPointsField = (process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10127').trim();
+    const toStoryPoints = (raw: unknown): number => {
+      if (raw == null) return 0;
+      if (typeof raw === 'number' && !Number.isNaN(raw)) return raw;
+      if (typeof raw === 'string') {
+        const n = parseFloat(raw);
+        return Number.isNaN(n) ? 0 : n;
+      }
+      const obj = raw as Record<string, unknown>;
+      const v = obj.value ?? obj.name ?? obj;
+      if (typeof v === 'number' && !Number.isNaN(v)) return v;
+      if (typeof v === 'string') {
+        const n = parseFloat(v);
+        return Number.isNaN(n) ? 0 : n;
+      }
+      return 0;
+    };
+
+    const fields = `key,resolutiondate,issuetype,${storyPointsField}`;
+    try {
+      const response = await jiraClient.searchIssuesWithPagination(jql, fields, 500);
+      const issues = response.issues || [];
+
+      const allDates = new Set<string>();
+      const byDateAndType: Record<string, Record<string, { count: number; points: number }>> = {};
+      const typeNamesLower = new Map<string, string>(typeNames.map((t) => [t.toLowerCase().trim(), t]));
+
+      for (const issue of issues) {
+        const f = issue.fields as Record<string, unknown>;
+        const resolutiondate = (f.resolutiondate as string) || '';
+        const dateStr = resolutiondate.split('T')[0];
+        if (!dateStr) continue;
+
+        const it = f.issuetype as { name?: string } | undefined;
+        const rawTypeName = (it?.name ?? 'Autres').trim();
+        const canonicalType = typeNamesLower.get(rawTypeName.toLowerCase()) ?? rawTypeName;
+        if (!typeNames.includes(canonicalType)) continue;
+
+        allDates.add(dateStr);
+        if (!byDateAndType[dateStr]) {
+          byDateAndType[dateStr] = {};
+          typeNames.forEach((t) => {
+            byDateAndType[dateStr][t] = { count: 0, points: 0 };
+          });
+        }
+        const bucket = byDateAndType[dateStr][canonicalType];
+        if (bucket) {
+          bucket.count += 1;
+          bucket.points += toStoryPoints(f[storyPointsField]);
+        }
+      }
+
+      for (let d = new Date(from); d <= new Date(to); d.setDate(d.getDate() + 1)) {
+        const dateStr = d.toISOString().split('T')[0];
+        allDates.add(dateStr);
+        if (!byDateAndType[dateStr]) {
+          byDateAndType[dateStr] = {};
+          typeNames.forEach((t) => {
+            byDateAndType[dateStr][t] = { count: 0, points: 0 };
+          });
+        }
+      }
+
+      const sortedDates = Array.from(allDates).sort();
+      const COLORS = ['#8b5cf6', '#10b981', '#ef4444', '#3b82f6', '#f59e0b'];
+      const types = typeNames.map((name, i) => ({ name, color: COLORS[i % COLORS.length] }));
+
+      const byDay: Array<Record<string, string | number>> = sortedDates.map((dateStr) => {
+        const row: Record<string, string | number> = { date: dateStr };
+        const dayData = byDateAndType[dateStr] || {};
+        typeNames.forEach((t) => {
+          const { count, points } = dayData[t] || { count: 0, points: 0 };
+          row[t] = count;
+          row[`${t}_points`] = points;
+        });
+        return row;
+      });
+
+      const totalsBySeries = typeNames.map((name) => ({
+        name,
+        total: byDay.reduce((sum, row) => sum + ((row[name] as number) || 0), 0)
+      }));
+      const totalsBySeriesPoints = typeNames.map((name) => ({
+        name,
+        total: byDay.reduce((sum, row) => sum + ((row[`${name}_points`] as number) || 0), 0)
+      }));
+
+      logger.info(`getResolvedByDayByType: project=${project} ${issues.length} issues → ${byDay.length} days`);
+      return { byDay, boards: [], types, totalResolvedTickets: issues.length, totalsBySeries, totalsBySeriesPoints };
+    } catch (err) {
+      logger.warn(`getResolvedByDayByType failed: ${err}`);
+      return null;
+    }
+  }
+
+  /**
+   * Same JQL as getResolvedByDayByType but aggregate by team (équipe) using JIRA_TEAM_FIELD.
+   * Maps each issue to a configured board by team name; issues without a matching team go to "Autres".
+   * Returns byDay with one series per team (board name) so the 22 tickets are distributed by équipe.
+   */
+  private async getResolvedByDayByTeam(
+    jiraClient: { searchIssuesWithPagination: (jql: string, fields: string, pageSize?: number) => Promise<{ issues: Array<{ key: string; fields: Record<string, unknown> }>; total: number }> },
+    from: string,
+    to: string,
+    project: string,
+    typesRaw: string,
+    activeSprint: boolean
+  ): Promise<{
+    byDay: Array<Record<string, string | number>>;
+    boards: Array<{ id: number; name: string; color?: string }>;
+    types: Array<{ name: string; color: string }>;
+    totalResolvedTickets: number;
+    totalsBySeries: Array<{ name: string; total: number }>;
+    totalsBySeriesPoints: Array<{ name: string; total: number }>;
+  } | null> {
+    const typeNames = this.parseResolvedByDayTypes(typesRaw);
+    if (typeNames.length === 0) return null;
+
+    const boards = await this.getConfiguredBoards();
+    if (boards.length === 0) {
+      logger.warn('getResolvedByDayByTeam: no configured boards, cannot group by team');
+      return null;
+    }
+
+    const FALLBACK_COLORS = ['#8b5cf6', '#ef4444', '#10b981', '#3b82f6', '#f59e0b', '#ec4899'];
+    const AUTRES = 'Autres';
+    const boardsWithColor = boards.map((b, i) => ({
+      id: b.id,
+      name: b.name,
+      color: FALLBACK_COLORS[i % FALLBACK_COLORS.length]
+    }));
+    boardsWithColor.push({ id: 0, name: AUTRES, color: '#6b7280' });
+    const boardByNameLower = new Map<string, { id: number; name: string; color: string }>();
+    boardsWithColor.forEach((b) => boardByNameLower.set(b.name.trim().toLowerCase(), b));
+
+    const periodStartDate = from.replace(/-/g, '/');
+    const periodEndDate = to.replace(/-/g, '/');
+    const typeInClause = typeNames.map((t) => `"${t.replace(/"/g, '')}"`).join(', ');
+    let jql = `project = "${project}" AND type in (${typeInClause}) AND resolution = Resolved AND resolutiondate >= "${periodStartDate}" AND resolutiondate <= "${periodEndDate}"`;
+    if (activeSprint) jql += ' AND Sprint in openSprints()';
+    jql += ' order by cf[10108] asc';
+
+    const teamField = (process.env.JIRA_TEAM_FIELD || 'customfield_10001').trim();
+    const storyPointsField = (process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10127').trim();
+    const toStoryPoints = (raw: unknown): number => {
+      if (raw == null) return 0;
+      if (typeof raw === 'number' && !Number.isNaN(raw)) return raw;
+      if (typeof raw === 'string') {
+        const n = parseFloat(raw);
+        return Number.isNaN(n) ? 0 : n;
+      }
+      const obj = raw as Record<string, unknown>;
+      const v = obj.value ?? obj.name ?? obj;
+      if (typeof v === 'number' && !Number.isNaN(v)) return v;
+      if (typeof v === 'string') {
+        const n = parseFloat(v);
+        return Number.isNaN(n) ? 0 : n;
+      }
+      return 0;
+    };
+    const getTeamFromIssue = (f: Record<string, unknown>): string | null => {
+      const raw = f[teamField];
+      if (raw == null) return null;
+      if (typeof raw === 'string') return raw.trim() || null;
+      const obj = raw as { name?: string; value?: string };
+      return (obj.name ?? obj.value ?? '').toString().trim() || null;
+    };
+
+    const fields = `key,resolutiondate,issuetype,${teamField},${storyPointsField}`;
+    try {
+      const response = await jiraClient.searchIssuesWithPagination(jql, fields, 500);
+      const issues = response.issues || [];
+
+      const allDates = new Set<string>();
+      const byDateAndTeam: Record<string, Record<string, { count: number; points: number }>> = {};
+
+      for (const issue of issues) {
+        const f = issue.fields as Record<string, unknown>;
+        const resolutiondate = (f.resolutiondate as string) || '';
+        const dateStr = resolutiondate.split('T')[0];
+        if (!dateStr) continue;
+
+        const teamName = getTeamFromIssue(f);
+        const board = teamName ? boardByNameLower.get(teamName.trim().toLowerCase()) : null;
+        const teamKey = board ? board.name : AUTRES;
+
+        allDates.add(dateStr);
+        if (!byDateAndTeam[dateStr]) {
+          byDateAndTeam[dateStr] = {};
+          boardsWithColor.forEach((b) => {
+            byDateAndTeam[dateStr][b.name] = { count: 0, points: 0 };
+          });
+        }
+        if (!byDateAndTeam[dateStr][teamKey]) {
+          byDateAndTeam[dateStr][teamKey] = { count: 0, points: 0 };
+        }
+        const bucket = byDateAndTeam[dateStr][teamKey];
+        bucket.count += 1;
+        bucket.points += toStoryPoints(f[storyPointsField]);
+      }
+
+      for (let d = new Date(from); d <= new Date(to); d.setDate(d.getDate() + 1)) {
+        const dateStr = d.toISOString().split('T')[0];
+        allDates.add(dateStr);
+        if (!byDateAndTeam[dateStr]) {
+          byDateAndTeam[dateStr] = {};
+          boardsWithColor.forEach((b) => {
+            byDateAndTeam[dateStr][b.name] = { count: 0, points: 0 };
+          });
+        }
+      }
+
+      const sortedDates = Array.from(allDates).sort();
+      const types = boardsWithColor.map((b) => ({ name: b.name, color: b.color }));
+
+      const byDay: Array<Record<string, string | number>> = sortedDates.map((dateStr) => {
+        const row: Record<string, string | number> = { date: dateStr };
+        const dayData = byDateAndTeam[dateStr] || {};
+        boardsWithColor.forEach((b) => {
+          const { count, points } = dayData[b.name] || { count: 0, points: 0 };
+          row[b.name] = count;
+          row[`${b.name}_points`] = points;
+        });
+        return row;
+      });
+
+      const totalTickets = issues.length;
+      const totalsBySeries = boardsWithColor.map((b) => ({
+        name: b.name,
+        total: byDay.reduce((sum, row) => sum + ((row[b.name] as number) || 0), 0)
+      }));
+      const totalsBySeriesPoints = boardsWithColor.map((b) => ({
+        name: b.name,
+        total: byDay.reduce((sum, row) => sum + ((row[`${b.name}_points`] as number) || 0), 0)
+      }));
+
+      logger.info(`getResolvedByDayByTeam: project=${project} ${totalTickets} issues (répartis par équipe) → ${byDay.length} days`);
+      return { byDay, boards: [], types, totalResolvedTickets: totalTickets, totalsBySeries, totalsBySeriesPoints };
+    } catch (err) {
+      logger.warn(`getResolvedByDayByTeam failed: ${err}`);
+      return null;
+    }
+  }
+
+  /**
+   * Get resolved tickets count or story points per day (for ResolvedByDayChart).
+   * When JIRA_RESOLVED_BY_DAY_PROJECT is set: uses JQL by project + type (US, Tâche Tech, Bug dev),
+   * resolution = Resolved, resolutiondate in range; optional Sprint in openSprints() for active sprint.
+   * Returns byDay with one series per type (stacked) and both count and points so frontend can switch.
+   * Otherwise: per-board series (legacy).
    */
   async getResolvedByDay(
     from: string,
     to: string,
-    issueType: 'all' | 'Story' = 'all'
-  ): Promise<{ byDay: Array<Record<string, string | number>>; boards: Array<{ id: number; name: string; color?: string }> }> {
+    mode: 'tickets' | 'points' = 'tickets',
+    activeSprint?: boolean
+  ): Promise<{
+    byDay: Array<Record<string, string | number>>;
+    boards: Array<{ id: number; name: string; color?: string }>;
+    types?: Array<{ name: string; color: string }>;
+    totalResolvedTickets?: number;
+    totalsBySeries?: Array<{ name: string; total: number }>;
+    totalsBySeriesPoints?: Array<{ name: string; total: number }>;
+  }> {
     const jiraClient = container().jiraClient;
+
+    // ADORIA26-style: same JQL (project + types + resolution + resolutiondate), aggregate by team (équipe) or by type
+    const resolvedByDayProject = (process.env.JIRA_RESOLVED_BY_DAY_PROJECT || '').trim();
+    const resolvedByDayTypesRaw = (process.env.JIRA_RESOLVED_BY_DAY_TYPES || 'US,"Tâche Tech","Bug dev"').trim();
+    const resolvedByDayGroupBy = (process.env.JIRA_RESOLVED_BY_DAY_GROUP_BY || 'team').trim().toLowerCase();
+    if (resolvedByDayProject) {
+      if (resolvedByDayGroupBy === 'team') {
+        const byDayAndTeams = await this.getResolvedByDayByTeam(
+          jiraClient,
+          from,
+          to,
+          resolvedByDayProject,
+          resolvedByDayTypesRaw,
+          activeSprint === true
+        );
+        if (byDayAndTeams) return byDayAndTeams;
+      }
+      const byDayAndTypes = await this.getResolvedByDayByType(
+        jiraClient,
+        from,
+        to,
+        resolvedByDayProject,
+        resolvedByDayTypesRaw,
+        activeSprint === true
+      );
+      if (byDayAndTypes) return byDayAndTypes;
+    }
+
     const boards = await this.getConfiguredBoards();
     if (boards.length === 0) {
       return { byDay: [], boards: [] };
@@ -550,6 +1043,28 @@ export class WorklogApplicationService {
       boardsWithColor.forEach((b) => { dateCountByBoard[dateStr][b.id] = 0; });
     }
 
+    const storyPointsField = (process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10127').trim();
+    const toStoryPoints = (raw: unknown): number => {
+      if (raw == null) return 0;
+      if (typeof raw === 'number' && !Number.isNaN(raw)) return raw;
+      if (typeof raw === 'string') {
+        const n = parseFloat(raw);
+        return Number.isNaN(n) ? 0 : n;
+      }
+      const obj = raw as { value?: number | string; name?: number | string };
+      const v = obj.value ?? obj.name;
+      if (typeof v === 'number' && !Number.isNaN(v)) return v;
+      if (typeof v === 'string') {
+        const n = parseFloat(v);
+        return Number.isNaN(n) ? 0 : n;
+      }
+      return 0;
+    };
+    const valueForIssue = (fieldsData: Record<string, unknown>): number =>
+      mode === 'points'
+        ? toStoryPoints(fieldsData[storyPointsField]) || 0
+        : 1;
+
     // Tickets "résolus" : résolution par nom (JIRA_RESOLUTION_NAME), par ID (JIRA_RESOLUTION_ID), ou par statut (JIRA_RESOLVED_STATUS)
     const resolutionNameRaw = process.env.JIRA_RESOLUTION_NAME?.trim();
     const resolutionNames = resolutionNameRaw
@@ -557,8 +1072,10 @@ export class WorklogApplicationService {
       : [];
     const resolutionId = process.env.JIRA_RESOLUTION_ID?.trim();
     const resolvedStatus = (process.env.JIRA_RESOLVED_STATUS || 'Terminé').trim();
-    const storyIssueType = (process.env.JIRA_STORY_ISSUE_TYPE || 'US').trim();
-    const storyClause = issueType === 'Story' ? ` AND issuetype = "${storyIssueType}"` : '';
+
+    // Format date pour JQL : certains Jira attendent YYYY/MM/DD (ex. resolutiondate)
+    const fromJql = from.replace(/-/g, '/');
+    const toJql = to.replace(/-/g, '/');
 
     const resolutionClause =
       resolutionNames.length > 0
@@ -566,13 +1083,17 @@ export class WorklogApplicationService {
         : resolutionId
           ? `resolution = ${resolutionId}`
           : null;
+    const storyPointsNotEmptyClause =
+      mode === 'points'
+        ? ` AND ${storyPointsField} is not EMPTY`
+        : '';
     const resolvedAndDateClause =
       resolutionClause !== null
-        ? `${resolutionClause} AND resolutiondate >= "${from}" AND resolutiondate <= "${to}"${storyClause}`
-        : `status = "${resolvedStatus}" AND updated >= "${from}" AND updated <= "${to}"${storyClause}`;
+        ? `${resolutionClause} AND resolutiondate >= "${fromJql}" AND resolutiondate <= "${toJql}"${storyPointsNotEmptyClause}`
+        : `status = "${resolvedStatus}" AND updated >= "${fromJql}" AND updated <= "${toJql}"${storyPointsNotEmptyClause}`;
 
     const teamField = process.env.JIRA_TEAM_FIELD || 'customfield_10001';
-    const fields = `key,updated,resolutiondate,issuetype,${teamField}`;
+    const fields = `key,updated,resolutiondate,issuetype,${teamField},${storyPointsField}`;
 
     /** Strip ORDER BY from filter JQL so we can append our conditions before it (valid JQL) */
     const stripOrderBy = (jql: string): { base: string; orderBy: string } => {
@@ -621,10 +1142,11 @@ export class WorklogApplicationService {
             if (!dateStr || !dateCountByBoard[dateStr]) continue;
             const teamName = getTeamFromIssue(fieldsData);
             const board = teamName ? boardByName.get(teamName.trim().toLowerCase()) : null;
+            const value = valueForIssue(fieldsData);
             if (board) {
-              dateCountByBoard[dateStr][board.id] = (dateCountByBoard[dateStr][board.id] || 0) + 1;
+              dateCountByBoard[dateStr][board.id] = (dateCountByBoard[dateStr][board.id] || 0) + value;
             } else {
-              dateCountByBoard[dateStr][OTHER_BOARD_ID] = (dateCountByBoard[dateStr][OTHER_BOARD_ID] || 0) + 1;
+              dateCountByBoard[dateStr][OTHER_BOARD_ID] = (dateCountByBoard[dateStr][OTHER_BOARD_ID] || 0) + value;
             }
           }
           logger.info(`getResolvedByDay: project "${projectKey}" → ${response.issues.length} issues (total ${response.total})`);
@@ -664,7 +1186,8 @@ export class WorklogApplicationService {
             const updated = fieldsData.updated as string | undefined;
             const dateStr = (resolutiondate || updated || '').split('T')[0];
             if (dateStr && dateCountByBoard[dateStr] !== undefined) {
-              dateCountByBoard[dateStr][board.id] = (dateCountByBoard[dateStr][board.id] || 0) + 1;
+              const value = valueForIssue(fieldsData);
+              dateCountByBoard[dateStr][board.id] = (dateCountByBoard[dateStr][board.id] || 0) + value;
             }
           }
           return response.total;
@@ -698,12 +1221,22 @@ export class WorklogApplicationService {
       return row;
     });
 
-    return { byDay, boards: boardsWithColor };
+    const totalResolvedTickets = mode === 'tickets'
+      ? byDay.reduce((sum, row) => sum + boardsWithColor.reduce((s, b) => s + ((row[`board_${b.id}`] as number) || 0), 0), 0)
+      : undefined;
+
+    const totalsBySeries = boardsWithColor.map((b) => ({
+      name: b.name,
+      total: byDay.reduce((sum, row) => sum + ((row[`board_${b.id}`] as number) || 0), 0)
+    }));
+
+    return { byDay, boards: boardsWithColor, types: undefined, totalResolvedTickets, totalsBySeries };
   }
 
   /**
-   * Get sprint issues for a specific board (for SprintDashboard by board).
-   * Optional from/to: when provided, fetch issues updated in that date range (board filter or project).
+   * Get issues for a specific board (for SprintDashboard).
+   * - Si from et to sont fournis : issues du projet du board mises à jour dans cette plage (aucun filtre sprint).
+   * - Sinon : issues du sprint actif (ou dernier sprint fermé) du board.
    */
   async getSprintIssuesForBoard(boardId: number, from?: string, to?: string): Promise<SprintIssuesResult> {
     if (from && to) {
@@ -713,31 +1246,27 @@ export class WorklogApplicationService {
   }
 
   /**
-   * Get issues for a board in a date range (board filter JQL + updated in range)
+   * Get issues for a board in a custom date range (période personnalisée).
+   * N'utilise pas le sprint : uniquement le projet du board + plage de dates (updated).
+   * Toutes les issues du projet mises à jour entre from et to sont incluses, quel que soit le sprint.
    */
   private async getSprintIssuesForBoardByDateRange(boardId: number, from: string, to: string): Promise<SprintIssuesResult> {
     const calculator = container().sprintMetricsCalculator;
     const jiraClient = container().jiraClient;
-    const storyPointsField = process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10535';
-    const storyPointEstimateField = process.env.JIRA_STORY_POINT_ESTIMATE_FIELD || 'customfield_10016';
-    const fields = `key,summary,issuetype,status,timeoriginalestimate,${storyPointsField},${storyPointEstimateField}`;
+    const storyPointsField = process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10127';
+    const fields = `key,summary,issuetype,status,timeoriginalestimate,${storyPointsField}`;
 
-    let jql: string | null = null;
-    const config = await jiraClient.getBoardConfiguration(boardId);
-    if (config?.filter?.id) {
-      const filterJql = await jiraClient.getFilterJql(config.filter.id);
-      if (filterJql?.trim()) {
-        jql = `(${filterJql.trim()}) AND updated >= "${from}" AND updated <= "${to}"`;
-      }
-    }
     const board = await jiraClient.getBoard(boardId);
-    if (!jql && board?.location?.projectKey) {
-      jql = `project = "${board.location.projectKey}" AND updated >= "${from}" AND updated <= "${to}"`;
-    }
-    if (!jql) {
-      logger.warn(`[Board ${boardId}] No filter/project for date range`);
+    const projectKey = board?.location?.projectKey;
+    if (!projectKey) {
+      logger.warn(`[Board ${boardId}] No project for date range`);
       return this.emptySprintIssuesResult();
     }
+    // Jira JQL attend souvent YYYY/MM/DD pour les champs date
+    const fromJql = from.replace(/-/g, '/');
+    const toJql = to.replace(/-/g, '/');
+    const jql = `project = "${projectKey}" AND updated >= "${fromJql}" AND updated <= "${toJql}"`;
+    logger.info(`[Board ${boardId}] Fetching issues by date range only (no sprint): ${fromJql} → ${toJql}`);
 
     try {
       const response = await jiraClient.searchIssuesWithPagination(jql, fields, 100);
@@ -746,7 +1275,7 @@ export class WorklogApplicationService {
         const fieldsData = issue.fields as Record<string, any>;
         const status = fieldsData.status as { name?: string; statusCategory?: { key?: string; name?: string } } | undefined;
         const issueType = fieldsData.issuetype as { name?: string } | undefined;
-        const storyPoints = (fieldsData[storyPointsField] as number) || (fieldsData[storyPointEstimateField] as number) || null;
+        const storyPoints = (fieldsData[storyPointsField] as number) ?? null;
         const statusName = (status?.name ?? (typeof status === 'string' ? status : '')) || 'Unknown';
         const { category, categoryKey } = this.normalizeJiraStatus(statusName, status?.statusCategory);
         return SprintIssue.create({
@@ -848,10 +1377,9 @@ export class WorklogApplicationService {
       };
     }
 
-    // Get issues from selected sprints (include both story point fields)
-    const storyPointsField = process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10535';
-    const storyPointEstimateField = process.env.JIRA_STORY_POINT_ESTIMATE_FIELD || 'customfield_10016';
-    const fields = `key,summary,issuetype,status,timeoriginalestimate,${storyPointsField},${storyPointEstimateField}`;
+    // Get issues from selected sprints
+    const storyPointsField = process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10127';
+    const fields = `key,summary,issuetype,status,timeoriginalestimate,${storyPointsField}`;
     
     const issueMap = new Map<string, any>(); // Deduplicate by issue key
     for (const sprint of sprintsToUse) {
@@ -879,7 +1407,7 @@ export class WorklogApplicationService {
       const issueType = fieldsData.issuetype as { name?: string } | undefined;
       const statusName = (status?.name ?? (typeof status === 'string' ? status : '')) || 'Unknown';
       const { category, categoryKey } = this.normalizeJiraStatus(statusName, status?.statusCategory);
-      const storyPoints = (fieldsData[storyPointsField] as number) || (fieldsData[storyPointEstimateField] as number) || null;
+      const storyPoints = (fieldsData[storyPointsField] as number) ?? null;
       return SprintIssue.create({
         issueKey: issue.key,
         summary: (fieldsData.summary as string) || '',
@@ -1302,12 +1830,10 @@ export class WorklogApplicationService {
    */
   private async fetchLegendChildren(legendKey: string): Promise<EpicChildIssue[]> {
     const jiraClient = container().jiraClient;
-    const storyPointsField = process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10535';
-    const storyPointEstimateField = process.env.JIRA_STORY_POINT_ESTIMATE_FIELD || 'customfield_10016';
+    const storyPointsField = process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10127';
     
-    // Find child Epics
     const epicJql = `parent = "${legendKey}"`;
-    const fields = `key,summary,issuetype,status,timeoriginalestimate,timespent,${storyPointsField},${storyPointEstimateField}`;
+    const fields = `key,summary,issuetype,status,timeoriginalestimate,timespent,${storyPointsField}`;
     const epicResponse = await jiraClient.searchIssuesWithPagination(epicJql, fields);
     
     const children: EpicChildIssue[] = [];
@@ -1324,7 +1850,7 @@ export class WorklogApplicationService {
       // Epics typically don't have their own story points or time estimates - they're on US/subtasks
       const epicOwnEstimate = (epicFields.timeoriginalestimate as number) || 0;
       const epicOwnSpent = (epicFields.timespent as number) || 0;
-      const epicOwnStoryPoints = (epicFields[storyPointsField] as number) || (epicFields[storyPointEstimateField] as number) || null;
+      const epicOwnStoryPoints = (epicFields[storyPointsField] as number) ?? null;
 
       children.push({
         issueKey: childEpic.key,
@@ -1349,11 +1875,9 @@ export class WorklogApplicationService {
    */
   private async fetchEpicChildren(epicKey: string): Promise<EpicChildIssue[]> {
     const jiraClient = container().jiraClient;
-    const storyPointsField = process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10535';
-    const storyPointEstimateField = process.env.JIRA_STORY_POINT_ESTIMATE_FIELD || 'customfield_10016';
+    const storyPointsField = process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10127';
     
-    // Get US/Stories that are children of this Epic (include story point fields)
-    const childFields = `key,summary,issuetype,status,timeoriginalestimate,timespent,aggregatetimeoriginalestimate,aggregatetimespent,subtasks,parent,${storyPointsField},${storyPointEstimateField}`;
+    const childFields = `key,summary,issuetype,status,timeoriginalestimate,timespent,aggregatetimeoriginalestimate,aggregatetimespent,subtasks,parent,${storyPointsField}`;
     const childJql = `("Epic Link" = "${epicKey}" OR parent = "${epicKey}")`;
 
     const childResponse = await jiraClient.searchIssuesWithPagination(childJql, childFields);
@@ -1383,7 +1907,7 @@ export class WorklogApplicationService {
         const subtaskJql = `key in (${batch.map(k => `"${k}"`).join(',')})`;
         const subtaskResponse = await jiraClient.searchIssuesWithPagination(
           subtaskJql, 
-          `key,summary,issuetype,status,timeoriginalestimate,timespent,${storyPointsField},${storyPointEstimateField}`
+          `key,summary,issuetype,status,timeoriginalestimate,timespent,${storyPointsField}`
         );
         
         for (const st of subtaskResponse.issues) {
@@ -1391,8 +1915,7 @@ export class WorklogApplicationService {
           const stStatus = stFields?.status as { name?: string; statusCategory?: { key?: string } } | undefined;
           const stIssueType = stFields?.issuetype as { name?: string } | undefined;
           const parentKey = subtaskKeyMap.get(st.key) || null;
-          // Story points: try both fields
-          const stStoryPoints = (stFields[storyPointsField] as number) || (stFields[storyPointEstimateField] as number) || null;
+          const stStoryPoints = (stFields[storyPointsField] as number) ?? null;
           
           subtaskDetails.set(st.key, {
             issueKey: st.key,
@@ -1446,8 +1969,7 @@ export class WorklogApplicationService {
         spent = (fields.aggregatetimespent as number) || (fields.timespent as number) || 0;
       }
       
-      // Story points: always use the issue's own value
-      const storyPoints = (fields[storyPointsField] as number) || (fields[storyPointEstimateField] as number) || null;
+      const storyPoints = (fields[storyPointsField] as number) ?? null;
 
       children.push({
         issueKey: issue.key,
@@ -1469,11 +1991,9 @@ export class WorklogApplicationService {
 
   private async fetchEpicDirectProgress(epicKey: string): Promise<{ estimate: number; spent: number; usCount: number; storyPoints: number }> {
     const jiraClient = container().jiraClient;
-    const storyPointsField = process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10535';
-    const storyPointEstimateField = process.env.JIRA_STORY_POINT_ESTIMATE_FIELD || 'customfield_10016';
+    const storyPointsField = process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10127';
     
-    // Get all US/Stories that are children of this Epic (include story point fields)
-    const childFields = `key,summary,issuetype,status,timeoriginalestimate,aggregatetimeoriginalestimate,timespent,aggregatetimespent,subtasks,${storyPointsField},${storyPointEstimateField}`;
+    const childFields = `key,summary,issuetype,status,timeoriginalestimate,aggregatetimeoriginalestimate,timespent,aggregatetimespent,subtasks,${storyPointsField}`;
     const childJql = `("Epic Link" = "${epicKey}" OR parent = "${epicKey}")`;
 
     const childResponse = await jiraClient.searchIssuesWithPagination(childJql, childFields);
@@ -1502,8 +2022,7 @@ export class WorklogApplicationService {
       const issueSpent = (fields.aggregatetimespent as number) 
         || (fields.timespent as number) 
         || 0;
-      // Story points: try both fields
-      const issueStoryPoints = (fields[storyPointsField] as number) || (fields[storyPointEstimateField] as number) || 0;
+      const issueStoryPoints = (fields[storyPointsField] as number) || 0;
       
       originalEstimateSeconds += issueEstimate;
       timeSpentSeconds += issueSpent;
@@ -1520,13 +2039,13 @@ export class WorklogApplicationService {
       for (let i = 0; i < subtaskKeys.length; i += batchSize) {
         const batch = subtaskKeys.slice(i, i + batchSize);
         const subtaskJql = `key in (${batch.map(k => `"${k}"`).join(',')})`;
-        const subtaskResponse = await jiraClient.searchIssuesWithPagination(subtaskJql, `key,timeoriginalestimate,timespent,${storyPointsField},${storyPointEstimateField}`);
+        const subtaskResponse = await jiraClient.searchIssuesWithPagination(subtaskJql, `key,timeoriginalestimate,timespent,${storyPointsField}`);
         
         subtaskResponse.issues.forEach(st => {
           const stFields = st.fields as Record<string, any>;
           const stEstimate = (stFields.timeoriginalestimate as number) || 0;
           const stSpent = (stFields.timespent as number) || 0;
-          const stStoryPoints = (stFields[storyPointsField] as number) || (stFields[storyPointEstimateField] as number) || 0;
+          const stStoryPoints = (stFields[storyPointsField] as number) || 0;
           subtaskEstimateTotal += stEstimate;
           subtaskSpentTotal += stSpent;
           subtaskStoryPointsTotal += stStoryPoints;
@@ -1717,6 +2236,25 @@ export interface SupportKPIResult {
     workingDays: number;
     ponderation: number | null;
   }>;
+  firstResponseDetails: Array<{
+    issueKey: string;
+    summary: string;
+    created: string;
+    beginDate: string;
+    workingDays: number;
+  }>;
+  /** Ratio support/build: heures SB / (REL+AD+SB) en %. Sprint actif + année en cours + détail par board. */
+  supportBuildRatio: {
+    activeSprintPercent: number;
+    yearToDatePercent: number;
+    activeSprintByProject: Array<{ projectKey: string; hours: number; percent: number }>;
+    yearToDateByProject: Array<{ projectKey: string; hours: number; percent: number }>;
+    retrievalDetail?: Array<{
+      projectKey: string;
+      sprint: { jql: string; issueCount: number; worklogCount: number; totalHours: number };
+      ytd: { jql: string; issueCount: number; worklogCount: number; totalHours: number; from: string; to: string };
+    }>;
+  };
 }
 
 export interface EpicProgressItem {

@@ -1,10 +1,22 @@
 import { Router, Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
+import mongoose from 'mongoose';
 import { authService } from '../application/services/AuthService';
 import { authenticate, requireSuperAdmin } from '../middleware/authMiddleware';
 import { User } from '../domain/user/entities/User';
 import { Role, IPageVisibilities, PAGE_IDS } from '../domain/user/entities/Role';
 import { logger } from '../utils/logger';
+
+/** Répond 503 si MongoDB n'est pas connecté (évite le timeout de 10s des opérations bufferisées) */
+const requireMongo = (_req: Request, res: Response, next: () => void) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      success: false,
+      error: 'Service d\'authentification indisponible (base de données non connectée). Vérifiez que MongoDB tourne et MONGODB_URI.'
+    });
+  }
+  next();
+};
 
 // Microsoft Graph API profile response type
 interface MicrosoftGraphProfile {
@@ -17,6 +29,32 @@ interface MicrosoftGraphProfile {
 }
 
 const router = Router();
+
+/**
+ * Microsoft SSO config (sans MongoDB) - doit être défini avant requireMongo pour que le bouton SSO s'affiche même si la DB est down
+ */
+router.get('/microsoft/config', (req: Request, res: Response) => {
+  const clientId = process.env.MICROSOFT_CLIENT_ID;
+  const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+
+  if (!clientId) {
+    return res.status(503).json({
+      success: false,
+      error: 'Microsoft SSO non configuré',
+      enabled: false
+    });
+  }
+
+  res.json({
+    success: true,
+    enabled: true,
+    clientId,
+    tenantId,
+    redirectUri: process.env.MICROSOFT_REDIRECT_URI || `${req.protocol}://${req.get('host')}/api/auth/microsoft/callback`
+  });
+});
+
+router.use(requireMongo);
 
 /**
  * @swagger
@@ -340,37 +378,6 @@ router.get('/roles/for-signup', async (_req: Request, res: Response) => {
     logger.error('Roles for signup error:', error);
     res.status(500).json({ success: false, error: 'Erreur serveur' });
   }
-});
-
-/**
- * @swagger
- * /api/auth/microsoft/config:
- *   get:
- *     summary: Get Microsoft SSO configuration
- *     tags: [Authentication]
- *     responses:
- *       200:
- *         description: Microsoft SSO configuration
- */
-router.get('/microsoft/config', (req: Request, res: Response) => {
-  const clientId = process.env.MICROSOFT_CLIENT_ID;
-  const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
-  
-  if (!clientId) {
-    return res.status(503).json({
-      success: false,
-      error: 'Microsoft SSO non configuré',
-      enabled: false
-    });
-  }
-
-  res.json({
-    success: true,
-    enabled: true,
-    clientId,
-    tenantId,
-    redirectUri: process.env.MICROSOFT_REDIRECT_URI || `${req.protocol}://${req.get('host')}/api/auth/microsoft/callback`
-  });
 });
 
 /**

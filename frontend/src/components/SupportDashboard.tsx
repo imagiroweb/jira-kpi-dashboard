@@ -80,6 +80,25 @@ interface SupportKPIData {
     workingDays: number;
     ponderation: number | null;
   }>;
+  firstResponseDetails?: Array<{
+    issueKey: string;
+    summary: string;
+    created: string;
+    beginDate: string;
+    workingDays: number;
+  }>;
+  /** Ratio support/build: SB hours / (REL+AD+SB) %. Sprint actif + année en cours + détail par board. */
+  supportBuildRatio?: {
+    activeSprintPercent: number;
+    yearToDatePercent: number;
+    activeSprintByProject?: Array<{ projectKey: string; hours: number; percent: number }>;
+    yearToDateByProject?: Array<{ projectKey: string; hours: number; percent: number }>;
+    retrievalDetail?: Array<{
+      projectKey: string;
+      sprint: { jql: string; issueCount: number; worklogCount: number; totalHours: number };
+      ytd: { jql: string; issueCount: number; worklogCount: number; totalHours: number; from: string; to: string };
+    }>;
+  };
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
@@ -118,6 +137,8 @@ export function SupportDashboard() {
   
   // Resolution details modal state
   const [showResolutionDetails, setShowResolutionDetails] = useState(false);
+  // First response (1ère prise en charge) details modal state
+  const [showFirstResponseDetails, setShowFirstResponseDetails] = useState(false);
 
   // silent = true means no loading state (for background refreshes)
   const loadKPIs = useCallback(async (silent = false) => {
@@ -396,6 +417,117 @@ export function SupportDashboard() {
               </div>
             </div>
           )}
+
+          {/* Ratio support/build: SB heures / (REL+AD+SB) + détail par board */}
+          {kpiData.supportBuildRatio != null && (
+            <div className="card-glass p-4 mb-6 border border-primary-500/20 bg-primary-500/5">
+              <div className="flex items-center gap-2 text-primary-400 mb-3">
+                <Scale className="w-5 h-5" />
+                <span className="font-semibold text-surface-100">Ratio support / build</span>
+              </div>
+              <p className="text-xs text-surface-500 mb-4">
+                Heures passées sur les tickets Support (SB) / total des heures (REL + AD + SB), en %
+              </p>
+              <p className="text-xs text-surface-500 mb-2">
+                Données via l’API Jira (recherche d’issues par JQL puis worklogs par issue, avec pagination pour tout récupérer). Pour un rapport exhaustif, vous pouvez aussi utiliser un export WorklogPro ou un tableau de bord Jira/export si configuré (WORKLOG_URL / WORKLOGPRO dans le backend).
+              </p>
+              <div className="flex flex-wrap gap-8 mb-4">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-bold text-primary-400 tabular-nums">
+                    {kpiData.supportBuildRatio.activeSprintPercent} %
+                  </span>
+                  <span className="text-sm text-surface-400">Sprint actif</span>
+                </div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-bold text-surface-200 tabular-nums">
+                    {kpiData.supportBuildRatio.yearToDatePercent} %
+                  </span>
+                  <span className="text-sm text-surface-400">Année en cours</span>
+                </div>
+              </div>
+              {/* Détail par board / espace */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                  <h4 className="text-sm font-medium text-surface-300 mb-2">Sprint actif — détail par board</h4>
+                  <div className="rounded-lg border border-surface-600/50 overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-surface-800/80 text-left">
+                          <th className="px-3 py-2 text-surface-400 font-medium">Espace</th>
+                          <th className="px-3 py-2 text-surface-400 font-medium text-right">Heures</th>
+                          <th className="px-3 py-2 text-surface-400 font-medium text-right">%</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(kpiData.supportBuildRatio.activeSprintByProject ?? []).map((row) => (
+                          <tr key={row.projectKey} className="border-t border-surface-700/50 hover:bg-surface-800/30">
+                            <td className="px-3 py-2 font-medium text-surface-200">{row.projectKey}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-surface-300">{row.hours.toFixed(1)} h</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-primary-400">{row.percent.toFixed(1)} %</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                <div>
+                  <h4 className="text-sm font-medium text-surface-300 mb-2">Année en cours — détail par board</h4>
+                  <div className="rounded-lg border border-surface-600/50 overflow-hidden">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="bg-surface-800/80 text-left">
+                          <th className="px-3 py-2 text-surface-400 font-medium">Espace</th>
+                          <th className="px-3 py-2 text-surface-400 font-medium text-right">Heures</th>
+                          <th className="px-3 py-2 text-surface-400 font-medium text-right">%</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(kpiData.supportBuildRatio.yearToDateByProject ?? []).map((row) => (
+                          <tr key={row.projectKey} className="border-t border-surface-700/50 hover:bg-surface-800/30">
+                            <td className="px-3 py-2 font-medium text-surface-200">{row.projectKey}</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-surface-300">{row.hours.toFixed(1)} h</td>
+                            <td className="px-3 py-2 text-right tabular-nums text-surface-300">{row.percent.toFixed(1)} %</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+              {/* Comment les heures sont récupérées (détail par espace) */}
+              {(kpiData.supportBuildRatio.retrievalDetail?.length ?? 0) > 0 && (
+                <details className="mt-4 rounded-lg border border-surface-600/50 bg-surface-800/30">
+                  <summary className="px-4 py-3 cursor-pointer text-sm font-medium text-surface-300 hover:text-surface-200">
+                    Comment les heures sont récupérées (détail par espace)
+                  </summary>
+                  <div className="px-4 pb-4 space-y-4">
+                    {kpiData.supportBuildRatio.retrievalDetail!.map((d) => (
+                      <div key={d.projectKey} className="rounded-lg border border-surface-700/50 p-3 bg-surface-900/50">
+                        <div className="font-medium text-surface-200 mb-2">Espace {d.projectKey}</div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                          <div>
+                            <div className="text-surface-500 mb-1">Sprint actif</div>
+                            <div className="font-mono text-surface-400 break-all mb-1">{d.sprint.jql}</div>
+                            <div className="text-surface-300">
+                              {d.sprint.issueCount} issue(s) → {d.sprint.worklogCount} worklog(s) → {d.sprint.totalHours.toFixed(1)} h
+                            </div>
+                          </div>
+                          <div>
+                            <div className="text-surface-500 mb-1">Année en cours ({d.ytd.from} → {d.ytd.to})</div>
+                            <div className="font-mono text-surface-400 break-all mb-1">{d.ytd.jql}</div>
+                            <div className="text-surface-300">
+                              {d.ytd.issueCount} issue(s) → {d.ytd.worklogCount} worklog(s) → {d.ytd.totalHours.toFixed(1)} h
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-4">
             <div className="card-glass p-4 text-center">
               <div className="flex items-center justify-center gap-2 text-surface-400 mb-2">
@@ -533,27 +665,30 @@ export function SupportDashboard() {
               );
             })()}
             
-            {/* First Response Time with objective: <= 4 days (96h) */}
+            {/* First Response Time with objective: <= 4 days (96h) — click to show detail (descending) */}
             {(() => {
               const targetHours = 96; // 4 jours
               const thresholdOver20Percent = targetHours * 1.2; // 115.2h
               const avgHours = kpiData.avgFirstResponseTimeHours;
+              const hasFirstResponseDetail = kpiData.firstResponseDetails && kpiData.firstResponseDetails.length > 0;
               
               let colorClass = 'text-success-400'; // Vert par défaut (objectif atteint)
               let bgClass = 'border-success-500/30';
               
               if (avgHours > thresholdOver20Percent) {
-                // Plus de 20% au-dessus de l'objectif = Rouge
                 colorClass = 'text-red-400';
                 bgClass = 'border-red-500/30';
               } else if (avgHours > targetHours) {
-                // Au-dessus mais <= 20% = Orange
                 colorClass = 'text-warning-400';
                 bgClass = 'border-warning-500/30';
               }
               
               return (
-                <div className={`card-glass p-3 text-center border ${bgClass}`}>
+                <button
+                  type="button"
+                  onClick={() => hasFirstResponseDetail && setShowFirstResponseDetails(true)}
+                  className={`card-glass p-3 text-center border ${bgClass} w-full ${hasFirstResponseDetail ? 'cursor-pointer hover:opacity-90 transition-opacity' : 'cursor-default'}`}
+                >
                   <div className={`flex items-center justify-center gap-1 ${colorClass} mb-1`}>
                     <PlayCircle className="w-4 h-4" />
                     <span className="text-[10px] uppercase tracking-wider">1ère Prise</span>
@@ -561,7 +696,10 @@ export function SupportDashboard() {
                   <div className={`text-2xl font-bold ${colorClass}`}>{formatHours(avgHours)}</div>
                   <div className="text-[10px] text-surface-500">en charge</div>
                   <div className="text-[9px] text-surface-600 mt-1">Objectif: ≤4j</div>
-                </div>
+                  {hasFirstResponseDetail && (
+                    <div className="text-[9px] text-surface-500 mt-1">Cliquer pour le détail</div>
+                  )}
+                </button>
               );
             })()}
             
@@ -1373,6 +1511,88 @@ export function SupportDashboard() {
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* First Response (1ère prise en charge) Details Modal — sorted descending */}
+      {showFirstResponseDetails && kpiData?.firstResponseDetails && kpiData.firstResponseDetails.length > 0 && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="card-glass p-6 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col animate-slide-up">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-xl font-semibold text-surface-100 flex items-center gap-2">
+                  <PlayCircle className="w-5 h-5 text-primary-400" />
+                  Détail temps moyen de première prise en charge
+                </h3>
+                <p className="text-sm text-surface-500 mt-1">
+                  {kpiData.firstResponseDetails.length} tickets • Moyenne: {formatHours(kpiData.avgFirstResponseTimeHours)} • Ordre décroissant
+                </p>
+              </div>
+              <button
+                onClick={() => setShowFirstResponseDetails(false)}
+                className="p-2 hover:bg-surface-700 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-surface-400" />
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto">
+              <table className="w-full">
+                <thead className="sticky top-0 bg-surface-900">
+                  <tr className="text-left text-xs text-surface-500 uppercase tracking-wider">
+                    <th className="pb-3 pr-4">Ticket</th>
+                    <th className="pb-3 pr-4">Résumé</th>
+                    <th className="pb-3 pr-4 text-center">Création</th>
+                    <th className="pb-3 pr-4 text-center">1ère prise</th>
+                    <th className="pb-3 text-center">Jours ouvrés</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-surface-800">
+                  {kpiData.firstResponseDetails.map((detail) => (
+                    <tr key={detail.issueKey} className="hover:bg-surface-800/50 transition-colors">
+                      <td className="py-3 pr-4">
+                        <a
+                          href={`https://${import.meta.env.VITE_JIRA_DOMAIN || 'jira.atlassian.net'}/browse/${detail.issueKey}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary-400 hover:text-primary-300 font-mono text-sm"
+                        >
+                          {detail.issueKey}
+                        </a>
+                      </td>
+                      <td className="py-3 pr-4">
+                        <span className="text-sm text-surface-200 line-clamp-1" title={detail.summary}>
+                          {detail.summary}
+                        </span>
+                      </td>
+                      <td className="py-3 pr-4 text-center">
+                        <span className="text-xs text-surface-400">
+                          {new Date(detail.created).toLocaleDateString('fr-FR')}
+                        </span>
+                      </td>
+                      <td className="py-3 pr-4 text-center">
+                        <span className="text-xs text-surface-400">
+                          {new Date(detail.beginDate).toLocaleDateString('fr-FR')}
+                        </span>
+                      </td>
+                      <td className="py-3 text-center">
+                        <span className={`text-sm font-bold ${detail.workingDays <= 2 ? 'text-success-400' : detail.workingDays <= 5 ? 'text-warning-400' : 'text-red-400'}`}>
+                          {detail.workingDays}j
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="mt-4 pt-4 border-t border-surface-700 flex justify-end">
+              <button
+                onClick={() => setShowFirstResponseDetails(false)}
+                className="px-4 py-2 bg-surface-700 hover:bg-surface-600 rounded-lg text-surface-200 transition-colors"
+              >
+                Fermer
+              </button>
             </div>
           </div>
         </div>

@@ -10,15 +10,14 @@ export class WorklogMapper {
   
   /**
    * Map Jira worklog API response to domain Worklog entity
-   * Supports both "Story Points" and "Story Point Estimate" fields
+   * Uses JIRA_STORY_POINTS_FIELD (customfield_10127) for story points
    */
   static toDomain(
     jiraWorklog: JiraWorklog,
     issueKey: string,
     issueFields?: Record<string, unknown>,
     storyPointsField?: string,
-    ponderationField?: string,
-    storyPointEstimateField?: string
+    ponderationField?: string
   ): Worklog {
     const author = Author.create(
       jiraWorklog.author.accountId,
@@ -31,12 +30,9 @@ export class WorklogMapper {
     // Extract description from comment
     const description = this.extractDescription(jiraWorklog.comment);
 
-    // Try Story Points first, then Story Point Estimate as fallback
     let storyPoints: number | null = null;
     if (storyPointsField && issueFields?.[storyPointsField] != null) {
       storyPoints = issueFields[storyPointsField] as number;
-    } else if (storyPointEstimateField && issueFields?.[storyPointEstimateField] != null) {
-      storyPoints = issueFields[storyPointEstimateField] as number;
     }
 
     return Worklog.create({
@@ -64,11 +60,10 @@ export class WorklogMapper {
     issueKey: string,
     issueFields?: Record<string, unknown>,
     storyPointsField?: string,
-    ponderationField?: string,
-    storyPointEstimateField?: string
+    ponderationField?: string
   ): Worklog[] {
     return jiraWorklogs.map(w => 
-      this.toDomain(w, issueKey, issueFields, storyPointsField, ponderationField, storyPointEstimateField)
+      this.toDomain(w, issueKey, issueFields, storyPointsField, ponderationField)
     );
   }
 
