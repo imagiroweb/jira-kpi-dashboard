@@ -6,6 +6,7 @@ module.exports = {
     ecmaVersion: 2022,
     sourceType: "module",
     ecmaFeatures: { jsx: true },
+    warnOnUnsupportedTypeScriptVersion: false,
   },
   plugins: ["@typescript-eslint", "react", "react-hooks", "react-refresh"],
   extends: [

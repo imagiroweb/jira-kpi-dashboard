@@ -82,7 +82,7 @@ router.post(
       if (!errors.isEmpty()) {
         return res.status(400).json({
           success: false,
-          errors: errors.array().map((e: any) => e.msg)
+          errors: errors.array().map((e: { msg?: string }) => e.msg)
         });
       }
 
@@ -334,7 +334,7 @@ router.get('/roles/for-signup', async (_req: Request, res: Response) => {
     const roles = await Role.find().select('name').lean();
     res.json({
       success: true,
-      roles: roles.map((r: any) => ({ id: r._id.toString(), name: r.name }))
+      roles: roles.map((r: { _id: { toString: () => string }; name: string }) => ({ id: r._id.toString(), name: r.name }))
     });
   } catch (error) {
     logger.error('Roles for signup error:', error);
@@ -453,7 +453,7 @@ router.patch(
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
-        return res.status(400).json({ success: false, errors: errors.array().map((e: any) => e.msg) });
+        return res.status(400).json({ success: false, errors: errors.array().map((e: { msg?: string }) => e.msg) });
       }
       const { roleId } = req.body;
       const result = await authService.setMyRole(req.user!.userId, roleId);
@@ -499,18 +499,34 @@ router.get('/users', authenticate, requireSuperAdmin, async (req: Request, res: 
   try {
     const users = await User.find().select('-password').populate('roleId', 'name').lean();
     const roles = await Role.find().lean();
-    const list = users.map((u: any) => ({
-      id: u._id.toString(),
-      email: u.email,
-      firstName: u.firstName,
-      lastName: u.lastName,
-      provider: u.provider,
-      isActive: u.isActive,
-      role: u.role ?? null,
-      roleId: u.roleId ? (u.roleId._id ?? u.roleId).toString() : null,
-      roleName: u.role === 'super_admin' ? 'Super admin' : (u.roleId?.name ?? '—')
-    }));
-    res.json({ success: true, users: list, roles: roles.map((r: any) => ({ id: r._id.toString(), name: r.name, pageVisibilities: r.pageVisibilities })) });
+    const list = users.map((u: {
+      _id: { toString: () => string };
+      email: string;
+      firstName?: string;
+      lastName?: string;
+      roleId?: { _id?: { toString: () => string }; name?: string; toString: () => string };
+      role?: string;
+      provider?: string;
+      isActive?: boolean;
+    }) => {
+      const roleIdVal = u.roleId;
+      const roleIdStr = roleIdVal
+        ? (typeof roleIdVal === 'object' && '_id' in roleIdVal ? (roleIdVal._id ?? roleIdVal) : roleIdVal).toString()
+        : null;
+      const roleName = u.role === 'super_admin' ? 'Super admin' : (roleIdVal && typeof roleIdVal === 'object' && 'name' in roleIdVal ? roleIdVal.name : '—');
+      return {
+        id: u._id.toString(),
+        email: u.email,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        provider: u.provider,
+        isActive: u.isActive,
+        role: u.role ?? null,
+        roleId: roleIdStr,
+        roleName
+      };
+    });
+    res.json({ success: true, users: list, roles: roles.map((r: { _id: { toString: () => string }; name: string; pageVisibilities?: unknown }) => ({ id: r._id.toString(), name: r.name, pageVisibilities: r.pageVisibilities })) });
   } catch (error) {
     logger.error('List users error:', error);
     res.status(500).json({ success: false, error: 'Erreur serveur' });
@@ -528,7 +544,7 @@ router.patch(
   async (req: Request, res: Response) => {
     try {
       const errors = validationResult(req);
-      if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array().map((e: any) => e.msg) });
+      if (!errors.isEmpty()) return res.status(400).json({ success: false, errors: errors.array().map((e: { msg?: string }) => e.msg) });
       const { id } = req.params;
       const { role, roleId } = req.body;
       const user = await User.findById(id);

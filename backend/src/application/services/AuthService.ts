@@ -105,8 +105,8 @@ export class AuthService {
       if ((password.match(/[0-9]/g) || []).length >= 2) score += 5;
     }
 
-    // Check for special characters
-    const specialCharRegex = new RegExp(`[${PASSWORD_RULES.specialChars.replace(/[[\]\\^$.|?*+(){}]/g, '\\$&')}]`);
+    // Check for special characters (escape - so it is not interpreted as range in character class)
+    const specialCharRegex = new RegExp(`[${PASSWORD_RULES.specialChars.replace(/[[\]\\^$.|?*+(){}-]/g, '\\$&')}]`);
     if (PASSWORD_RULES.requireSpecialChars && !specialCharRegex.test(password)) {
       errors.push('Le mot de passe doit contenir au moins un caractère spécial (!@#$%^&*...)');
     } else if (specialCharRegex.test(password)) {
@@ -471,7 +471,7 @@ export class AuthService {
   async buildUserWithPermissions(user: IUser): Promise<{ id: string; email: string; firstName?: string; lastName?: string; provider: string; role: 'super_admin' | string | null; roleName: string; visiblePages: IPageVisibilities }> {
     const visiblePages = await this.getVisiblePages(user);
     let roleName = 'Utilisateur';
-    let role: 'super_admin' | string | null = user.role ?? (user.roleId ? user.roleId.toString() : null);
+    const role: 'super_admin' | string | null = user.role ?? (user.roleId ? user.roleId.toString() : null);
     if (user.role === 'super_admin') roleName = 'Super admin';
     else if (user.roleId) {
       const r = await Role.findById(user.roleId);

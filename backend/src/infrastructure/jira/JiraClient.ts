@@ -303,7 +303,7 @@ export class JiraClient {
       
       if (issues.length < maxResults) break;
       startAt += maxResults;
-      
+      // eslint-disable-next-line no-constant-condition -- pagination loop
     } while (true);
 
     return allIssues;

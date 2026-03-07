@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useCallback, useRef, ReactNode } from 'react';
+import React, { createContext, useCallback, useRef, ReactNode } from 'react';
 import { useSocket, SocketState, Alert, SyncProgress, KPIUpdate } from '../hooks/useSocket';
-import { NotificationToast, useNotifications } from '../components/NotificationToast';
+import { NotificationToast } from '../components/NotificationToast';
+import { useNotifications } from '../hooks/useNotifications';
 import { useStore } from '../store/useStore';
 
 interface SocketContextValue extends SocketState {
@@ -95,19 +96,6 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     </SocketContext.Provider>
   );
 };
-
-export function useSocketContext() {
-  const context = useContext(SocketContext);
-  if (!context) {
-    throw new Error('useSocketContext must be used within a SocketProvider');
-  }
-  return context;
-}
-
-// Hook that can be used outside provider (returns null values if not in provider)
-export function useSocketOptional() {
-  return useContext(SocketContext);
-}
 
 export default SocketContext;
 

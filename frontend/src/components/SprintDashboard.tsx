@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useCallback, useState } from 'react';
+import { useEffect, useMemo, useCallback, useState, useRef } from 'react';
 import { 
   FolderKanban, Zap, Ticket, PlayCircle, FlaskConical, 
   Clock, CheckCircle, TrendingUp, ListTodo, Inbox, CalendarDays,
@@ -62,7 +62,8 @@ export function SprintDashboard() {
   const [loadingSnapshots, setLoadingSnapshots] = useState(false);
   const [selectedSnapshot, setSelectedSnapshot] = useState<DashboardSnapshotFull | null>(null);
   const [loadingSnapshot, setLoadingSnapshot] = useState(false);
-  
+  const didInitialLoad = useRef(false);
+
   // Charger les boards configurés depuis l'API
   useEffect(() => {
     const loadConfiguredBoards = async () => {
@@ -216,26 +217,26 @@ export function SprintDashboard() {
     loadAllBoards(true);
   }, [loadAllBoards]);
 
-  // Load on mount when boards are loaded
+  // Load once when boards are loaded (ref avoids re-run when projectsStats updates)
   useEffect(() => {
-    if (boardsLoaded && configuredBoards.length > 0 && projectsStats.length === 0) {
-      loadAllBoards(true);
-    }
-  }, [boardsLoaded, configuredBoards.length]);
+    if (!boardsLoaded || configuredBoards.length === 0 || didInitialLoad.current) return;
+    didInitialLoad.current = true;
+    loadAllBoards(true);
+  }, [boardsLoaded, configuredBoards.length, loadAllBoards]);
 
   // Reload when date range changes (with loading indicator)
   useEffect(() => {
     if (configuredBoards.length > 0) {
       loadAllBoards(true, false);
     }
-  }, [dateRange.from, dateRange.to, configuredBoards.length]);
+  }, [configuredBoards.length, loadAllBoards, dateRange.from, dateRange.to]);
 
   // Silent refresh when kpiRefreshTrigger changes (no loading indicator)
   useEffect(() => {
     if (configuredBoards.length > 0 && kpiRefreshTrigger > 0) {
-      loadAllBoards(true, true); // silent = true
+      loadAllBoards(true, true);
     }
-  }, [kpiRefreshTrigger]);
+  }, [configuredBoards.length, kpiRefreshTrigger, loadAllBoards]);
 
   // Totals
   const totals = useMemo(() => {
@@ -811,7 +812,7 @@ export function SprintDashboard() {
                             })} par {snapshot.savedBy.name || snapshot.savedBy.email}
                           </p>
                           {snapshot.notes && (
-                            <p className="text-sm text-surface-400 mt-2 italic">"{snapshot.notes}"</p>
+                            <p className="text-sm text-surface-400 mt-2 italic">&quot;{snapshot.notes}&quot;</p>
                           )}
                           <div className="flex gap-4 mt-3 text-sm">
                             <span className="text-surface-400">
@@ -891,7 +892,7 @@ export function SprintDashboard() {
             <div className="flex-1 overflow-y-auto space-y-6">
               {selectedSnapshot.notes && (
                 <div className="bg-surface-800/50 rounded-lg p-4 border border-surface-700">
-                  <p className="text-sm text-surface-400 italic">"{selectedSnapshot.notes}"</p>
+                  <p className="text-sm text-surface-400 italic">&quot;{selectedSnapshot.notes}&quot;</p>
                 </div>
               )}
               

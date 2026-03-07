@@ -1,4 +1,4 @@
-import { IWorklogRepository, WorklogSearchParams } from '../../domain/worklog/repositories/IWorklogRepository';
+import { IWorklogRepository } from '../../domain/worklog/repositories/IWorklogRepository';
 import { WorklogMetricsCalculator } from '../../domain/kpi/services/WorklogMetricsCalculator';
 import { WorklogDTOMapper, WorklogSearchResponseDTO } from '../dto/WorklogDTO';
 

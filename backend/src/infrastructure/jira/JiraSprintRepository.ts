@@ -96,7 +96,7 @@ export class JiraSprintRepository implements ISprintRepository {
     return SprintMapper.issuesToDomain(response.issues, this.storyPointsField, this.storyPointEstimateField);
   }
 
-  async findBacklogIssues(projectKey: string, maxResults: number = 1000): Promise<SprintIssue[]> {
+  async findBacklogIssues(projectKey: string, _maxResults: number = 1000): Promise<SprintIssue[]> {
     const jql = `project = "${projectKey}" AND Sprint is EMPTY AND statusCategory != Done ORDER BY created DESC`;
     const fields = `key,summary,issuetype,status,${this.storyPointsField},${this.storyPointEstimateField}`;
     

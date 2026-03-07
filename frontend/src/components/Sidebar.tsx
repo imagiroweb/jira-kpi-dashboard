@@ -1,7 +1,7 @@
 import { LayoutDashboard, Users, Headphones, ChevronLeft, ChevronRight, LogOut, User, Wifi, WifiOff, RefreshCw, Flag, Megaphone, Package, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import { useStore } from '../store/useStore';
-import { useSocketOptional } from '../contexts/SocketContext';
+import { useSocketOptional } from '../hooks/useSocketContext';
 import { syncApi } from '../services/api';
 
 // PageType is defined in the store, we just use the same type here

@@ -16,7 +16,7 @@ router.get('/configured-projects', async (req: Request, res: Response) => {
     const allProjects = await worklogAppService.getProjects();
     
     // Map configured keys to project objects with names
-    const projects = configuredKeys.map((key, index) => {
+    const projects = configuredKeys.map((key, _index) => {
       const projectInfo = allProjects.find(p => p.key === key);
       return {
         key,
