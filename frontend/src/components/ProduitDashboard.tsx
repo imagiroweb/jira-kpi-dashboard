@@ -142,7 +142,7 @@ function parseDate(value: string): Date | null {
     const d = new Date(parseInt(iso[1], 10), parseInt(iso[2], 10) - 1, parseInt(iso[3], 10));
     return isNaN(d.getTime()) ? null : d;
   }
-  const dmy = dateStr.match(/^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/);
+  const dmy = dateStr.match(/^(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{4})$/);
   if (dmy) {
     const d = new Date(parseInt(dmy[3], 10), parseInt(dmy[2], 10) - 1, parseInt(dmy[1], 10));
     return isNaN(d.getTime()) ? null : d;
@@ -658,7 +658,7 @@ export function ProduitDashboard() {
             </select>
             {npsWorkspace && selectedWorkspaceId !== npsWorkspace.id && (
               <span className="text-xs text-surface-500">
-                → Pour les KPI NPS Fev 2026 Monday, sélectionnez l'espace « {npsWorkspace.name} »
+                → Pour les KPI NPS Fev 2026 Monday, sélectionnez l&apos;espace « {npsWorkspace.name} »
               </span>
             )}
           </div>
@@ -688,7 +688,7 @@ export function ProduitDashboard() {
           </div>
           {boards.length === 0 && (
             <div className="p-6 text-surface-500 text-sm">
-              Aucun board dans cet espace. Vérifiez les droits d'accès sur Monday.com ou le nom de l'espace.
+              Aucun board dans cet espace. Vérifiez les droits d&apos;accès sur Monday.com ou le nom de l&apos;espace.
             </div>
           )}
           {!npsLoading && boards.length > 0 && !npsBoardId && (
@@ -926,7 +926,7 @@ export function ProduitDashboard() {
                     <span className="text-xs font-medium text-surface-500">Utilisateurs actifs</span>
                   </div>
                   <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.totalUtilisateursActifs}</div>
-                  <div className="text-[10px] text-surface-500 mt-0.5">somme par site (Nbre d'utilisateurs actifs)</div>
+                  <div className="text-[10px] text-surface-500 mt-0.5">somme par site (Nbre d&apos;utilisateurs actifs)</div>
                 </div>
                 <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
                   <div className="flex items-center gap-2 mb-1">

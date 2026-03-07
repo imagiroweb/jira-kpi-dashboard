@@ -511,7 +511,7 @@ export function EpicProgressPage() {
           <div>
             <h1 className="text-2xl font-semibold text-surface-100">Suivi epics</h1>
             <p className="text-sm text-surface-500">
-              Progression basee sur l'estimation originale des US enfants et le temps passe.
+              Progression basee sur l&apos;estimation originale des US enfants et le temps passe.
             </p>
           </div>
         </div>
@@ -632,7 +632,7 @@ export function EpicProgressPage() {
         
         {showSearchDropdown && searchQuery.length >= 2 && searchResults.length === 0 && !isSearching && (
           <div className="absolute z-20 mt-2 w-full bg-surface-900 border border-surface-700/60 rounded-xl shadow-xl p-4 text-center text-surface-500 text-sm">
-            Aucun résultat trouvé pour "{searchQuery}"
+            Aucun résultat trouvé pour &quot;{searchQuery}&quot;
           </div>
         )}
       </div>
@@ -691,7 +691,7 @@ export function EpicProgressPage() {
                 </div>
                 {epic.isOverrun && (
                   <div className="text-xs text-danger-400 mt-2">
-                    Temps passé supérieur à l'estimation originale.
+                    Temps passé supérieur à l&apos;estimation originale.
                   </div>
                 )}
               </div>

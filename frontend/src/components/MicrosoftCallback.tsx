@@ -45,9 +45,11 @@ export function MicrosoftCallback() {
           setError(result.error || 'Erreur de connexion');
           setStatus('error');
         }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error('Microsoft callback error:', err);
-      const msg = err?.response?.data?.error || err?.message || 'Erreur de connexion au serveur';
+      const msg = (err as { response?: { data?: { error?: string } }; message?: string })?.response?.data?.error
+        || (err as Error)?.message
+        || 'Erreur de connexion au serveur';
       setError(msg);
       setStatus('error');
     }

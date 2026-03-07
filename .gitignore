@@ -11,6 +11,7 @@ out/
 
 # Environment files (never commit secrets)
 .env
+env.prod.template
 .env.local
 .env.development.local
 .env.test.local

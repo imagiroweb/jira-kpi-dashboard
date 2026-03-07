@@ -1,8 +1,9 @@
 import { Request, Response, NextFunction } from 'express';
 import { authService, AuthTokenPayload } from '../application/services/AuthService';
 
-// Extend Express Request type
+// Extend Express Request type (namespace required for Express augmentation)
 declare global {
+  // eslint-disable-next-line @typescript-eslint/no-namespace
   namespace Express {
     interface Request {
       user?: AuthTokenPayload;

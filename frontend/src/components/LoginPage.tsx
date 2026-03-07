@@ -78,7 +78,7 @@ export function LoginPage() {
       })
       .catch(() => {});
     return () => { cancelled = true; };
-  }, [mode]);
+  }, [mode, selectedRoleId]);
 
   // Password validation for registration
   const isPasswordValid = useCallback(() => {

@@ -1,0 +1,1 @@
+npm run lint && (cd frontend && (test -x node_modules/.bin/vitest || npm install) && npm run test) && (cd backend && (test -x node_modules/.bin/jest || npm install) && npm run test)

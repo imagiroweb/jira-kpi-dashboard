@@ -93,7 +93,7 @@ export const authApi = {
    */
   async getRolesForSignup(): Promise<RoleForSignup[]> {
     const response = await api.get<{ success: boolean; roles: RoleForSignup[] }>('/api/auth/roles/for-signup');
-    if (!response.data.success) throw new Error((response.data as any).error);
+    if (!response.data.success) throw new Error((response.data as { error?: string }).error);
     return response.data.roles;
   },
 
@@ -116,12 +116,11 @@ export const authApi = {
         roleId
       });
       return response.data;
-    } catch (error: any) {
-      if (error.response?.data) {
-        return {
-          success: false,
-          error: error.response.data.error || error.response.data.errors?.join('. ')
-        };
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { error?: string; errors?: string[] } } };
+      if (err.response?.data) {
+        const msg = err.response.data.error || err.response.data.errors?.join('. ');
+        if (msg) return { success: false, error: msg };
       }
       return { success: false, error: 'Erreur de connexion au serveur' };
     }
@@ -137,12 +136,10 @@ export const authApi = {
         password
       });
       return response.data;
-    } catch (error: any) {
-      if (error.response?.data) {
-        return {
-          success: false,
-          error: error.response.data.error
-        };
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { error?: string } } };
+      if (err.response?.data?.error) {
+        return { success: false, error: err.response.data.error };
       }
       return { success: false, error: 'Erreur de connexion au serveur' };
     }
@@ -187,12 +184,10 @@ export const authApi = {
         accessToken
       });
       return response.data;
-    } catch (error: any) {
-      if (error.response?.data) {
-        return {
-          success: false,
-          error: error.response.data.error
-        };
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { error?: string } } };
+      if (err.response?.data?.error) {
+        return { success: false, error: err.response.data.error };
       }
       return { success: false, error: 'Erreur de connexion Microsoft' };
     }
@@ -227,7 +222,7 @@ export const authApi = {
    */
   async getUsersAndRoles(): Promise<{ users: UserWithRoleDto[]; roles: RoleDto[] }> {
     const response = await api.get<{ success: boolean; users: UserWithRoleDto[]; roles: RoleDto[] }>('/api/auth/users');
-    if (!response.data.success) throw new Error(response.data as any);
+    if (!response.data.success) throw new Error((response.data as { error?: string }).error);
     return { users: response.data.users, roles: response.data.roles };
   },
 
@@ -239,7 +234,7 @@ export const authApi = {
     if (role === 'super_admin') body.role = 'super_admin';
     else body.roleId = roleId;
     const response = await api.patch<{ success: boolean; user: User }>(`/api/auth/users/${userId}`, body);
-    if (!response.data.success) throw new Error((response.data as any).error);
+    if (!response.data.success) throw new Error((response.data as { error?: string }).error);
     return response.data.user;
   },
 
@@ -248,7 +243,7 @@ export const authApi = {
    */
   async getRoles(): Promise<RoleDto[]> {
     const response = await api.get<{ success: boolean; roles: RoleDto[] }>('/api/auth/roles');
-    if (!response.data.success) throw new Error((response.data as any).error);
+    if (!response.data.success) throw new Error((response.data as { error?: string }).error);
     return response.data.roles;
   },
 
@@ -257,7 +252,7 @@ export const authApi = {
    */
   async createRole(name: string, pageVisibilities: VisiblePages): Promise<RoleDto> {
     const response = await api.post<{ success: boolean; role: RoleDto }>('/api/auth/roles', { name, pageVisibilities });
-    if (!response.data.success) throw new Error((response.data as any).error);
+    if (!response.data.success) throw new Error((response.data as { error?: string }).error);
     return response.data.role;
   },
 
@@ -266,7 +261,7 @@ export const authApi = {
    */
   async updateRole(roleId: string, data: { name?: string; pageVisibilities?: VisiblePages }): Promise<RoleDto> {
     const response = await api.patch<{ success: boolean; role: RoleDto }>(`/api/auth/roles/${roleId}`, data);
-    if (!response.data.success) throw new Error((response.data as any).error);
+    if (!response.data.success) throw new Error((response.data as { error?: string }).error);
     return response.data.role;
   },
 
@@ -275,7 +270,7 @@ export const authApi = {
    */
   async updateMyRole(roleId: string): Promise<User> {
     const response = await api.patch<{ success: boolean; user: User }>('/api/auth/me/role', { roleId });
-    if (!response.data.success) throw new Error((response.data as any).error);
+    if (!response.data.success) throw new Error((response.data as { error?: string }).error);
     return response.data.user;
   }
 };

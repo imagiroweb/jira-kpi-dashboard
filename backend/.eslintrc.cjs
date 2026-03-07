@@ -4,6 +4,7 @@ module.exports = {
   parserOptions: {
     ecmaVersion: 2022,
     sourceType: "module",
+    warnOnUnsupportedTypeScriptVersion: false,
   },
   plugins: ["@typescript-eslint"],
   extends: [
@@ -16,7 +17,7 @@ module.exports = {
   },
   ignorePatterns: ["dist/", "node_modules/"],
   rules: {
-    "@typescript-eslint/no-unused-vars": "warn",
+    "@typescript-eslint/no-unused-vars": ["warn", { "argsIgnorePattern": "^_", "varsIgnorePattern": "^_" }],
     "@typescript-eslint/no-explicit-any": "warn",
     "@typescript-eslint/no-namespace": "warn",
     "no-constant-condition": "warn",
