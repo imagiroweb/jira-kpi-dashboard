@@ -143,11 +143,13 @@ export function LoginPage() {
   const handleMicrosoftLogin = () => {
     if (!microsoftConfig) return;
 
-    // Build Microsoft OAuth2 authorization URL
+    // Toujours utiliser l'origine courante pour rester sur le même port (ex. 3001)
+    // Azure doit avoir cette URI enregistrée (ex. http://localhost:3001/auth/microsoft/callback)
+    const redirectUri = window.location.origin + '/auth/microsoft/callback';
     const params = new URLSearchParams({
       client_id: microsoftConfig.clientId,
       response_type: 'token',
-      redirect_uri: window.location.origin + '/auth/microsoft/callback',
+      redirect_uri: redirectUri,
       scope: 'openid profile email User.Read',
       response_mode: 'fragment',
       state: crypto.randomUUID(),

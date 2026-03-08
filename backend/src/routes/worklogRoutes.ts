@@ -114,22 +114,33 @@ router.get('/user/:accountId', async (req: Request, res: Response) => {
 router.get('/search', async (req: Request, res: Response) => {
   try {
     const { from, to, projectKey, issueKey, accountId, teamName, openSprints } = req.query;
+    const useOpenSprints = openSprints === 'true';
+
+    let fromFinal: string | undefined = from as string;
+    let toFinal: string | undefined = to as string;
+    if (useOpenSprints && (!fromFinal || !toFinal)) {
+      const range = await worklogAppService.getActiveSprintDateRange();
+      if (range) {
+        fromFinal = range.from;
+        toFinal = range.to;
+      }
+    }
     
     const worklogs = await worklogAppService.searchWorklogs({
-      from: from as string,
-      to: to as string,
+      from: fromFinal,
+      to: toFinal,
       projectKey: projectKey as string,
       issueKey: issueKey as string,
       accountId: accountId as string,
       teamName: teamName as string,
-      openSprints: openSprints === 'true'
+      openSprints: useOpenSprints && (!fromFinal || !toFinal) ? false : useOpenSprints
     });
     
     const metrics = worklogAppService.calculateMetrics(worklogs);
     
     res.json({
       success: true,
-      filters: { from, to, projectKey, issueKey, accountId, teamName, openSprints },
+      filters: { from: fromFinal, to: toFinal, projectKey, issueKey, accountId, teamName, openSprints },
       count: worklogs.length,
       worklogs: worklogs.map(w => w.toJSON()),
       metrics
@@ -196,19 +207,30 @@ router.get('/report', async (req: Request, res: Response) => {
     const { from, to, projectKey, groupBy = 'day', activeSprint } = req.query;
     const useActiveSprint = activeSprint === 'true';
     
-    // Si activeSprint est true, on n'a pas besoin des dates
-    if (!useActiveSprint && (!from || !to)) {
+    // Si activeSprint est true, on résout la plage de dates du sprint puis on cherche par worklogDate
+    // (au lieu de "Sprint in openSprints()" qui exclut les logs sur issues en backlog / hors sprint)
+    let fromFinal: string | undefined = from as string;
+    let toFinal: string | undefined = to as string;
+    if (useActiveSprint) {
+      const range = await worklogAppService.getActiveSprintDateRange();
+      if (range) {
+        fromFinal = range.from;
+        toFinal = range.to;
+      }
+    }
+
+    if (!fromFinal || !toFinal) {
       return res.status(400).json({
         success: false,
-        message: 'Missing required parameters: from and to dates (YYYY-MM-DD) or activeSprint=true'
+        message: 'Missing required parameters: from and to dates (YYYY-MM-DD) or activeSprint=true (avec un sprint actif ou dernier fermé)'
       });
     }
     
     const worklogs = await worklogAppService.searchWorklogs({
-      from: useActiveSprint ? undefined : from as string,
-      to: useActiveSprint ? undefined : to as string,
+      from: fromFinal,
+      to: toFinal,
       projectKey: projectKey as string,
-      openSprints: useActiveSprint
+      openSprints: false
     });
     
     const metrics = worklogAppService.calculateMetrics(worklogs);
@@ -230,7 +252,7 @@ router.get('/report', async (req: Request, res: Response) => {
     
     res.json({
       success: true,
-      period: useActiveSprint ? { activeSprint: true } : { from, to },
+      period: useActiveSprint ? { activeSprint: true, from: fromFinal, to: toFinal } : { from: fromFinal, to: toFinal },
       groupBy,
       activeSprint: useActiveSprint,
       summary: {

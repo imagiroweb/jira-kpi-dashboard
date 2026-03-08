@@ -9,7 +9,7 @@ build/
 .next/
 out/
 
-# Environment files
+# Environment files (never commit secrets)
 .env
 env.prod.template
 .env.local
@@ -17,6 +17,8 @@ env.prod.template
 .env.test.local
 .env.production.local
 *.env
+.env copie
+.env copie*
 
 # Logs
 logs/

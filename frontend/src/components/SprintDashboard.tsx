@@ -224,12 +224,12 @@ export function SprintDashboard() {
     loadAllBoards(true);
   }, [boardsLoaded, configuredBoards.length, loadAllBoards]);
 
-  // Reload when date range changes (with loading indicator)
+  // Reload when date range or sprint/custom mode changes (with loading indicator)
   useEffect(() => {
     if (configuredBoards.length > 0) {
       loadAllBoards(true, false);
     }
-  }, [configuredBoards.length, loadAllBoards, dateRange.from, dateRange.to]);
+  }, [configuredBoards.length, loadAllBoards, dateRange.from, dateRange.to, useActiveSprint]);
 
   // Silent refresh when kpiRefreshTrigger changes (no loading indicator)
   useEffect(() => {
