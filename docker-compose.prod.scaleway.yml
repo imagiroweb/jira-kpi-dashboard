@@ -10,6 +10,7 @@ services:
   backend:
     ports: !reset []
     environment:
+      - HOST=0.0.0.0
       - CORS_ORIGIN=https://jira-kpi.imagiro.fr
       - JIRA_SUPPORT_PROJECT_KEY=${JIRA_SUPPORT_PROJECT_KEY}
       - JIRA_REL_PROJECT_KEY=${JIRA_REL_PROJECT_KEY}
@@ -26,7 +27,7 @@ services:
       - BREVO_API_KEY=${BREVO_API_KEY}
       - MONDAY_API_KEY=${MONDAY_API_KEY}
       - SYNC_ENABLED=${SYNC_ENABLED:-true}
-      - SYNC_INTERVAL_SECONDS=${SYNC_INTERVAL_SECONDS:-10}
+      - SYNC_INTERVAL_SECONDS=${SYNC_INTERVAL_SECONDS:-300}
       - MICROSOFT_REDIRECT_URI=https://jira-kpi.imagiro.fr/auth/microsoft/callback
     depends_on:
       mongodb:
