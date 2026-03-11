@@ -55,6 +55,11 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost}
+      - JWT_SECRET=${JWT_SECRET:-}
+      - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
+      - MICROSOFT_CLIENT_ID=${MICROSOFT_CLIENT_ID:-}
+      - MICROSOFT_TENANT_ID=${MICROSOFT_TENANT_ID:-common}
+      - MICROSOFT_REDIRECT_URI=${MICROSOFT_REDIRECT_URI:-}
     volumes:
       - backend_uploads:/app/uploads
       - backend_logs:/app/logs
