@@ -1,0 +1,65 @@
+# Override pour déploiement Scaleway Dedibox avec Traefik
+# Usage: docker compose -f docker-compose.prod.yml -f docker-compose.prod.ghcr.yml -f docker-compose.prod.scaleway.yml up -d
+#
+# Prérequis sur le serveur :
+#   - Traefik tournant sur le réseau externe "traefik-public"
+#   - DNS jira-kpi.imagiro.fr → IP du serveur
+#   - .env avec toutes les variables de prod
+
+services:
+  backend:
+    ports: !reset []
+    environment:
+      - CORS_ORIGIN=https://jira-kpi.imagiro.fr
+      - JIRA_SUPPORT_PROJECT_KEY=${JIRA_SUPPORT_PROJECT_KEY}
+      - JIRA_REL_PROJECT_KEY=${JIRA_REL_PROJECT_KEY}
+      - JIRA_PONDERATION_FIELD=${JIRA_PONDERATION_FIELD}
+      - JIRA_STORY_POINTS_FIELD=${JIRA_STORY_POINTS_FIELD}
+      - JIRA_TEAM_FIELD=${JIRA_TEAM_FIELD}
+      - JIRA_STORY_ISSUE_TYPE=${JIRA_STORY_ISSUE_TYPE}
+      - JIRA_RESOLVED_STATUS=${JIRA_RESOLVED_STATUS}
+      - JIRA_RESOLUTION_NAME=${JIRA_RESOLUTION_NAME}
+      - JIRA_RESOLVED_BY_DAY_TYPES=${JIRA_RESOLVED_BY_DAY_TYPES}
+      - JIRA_RESOLVED_BY_DAY_PROJECT=${JIRA_RESOLVED_BY_DAY_PROJECT}
+      - WORKLOGPRO_API_KEY=${WORKLOGPRO_API_KEY}
+      - WORKLOG_URL=${WORKLOG_URL}
+      - BREVO_API_KEY=${BREVO_API_KEY}
+      - MONDAY_API_KEY=${MONDAY_API_KEY}
+      - SYNC_ENABLED=${SYNC_ENABLED:-true}
+      - SYNC_INTERVAL_SECONDS=${SYNC_INTERVAL_SECONDS:-10}
+      - MICROSOFT_REDIRECT_URI=https://jira-kpi.imagiro.fr/auth/microsoft/callback
+    depends_on:
+      mongodb:
+        condition: service_started
+      redis:
+        condition: service_started
+    healthcheck:
+      disable: true
+    networks:
+      - jira-kpi-network
+
+  frontend:
+    ports: !reset []
+    depends_on:
+      - backend
+    healthcheck:
+      disable: true
+    networks:
+      - jira-kpi-network
+      - traefik-public
+    labels:
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.routers.jira-kpi-http.rule=Host(`jira-kpi.imagiro.fr`)"
+      - "traefik.http.routers.jira-kpi-http.entrypoints=web"
+      - "traefik.http.routers.jira-kpi-http.middlewares=jira-kpi-https-redirect"
+      - "traefik.http.middlewares.jira-kpi-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.routers.jira-kpi.rule=Host(`jira-kpi.imagiro.fr`)"
+      - "traefik.http.routers.jira-kpi.entrypoints=websecure"
+      - "traefik.http.routers.jira-kpi.tls=true"
+      - "traefik.http.routers.jira-kpi.tls.certresolver=letsencrypt"
+      - "traefik.http.services.jira-kpi.loadbalancer.server.port=80"
+
+networks:
+  traefik-public:
+    external: true
