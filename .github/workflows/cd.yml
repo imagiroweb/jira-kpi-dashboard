@@ -79,6 +79,18 @@ jobs:
     needs: build-and-push
     if: github.ref == 'refs/heads/main' && vars.DEPLOY_METHOD == 'ssh'
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Copy docker-compose files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "docker-compose.prod.yml,docker-compose.prod.ghcr.yml,docker-compose.prod.scaleway.yml"
+          target: ${{ vars.SSH_DEPLOY_PATH || '/opt/jira-kpi-dashboard' }}
+
       - name: Deploy on server
         uses: appleboy/ssh-action@v1.0.3
         with:
