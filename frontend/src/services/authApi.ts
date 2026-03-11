@@ -1,7 +1,8 @@
 import axios from 'axios';
 
-// Use relative URL in dev so Vite proxies /api to backend (avoids CORS on SSO callback)
-const API_URL = import.meta.env.VITE_API_URL ?? '';
+// Toujours utiliser des URLs relatives pour que le proxy nginx/Vite gère le routage
+// VITE_API_URL ne doit pas être /api sinon on obtiendrait /api/api/...
+const API_URL = '';
 
 const api = axios.create({
   baseURL: API_URL,
