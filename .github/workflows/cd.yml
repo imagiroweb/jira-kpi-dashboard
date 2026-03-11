@@ -101,6 +101,10 @@ jobs:
             set -e
             cd ${{ vars.SSH_DEPLOY_PATH || '/opt/jira-kpi-dashboard' }}
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            # Supprimer les containers existants s'ils appartiennent à un autre projet (ex: Portainer)
+            for name in jira-kpi-frontend jira-kpi-backend jira-kpi-mongodb jira-kpi-redis; do
+              docker rm -f $name 2>/dev/null || true
+            done
             docker compose -f docker-compose.prod.yml -f docker-compose.prod.ghcr.yml -f docker-compose.prod.scaleway.yml pull
             docker compose -f docker-compose.prod.yml -f docker-compose.prod.ghcr.yml -f docker-compose.prod.scaleway.yml up -d --remove-orphans
 
