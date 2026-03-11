@@ -179,6 +179,14 @@ volumes:
 - `CORS_ORIGIN` (ex. `https://ton-domaine.com`)
 - Optionnel : `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
 
+**SSO Microsoft Entra ID** (pour afficher le bouton « Se connecter avec Microsoft ») — à définir sur le **backend** (variables d’environnement du service `backend` ou variables de stack passées au backend) :
+
+- `MICROSOFT_CLIENT_ID` : Client ID de l’App Registration Azure (obligatoire pour que le SSO soit proposé)
+- `MICROSOFT_TENANT_ID` : Tenant ID Azure, ou `common` (optionnel, défaut : `common`)
+- `MICROSOFT_REDIRECT_URI` : URI de redirection exacte, ex. `https://jira-kpi.imagiro.fr/auth/microsoft/callback` (doit être identique à celle enregistrée dans Azure, type **Single-page application**)
+
+Dans Azure Entra : **App registration** → **Authentication** → **Add a platform** → **Single-page application** → Redirect URI = `https://jira-kpi.imagiro.fr/auth/microsoft/callback`. Permissions API : `openid`, `profile`, `email`, `User.Read`.
+
 5. Si les images GHCR sont **privées** : dans Portainer, **Registries** → ajouter un registry **Custom** :
    - **Name** : `ghcr.io`
    - **URL** : `ghcr.io`
