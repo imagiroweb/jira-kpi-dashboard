@@ -1533,8 +1533,19 @@ export class WorklogApplicationService {
   /**
    * Get progress for Epics/Legends filtered by board
    * @param typeFilter 'epic' | 'legend' | 'all' - filter by issue type
+   * @param statusFilter 'all' | 'done' | 'new' | 'indeterminate' - filter by status (Terminées, À faire, En cours)
+   * @param page 1-based page (si fourni avec pageSize, ne charge qu'une page)
+   * @param pageSize nombre d'epics par page (défaut 20)
+   * @param summaryPrefix filtre par 3 premières lettres du résumé (ex. FAC pour "FAC064 - ...")
    */
-  async getEpicProgressByBoard(boardId: number, typeFilter: string = 'all'): Promise<EpicProgressResult> {
+  async getEpicProgressByBoard(
+    boardId: number,
+    typeFilter: string = 'all',
+    statusFilter: string = 'all',
+    page: number = 1,
+    pageSize: number = 20,
+    summaryPrefix?: string
+  ): Promise<EpicProgressResult> {
     const jiraClient = container().jiraClient;
     const board = await jiraClient.getBoard(boardId);
     const projectKey = board?.location?.projectKey || null;
@@ -1546,6 +1557,9 @@ export class WorklogApplicationService {
         boardName: board?.name || `Board ${boardId}`,
         projectKey: null,
         epicCount: 0,
+        total: 0,
+        page: 1,
+        pageSize: 20,
         epics: []
       };
     }
@@ -1560,23 +1574,61 @@ export class WorklogApplicationService {
       issueTypes = '"Epic","Épic","Legend","Légende","Feature","Initiative"';
     }
 
-    // Exclude epics with status category "new" (À faire) - only show "in progress" or "done"
-    const epicJql = `project = "${projectKey}" AND issuetype in (${issueTypes}) AND statusCategory in ("In Progress", "Done") ORDER BY key ASC`;
-    const epicFields = 'key,summary,issuetype,status';
+    // Filtre par statut : Terminées (Done), À faire (To Do), En cours (In Progress)
+    let statusClause: string;
+    if (statusFilter === 'done') {
+      statusClause = 'statusCategory = "Done"';
+    } else if (statusFilter === 'new') {
+      statusClause = 'statusCategory = "To Do"';
+    } else if (statusFilter === 'indeterminate') {
+      statusClause = 'statusCategory = "In Progress"';
+    } else {
+      statusClause = 'statusCategory in ("To Do", "In Progress", "Done")';
+    }
 
-    logger.info(`Fetching Epics/Legends with JQL: ${epicJql}`);
+    // Filtre par préfixe du résumé (3 premières lettres, ex. FAC064 - Saisie... → FAC). JQL: summary ~ "FAC*"
+    const allowedPrefixes = ['INT', 'FAC', 'CLI', 'OPT', 'NIM'];
+    const summaryPrefixClause = (prefix: string | undefined) => {
+      const p = (prefix || '').toUpperCase().trim();
+      if (allowedPrefixes.includes(p)) {
+        return ` AND summary ~ "${p}*"`;
+      }
+      return '';
+    };
 
-    const epicResponse = await jiraClient.searchIssuesWithPagination(epicJql, epicFields);
-    const epics = epicResponse.issues;
-    
-    // Log all epic keys with their types for debugging
-    logger.info(`Found ${epics.length} epics: ${epics.map(e => {
-      const fields = e.fields as Record<string, unknown>;
-      const issueType = (fields?.issuetype as { name?: string })?.name || 'Unknown';
-      const statusCat = (fields?.status as { statusCategory?: { key?: string } })?.statusCategory?.key || 'unknown';
-      return `${e.key}(${issueType}, ${statusCat})`;
-    }).join(', ')}`);
-    
+    const epicJql = `project = "${projectKey}" AND issuetype in (${issueTypes}) AND ${statusClause}${summaryPrefixClause(summaryPrefix)} ORDER BY key ASC`;
+    const macroChiffrageField = process.env.JIRA_MACRO_CHIFFRAGE_FIELD || 'customfield_10992';
+    const teamField = process.env.JIRA_TEAM_FIELD || 'customfield_10001';
+    const epicFields = `key,summary,issuetype,status,${macroChiffrageField},${teamField}`;
+
+    const safePage = Math.max(1, Math.floor(page));
+    const safePageSize = Math.min(100, Math.max(1, Math.floor(pageSize)));
+    const startAt = (safePage - 1) * safePageSize;
+
+    logger.info(`Fetching Epics/Legends with JQL (page=${safePage}, startAt=${startAt}, maxResults=${safePageSize}): ${epicJql}`);
+
+    const [epicResponse, approximateTotal] = await Promise.all([
+      jiraClient.searchIssuesPage(epicJql, epicFields, safePageSize, startAt),
+      jiraClient.searchApproximateCount(epicJql)
+    ]);
+    let epics = epicResponse.issues;
+
+    // Limiter aux 3 premières lettres du résumé uniquement (ex. "OPT002 - option client" ne doit pas matcher filtre CLI)
+    const prefixUpper = (summaryPrefix || '').toUpperCase().trim();
+    if (allowedPrefixes.includes(prefixUpper)) {
+      epics = epics.filter((issue) => {
+        const summary = (issue.fields?.summary as string) || '';
+        const first3 = summary.trim().toUpperCase().substring(0, 3);
+        return first3 === prefixUpper;
+      });
+      logger.info(`Filtered to ${epics.length} epics with summary starting with "${prefixUpper}" (strict first 3 letters)`);
+    }
+
+    const total = approximateTotal > 0
+      ? approximateTotal
+      : Math.max(startAt + epics.length, epics.length);
+
+    logger.info(`Found ${epics.length} epics (total=${total}, startAt=${startAt})`);
 
     const results: EpicProgressItem[] = [];
     const batchSize = 3;
@@ -1594,8 +1646,21 @@ export class WorklogApplicationService {
       boardName: board?.name || `Board ${boardId}`,
       projectKey,
       epicCount: results.length,
+      total,
+      page: safePage,
+      pageSize: safePageSize,
       epics: results
     };
+  }
+
+  private getTeamFromFields(fields: Record<string, unknown>): string | null {
+    const teamField = process.env.JIRA_TEAM_FIELD || 'customfield_10001';
+    const raw = fields?.[teamField];
+    if (raw && typeof raw === 'object' && raw !== null && 'name' in raw) {
+      const name = (raw as { name?: string }).name;
+      return typeof name === 'string' && name.trim() ? name.trim() : null;
+    }
+    return null;
   }
 
   private async fetchEpicProgress(epic: { key: string; fields: Record<string, unknown> }): Promise<EpicProgressItem> {
@@ -1604,35 +1669,55 @@ export class WorklogApplicationService {
     const issueTypeName = issueType?.name || 'Epic';
     const isLegend = issueTypeName.toLowerCase().includes('legend') || issueTypeName.toLowerCase().includes('légende');
 
+    const epicTeam = this.getTeamFromFields(epicFields || {});
+
     let originalEstimateSeconds = 0;
     let timeSpentSeconds = 0;
     let childCount = 0;
     let totalStoryPoints = 0;
+    let descendantTeams: string[] = [];
 
     if (isLegend) {
       // Legend: children are Epics, need to aggregate US from each Epic
-      const { estimate, spent, epicCount, storyPoints } = await this.fetchLegendProgress(epic.key);
-      originalEstimateSeconds = estimate;
-      timeSpentSeconds = spent;
-      childCount = epicCount;
-      totalStoryPoints = storyPoints;
+      const result = await this.fetchLegendProgress(epic.key);
+      originalEstimateSeconds = result.estimate;
+      timeSpentSeconds = result.spent;
+      childCount = result.epicCount;
+      totalStoryPoints = result.storyPoints;
+      descendantTeams = result.teams;
     } else {
       // Epic: children are US, aggregate directly
-      const { estimate, spent, usCount, storyPoints } = await this.fetchEpicDirectProgress(epic.key);
-      originalEstimateSeconds = estimate;
-      timeSpentSeconds = spent;
-      childCount = usCount;
-      totalStoryPoints = storyPoints;
+      const result = await this.fetchEpicDirectProgress(epic.key);
+      originalEstimateSeconds = result.estimate;
+      timeSpentSeconds = result.spent;
+      childCount = result.usCount;
+      totalStoryPoints = result.storyPoints;
+      descendantTeams = result.teams;
     }
+
+    const teams = [...new Set([epicTeam, ...descendantTeams].filter(Boolean))] as string[];
 
     const status = epicFields?.status as { name?: string; statusCategory?: { key?: string } } | undefined;
     const summary = (epicFields?.summary as string) || '';
 
-    const progressPercent = originalEstimateSeconds > 0
-      ? Math.min(100, Math.round((timeSpentSeconds / originalEstimateSeconds) * 100))
-      : 0;
+    // Macro chiffrage (custom field 10992) : valeur en jours homme → conversion en secondes (7,5 h/jour par défaut)
+    const macroChiffrageField = process.env.JIRA_MACRO_CHIFFRAGE_FIELD || 'customfield_10992';
+    const hoursPerManDay = Math.max(0.1, parseFloat(process.env.JIRA_MACRO_CHIFFRAGE_HOURS_PER_DAY || '7.5') || 7.5);
+    const rawMacro = epicFields?.[macroChiffrageField];
+    const macroChiffrageSeconds = typeof rawMacro === 'number' && rawMacro >= 0
+      ? Math.round(rawMacro * hoursPerManDay * 3600)
+      : null;
 
-    logger.info(`[${issueTypeName} ${epic.key}] ${childCount} ${isLegend ? 'épics' : 'US'}, estimate=${(originalEstimateSeconds/3600).toFixed(1)}h, spent=${(timeSpentSeconds/3600).toFixed(1)}h, storyPoints=${totalStoryPoints}, progress=${progressPercent}%`);
+    // Progression : privilégier temps passé / macro chiffrage si présent, sinon temps passé / estimation
+    const referenceSeconds = (macroChiffrageSeconds != null && macroChiffrageSeconds > 0)
+      ? macroChiffrageSeconds
+      : originalEstimateSeconds;
+    const progressPercent = referenceSeconds > 0
+      ? Math.round((timeSpentSeconds / referenceSeconds) * 100)
+      : 0;
+    const isOverrun = referenceSeconds > 0 && timeSpentSeconds > referenceSeconds;
+
+    logger.info(`[${issueTypeName} ${epic.key}] ${childCount} ${isLegend ? 'épics' : 'US'}, estimate=${(originalEstimateSeconds/3600).toFixed(1)}h, spent=${(timeSpentSeconds/3600).toFixed(1)}h, storyPoints=${totalStoryPoints}, progress=${progressPercent}% (ref=${macroChiffrageSeconds != null ? 'macro' : 'estimate'})${macroChiffrageSeconds != null ? `, macroChiffrage=${(macroChiffrageSeconds/3600).toFixed(1)}h` : ''}`);
 
     return {
       epicKey: epic.key,
@@ -1643,17 +1728,19 @@ export class WorklogApplicationService {
       childIssueCount: childCount,
       originalEstimateSeconds,
       timeSpentSeconds,
+      macroChiffrageSeconds,
       totalStoryPoints,
       progressPercent,
-      isOverrun: originalEstimateSeconds > 0 && timeSpentSeconds > originalEstimateSeconds
+      isOverrun,
+      teams
     };
   }
 
   /**
    * Fetch progress for a Legend (children are Epics)
-   * Aggregates estimates from all Epics and their US/subtasks
+   * Aggregates estimates from all Epics and their US/subtasks; collects teams from all descendants
    */
-  private async fetchLegendProgress(legendKey: string): Promise<{ estimate: number; spent: number; epicCount: number; storyPoints: number }> {
+  private async fetchLegendProgress(legendKey: string): Promise<{ estimate: number; spent: number; epicCount: number; storyPoints: number; teams: string[] }> {
     const jiraClient = container().jiraClient;
     
     // Find all Epics that are children of this Legend
@@ -1666,20 +1753,23 @@ export class WorklogApplicationService {
     let totalEstimate = 0;
     let totalSpent = 0;
     let totalStoryPoints = 0;
+    const allTeams = new Set<string>();
 
-    // For each child Epic, get their US and aggregate
+    // For each child Epic, get their US and aggregate (including teams)
     for (const childEpic of childEpics) {
-      const { estimate, spent, storyPoints } = await this.fetchEpicDirectProgress(childEpic.key);
-      totalEstimate += estimate;
-      totalSpent += spent;
-      totalStoryPoints += storyPoints;
+      const result = await this.fetchEpicDirectProgress(childEpic.key);
+      totalEstimate += result.estimate;
+      totalSpent += result.spent;
+      totalStoryPoints += result.storyPoints;
+      result.teams.forEach((t) => allTeams.add(t));
     }
 
     return {
       estimate: totalEstimate,
       spent: totalSpent,
       epicCount: childEpics.length,
-      storyPoints: totalStoryPoints
+      storyPoints: totalStoryPoints,
+      teams: [...allTeams]
     };
   }
 
@@ -1689,8 +1779,9 @@ export class WorklogApplicationService {
    */
   /**
    * Search Epics/Legends by title (for autocomplete)
+   * @param statusFilter 'all' | 'done' | 'new' | 'indeterminate' - same as getEpicProgressByBoard
    */
-  async searchEpicsByTitle(boardId: number, query: string, typeFilter: string = 'all'): Promise<EpicSearchResult> {
+  async searchEpicsByTitle(boardId: number, query: string, typeFilter: string = 'all', statusFilter: string = 'all'): Promise<EpicSearchResult> {
     const jiraClient = container().jiraClient;
     const board = await jiraClient.getBoard(boardId);
     const projectKey = board?.location?.projectKey || null;
@@ -1713,8 +1804,19 @@ export class WorklogApplicationService {
       issueTypes = '"Epic","Épic","Legend","Légende","Feature","Initiative"';
     }
 
+    let statusClause: string;
+    if (statusFilter === 'done') {
+      statusClause = 'statusCategory = "Done"';
+    } else if (statusFilter === 'new') {
+      statusClause = 'statusCategory = "To Do"';
+    } else if (statusFilter === 'indeterminate') {
+      statusClause = 'statusCategory = "In Progress"';
+    } else {
+      statusClause = 'statusCategory in ("To Do", "In Progress", "Done")';
+    }
+
     // Build JQL with text search
-    let jql = `project = "${projectKey}" AND issuetype in (${issueTypes})`;
+    let jql = `project = "${projectKey}" AND issuetype in (${issueTypes}) AND ${statusClause}`;
     if (query && query.trim().length > 0) {
       // Search in summary using text search
       jql += ` AND (summary ~ "${query}*" OR key = "${query.toUpperCase()}")`;
@@ -1752,9 +1854,10 @@ export class WorklogApplicationService {
   async getEpicDetails(epicKey: string): Promise<EpicDetailsResult> {
     const jiraClient = container().jiraClient;
     
-    // Fetch the epic itself
+    // Fetch the epic itself (incl. macro chiffrage pour comparaison avec temps passé)
+    const macroChiffrageField = process.env.JIRA_MACRO_CHIFFRAGE_FIELD || 'customfield_10992';
     const epicJql = `key = "${epicKey}"`;
-    const epicResponse = await jiraClient.searchIssuesWithPagination(epicJql, 'key,summary,issuetype,status,timeoriginalestimate,timespent,aggregatetimeoriginalestimate,aggregatetimespent');
+    const epicResponse = await jiraClient.searchIssuesWithPagination(epicJql, `key,summary,issuetype,status,timeoriginalestimate,timespent,aggregatetimeoriginalestimate,aggregatetimespent,${macroChiffrageField}`);
     
     if (epicResponse.issues.length === 0) {
       throw new Error(`Epic ${epicKey} not found`);
@@ -1802,9 +1905,21 @@ export class WorklogApplicationService {
     totalEstimate = totals.estimate;
     totalSpent = totals.spent;
 
-    const progressPercent = totalEstimate > 0
-      ? Math.min(100, Math.round((totalSpent / totalEstimate) * 100))
+    // Macro chiffrage : jours homme → secondes (7,5 h/jour par défaut)
+    const hoursPerManDay = Math.max(0.1, parseFloat(process.env.JIRA_MACRO_CHIFFRAGE_HOURS_PER_DAY || '7.5') || 7.5);
+    const rawMacro = epicFields?.[macroChiffrageField];
+    const macroChiffrageSeconds = typeof rawMacro === 'number' && rawMacro >= 0
+      ? Math.round(rawMacro * hoursPerManDay * 3600)
+      : null;
+
+    // Progression : privilégier temps passé / macro chiffrage si présent, sinon temps passé / estimation
+    const referenceSeconds = (macroChiffrageSeconds != null && macroChiffrageSeconds > 0)
+      ? macroChiffrageSeconds
+      : totalEstimate;
+    const progressPercent = referenceSeconds > 0
+      ? Math.round((totalSpent / referenceSeconds) * 100)
       : 0;
+    const isOverrun = referenceSeconds > 0 && totalSpent > referenceSeconds;
 
     return {
       epicKey: epic.key,
@@ -1814,9 +1929,10 @@ export class WorklogApplicationService {
       statusCategoryKey: status?.statusCategory?.key || null,
       originalEstimateSeconds: totalEstimate,
       timeSpentSeconds: totalSpent,
+      macroChiffrageSeconds,
       totalStoryPoints: totals.storyPoints,
       progressPercent,
-      isOverrun: totalEstimate > 0 && totalSpent > totalEstimate,
+      isOverrun,
       children
     };
   }
@@ -1987,11 +2103,12 @@ export class WorklogApplicationService {
     return children;
   }
 
-  private async fetchEpicDirectProgress(epicKey: string): Promise<{ estimate: number; spent: number; usCount: number; storyPoints: number }> {
+  private async fetchEpicDirectProgress(epicKey: string): Promise<{ estimate: number; spent: number; usCount: number; storyPoints: number; teams: string[] }> {
     const jiraClient = container().jiraClient;
     const storyPointsField = process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10127';
+    const teamField = process.env.JIRA_TEAM_FIELD || 'customfield_10001';
     
-    const childFields = `key,summary,issuetype,status,timeoriginalestimate,aggregatetimeoriginalestimate,timespent,aggregatetimespent,subtasks,${storyPointsField}`;
+    const childFields = `key,summary,issuetype,status,timeoriginalestimate,aggregatetimeoriginalestimate,timespent,aggregatetimespent,subtasks,${storyPointsField},${teamField}`;
     const childJql = `("Epic Link" = "${epicKey}" OR parent = "${epicKey}")`;
 
     const childResponse = await jiraClient.searchIssuesWithPagination(childJql, childFields);
@@ -2000,12 +2117,15 @@ export class WorklogApplicationService {
     let originalEstimateSeconds = 0;
     let timeSpentSeconds = 0;
     let totalStoryPoints = 0;
+    const teamsSet = new Set<string>();
 
     // Collect subtask keys from children
     const subtaskKeys: string[] = [];
     
     childIssues.forEach(issue => {
       const fields = issue.fields as Record<string, unknown>;
+      const team = this.getTeamFromFields(fields);
+      if (team) teamsSet.add(team);
       
       // Collect subtask keys
       const subtasks = fields.subtasks as Array<{ key: string }> | undefined;
@@ -2027,7 +2147,7 @@ export class WorklogApplicationService {
       totalStoryPoints += issueStoryPoints;
     });
 
-    // Fetch subtasks to get their estimates and story points
+    // Fetch subtasks to get their estimates, story points and team
     if (subtaskKeys.length > 0) {
       const batchSize = 50;
       let subtaskEstimateTotal = 0;
@@ -2037,10 +2157,12 @@ export class WorklogApplicationService {
       for (let i = 0; i < subtaskKeys.length; i += batchSize) {
         const batch = subtaskKeys.slice(i, i + batchSize);
         const subtaskJql = `key in (${batch.map(k => `"${k}"`).join(',')})`;
-        const subtaskResponse = await jiraClient.searchIssuesWithPagination(subtaskJql, `key,timeoriginalestimate,timespent,${storyPointsField}`);
+        const subtaskResponse = await jiraClient.searchIssuesWithPagination(subtaskJql, `key,timeoriginalestimate,timespent,${storyPointsField},${teamField}`);
         
         subtaskResponse.issues.forEach(st => {
           const stFields = st.fields as Record<string, unknown>;
+          const stTeam = this.getTeamFromFields(stFields);
+          if (stTeam) teamsSet.add(stTeam);
           const stEstimate = (stFields.timeoriginalestimate as number) || 0;
           const stSpent = (stFields.timespent as number) || 0;
           const stStoryPoints = (stFields[storyPointsField] as number) || 0;
@@ -2080,7 +2202,8 @@ export class WorklogApplicationService {
       estimate: originalEstimateSeconds,
       spent: timeSpentSeconds,
       usCount: childIssues.length,
-      storyPoints: totalStoryPoints
+      storyPoints: totalStoryPoints,
+      teams: [...teamsSet]
     };
   }
 }
@@ -2264,9 +2387,13 @@ export interface EpicProgressItem {
   childIssueCount: number;
   originalEstimateSeconds: number;
   timeSpentSeconds: number;
+  /** Macro chiffrage (customfield_10992), en secondes, pour comparaison avec le temps passé */
+  macroChiffrageSeconds: number | null;
   totalStoryPoints: number;
   progressPercent: number;
   isOverrun: boolean;
+  /** Teams associées (epic/legend + tous les descendants) */
+  teams: string[];
 }
 
 export interface EpicProgressResult {
@@ -2274,6 +2401,9 @@ export interface EpicProgressResult {
   boardName: string;
   projectKey: string | null;
   epicCount: number;
+  total: number;
+  page: number;
+  pageSize: number;
   epics: EpicProgressItem[];
 }
 
@@ -2311,6 +2441,8 @@ export interface EpicDetailsResult {
   statusCategoryKey: string | null;
   originalEstimateSeconds: number;
   timeSpentSeconds: number;
+  /** Macro chiffrage (customfield_10992), en secondes */
+  macroChiffrageSeconds: number | null;
   totalStoryPoints: number;
   progressPercent: number;
   isOverrun: boolean;
