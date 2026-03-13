@@ -1,43 +1,26 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, Flag, Loader2, Search, X } from 'lucide-react';
-import { epicApi, EpicProgressItem, EpicTypeFilter, EpicSearchItem, EpicChildIssue, EpicDetailsResponse, jiraApi, JiraBoard, TimeTrackingConfig } from '../services/api';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChevronDown, ChevronLeft, ChevronRight, Flag, Loader2, Search, Users, X } from 'lucide-react';
+import { epicApi, EpicProgressItem, EpicTypeFilter, EpicStatusFilter, EpicSearchItem, EpicChildIssue, EpicDetailsResponse, jiraApi } from '../services/api';
 
-// Default config (will be loaded from Jira)
-const DEFAULT_TIME_CONFIG: TimeTrackingConfig = {
-  workingHoursPerDay: 8,
-  workingDaysPerWeek: 5
-};
-
-function formatHoursFromSeconds(seconds: number, hoursPerDay: number = 8): string {
+/** Affiche toujours en heures (et minutes si < 1h), sans jours */
+function formatHoursOnly(seconds: number): string {
   if (!seconds || seconds <= 0) return '0h';
   const hours = seconds / 3600;
-  
-  // Si moins de 1h, afficher en minutes
   if (hours < 1) return `${Math.round(hours * 60)}min`;
-  
-  // Calculer jours et heures restantes
-  const days = Math.floor(hours / hoursPerDay);
-  const remainingHours = hours % hoursPerDay;
-  
-  // Si c'est proche d'un nombre entier de jours (tolérance de 0.3h)
-  if (days > 0) {
-    if (remainingHours < 0.3) {
-      return `${days}j`;
-    } else if (remainingHours > hoursPerDay - 0.3) {
-      return `${days + 1}j`;
-    } else {
-      // Afficher jours + heures
-      return `${days}j ${remainingHours.toFixed(1)}h`;
-    }
-  }
-  
-  // Moins d'un jour : afficher en heures
-  // Si proche d'une journée complète
-  if (hours >= hoursPerDay - 0.3) {
-    return '1j';
-  }
-  
   return `${hours.toFixed(1)}h`;
+}
+
+/** Préfixes de tickets (ex. INT-123, FAC-456) pour le filtre */
+export const TICKET_PREFIXES = ['INT', 'FAC', 'CLI', 'OPT', 'NIM'] as const;
+export type TicketPrefixFilter = (typeof TICKET_PREFIXES)[number] | 'all';
+
+function getKeyPrefix(key: string): string {
+  return key.split('-')[0]?.toUpperCase() || '';
+}
+
+function filterChildrenByPrefix(children: EpicChildIssue[], prefix: TicketPrefixFilter): EpicChildIssue[] {
+  if (!prefix || prefix === 'all') return children;
+  return children.filter((c) => getKeyPrefix(c.issueKey) === prefix);
 }
 
 function getStatusLabel(statusCategoryKey: string | null): string {
@@ -84,7 +67,7 @@ function calculateSubtotals(items: EpicChildIssue[]): { estimate: number; spent:
 }
 
 // Composant pour afficher un enfant et ses sous-enfants
-function ChildIssueRow({ child, level = 0, hoursPerDay }: { child: EpicChildIssue; level?: number; hoursPerDay: number }) {
+function ChildIssueRow({ child, level = 0, prefixFilter = 'all' }: { child: EpicChildIssue; level?: number; prefixFilter?: TicketPrefixFilter }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const hasChildren = child.children && child.children.length > 0;
   const indent = level * 24;
@@ -97,8 +80,9 @@ function ChildIssueRow({ child, level = 0, hoursPerDay }: { child: EpicChildIssu
   const displaySpent = child.timeSpentSeconds + (subtotals?.spent || 0);
   const displayStoryPoints = (child.storyPoints || 0) + (subtotals?.storyPoints || 0);
   
+  // Au-delà de 100 % = dépassement (ex. 150 %)
   const progressPercent = displayEstimate > 0 
-    ? Math.min(100, Math.round((displaySpent / displayEstimate) * 100))
+    ? Math.round((displaySpent / displayEstimate) * 100)
     : 0;
   const isOverrun = displayEstimate > 0 && displaySpent > displayEstimate;
 
@@ -151,13 +135,13 @@ function ChildIssueRow({ child, level = 0, hoursPerDay }: { child: EpicChildIssu
         </td>
         <td className="px-3 py-2.5 text-right">
           <span className="text-sm text-surface-300">
-            {formatHoursFromSeconds(displayEstimate, hoursPerDay)}
+            {formatHoursOnly(displayEstimate)}
             {hasChildren && displayEstimate > 0 && <span className="text-xs text-surface-500 ml-0.5">Σ</span>}
           </span>
         </td>
         <td className="px-3 py-2.5 text-right">
           <span className={`text-sm ${isOverrun ? 'text-danger-400' : 'text-surface-300'}`}>
-            {formatHoursFromSeconds(displaySpent, hoursPerDay)}
+            {formatHoursOnly(displaySpent)}
             {hasChildren && displaySpent > 0 && <span className="text-xs text-surface-500 ml-0.5">Σ</span>}
           </span>
         </td>
@@ -173,8 +157,8 @@ function ChildIssueRow({ child, level = 0, hoursPerDay }: { child: EpicChildIssu
           </div>
         </td>
       </tr>
-      {isExpanded && hasChildren && child.children!.map(subChild => (
-        <ChildIssueRow key={subChild.issueKey} child={subChild} level={level + 1} hoursPerDay={hoursPerDay} />
+      {isExpanded && hasChildren && filterChildrenByPrefix(child.children!, prefixFilter).map(subChild => (
+        <ChildIssueRow key={subChild.issueKey} child={subChild} level={level + 1} prefixFilter={prefixFilter} />
       ))}
     </>
   );
@@ -184,11 +168,11 @@ function ChildIssueRow({ child, level = 0, hoursPerDay }: { child: EpicChildIssu
 function EpicDetailModal({ 
   epicKey, 
   onClose,
-  hoursPerDay
+  prefixFilter = 'all',
 }: { 
   epicKey: string; 
   onClose: () => void;
-  hoursPerDay: number;
+  prefixFilter?: TicketPrefixFilter;
 }) {
   const [details, setDetails] = useState<EpicDetailsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -201,7 +185,10 @@ function EpicDetailModal({
       try {
         const result = await epicApi.getDetails(epicKey);
         if (result.success) {
-          setDetails(result);
+          setDetails({
+            ...result,
+            children: Array.isArray(result.children) ? result.children : []
+          });
         } else {
           setError('Erreur lors du chargement des détails');
         }
@@ -277,7 +264,7 @@ function EpicDetailModal({
           {!isLoading && details && (
             <div className="space-y-6">
               {/* Progress summary */}
-              <div className="grid gap-4 sm:grid-cols-5">
+              <div className="grid gap-4 sm:grid-cols-5 lg:grid-cols-6">
                 <div className="rounded-xl bg-surface-800/60 border border-surface-700/60 p-4">
                   <div className="text-xs text-surface-500 uppercase tracking-wide">Progression</div>
                   <div className="mt-2">
@@ -286,22 +273,35 @@ function EpicDetailModal({
                       {details.isOverrun && <span className="text-danger-400 text-xs">Dépassé</span>}
                     </div>
                     <div className="h-2 rounded-full bg-surface-700 overflow-hidden">
-                      <div className={`h-full ${progressColor}`} style={{ width: `${details.progressPercent}%` }} />
+                      <div className={`h-full ${progressColor}`} style={{ width: `${Math.min(100, details.progressPercent)}%` }} />
                     </div>
                   </div>
                 </div>
                 <div className="rounded-xl bg-surface-800/60 border border-surface-700/60 p-4">
                   <div className="text-xs text-surface-500 uppercase tracking-wide">Estimation</div>
                   <div className="text-xl font-semibold text-surface-100 mt-1">
-                    {formatHoursFromSeconds(details.originalEstimateSeconds, hoursPerDay)}
+                    {formatHoursOnly(details.originalEstimateSeconds)}
                   </div>
                 </div>
                 <div className="rounded-xl bg-surface-800/60 border border-surface-700/60 p-4">
                   <div className="text-xs text-surface-500 uppercase tracking-wide">Temps passé</div>
                   <div className={`text-xl font-semibold mt-1 ${details.isOverrun ? 'text-danger-400' : 'text-surface-100'}`}>
-                    {formatHoursFromSeconds(details.timeSpentSeconds, hoursPerDay)}
+                    {formatHoursOnly(details.timeSpentSeconds)}
                   </div>
+                  {details.macroChiffrageSeconds != null && details.macroChiffrageSeconds > 0 && (
+                    <div className="text-xs text-surface-500 mt-1">
+                      vs Macro: {details.timeSpentSeconds > details.macroChiffrageSeconds ? '+' : ''}{formatHoursOnly(details.timeSpentSeconds - details.macroChiffrageSeconds)}
+                    </div>
+                  )}
                 </div>
+                {details.macroChiffrageSeconds != null && details.macroChiffrageSeconds >= 0 && (
+                  <div className="rounded-xl bg-surface-800/60 border border-surface-700/60 p-4">
+                    <div className="text-xs text-surface-500 uppercase tracking-wide">Macro chiffrage</div>
+                    <div className="text-xl font-semibold text-surface-100 mt-1">
+                      {formatHoursOnly(details.macroChiffrageSeconds)}
+                    </div>
+                  </div>
+                )}
                 <div className="rounded-xl bg-surface-800/60 border border-surface-700/60 p-4">
                   <div className="text-xs text-surface-500 uppercase tracking-wide">Story Points</div>
                   <div className="text-xl font-semibold text-primary-300 mt-1">
@@ -311,7 +311,7 @@ function EpicDetailModal({
                 <div className="rounded-xl bg-surface-800/60 border border-surface-700/60 p-4">
                   <div className="text-xs text-surface-500 uppercase tracking-wide">Tickets enfants</div>
                   <div className="text-xl font-semibold text-surface-100 mt-1">
-                    {details.children.length}
+                    {(details.children ?? []).length}
                   </div>
                 </div>
               </div>
@@ -331,16 +331,19 @@ function EpicDetailModal({
                     </tr>
                   </thead>
                   <tbody>
-                    {details.children.length === 0 && (
+                    {(details.children ?? []).length === 0 ? (
                       <tr>
                         <td colSpan={7} className="px-3 py-8 text-center text-surface-500">
                           Aucun ticket enfant trouvé
                         </td>
                       </tr>
+                    ) : (
+                      filterChildrenByPrefix(details.children ?? [], prefixFilter).map((child) => (
+                        <Fragment key={child.issueKey}>
+                          <ChildIssueRow child={child} level={0} prefixFilter={prefixFilter} />
+                        </Fragment>
+                      ))
                     )}
-                    {details.children.map(child => (
-                      <ChildIssueRow key={child.issueKey} child={child} hoursPerDay={hoursPerDay} />
-                    ))}
                   </tbody>
                 </table>
               </div>
@@ -353,16 +356,15 @@ function EpicDetailModal({
 }
 
 export function EpicProgressPage() {
-  const [boards, setBoards] = useState<JiraBoard[]>([]);
   const [selectedBoardId, setSelectedBoardId] = useState<number | null>(null);
   const [typeFilter, setTypeFilter] = useState<EpicTypeFilter>('all');
+  const [statusFilter, setStatusFilter] = useState<EpicStatusFilter>('all');
   const [epics, setEpics] = useState<EpicProgressItem[]>([]);
-  const [isLoadingBoards, setIsLoadingBoards] = useState(true);
+  const [totalEpics, setTotalEpics] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize] = useState(20);
   const [isLoadingEpics, setIsLoadingEpics] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-  
-  // Time tracking config
-  const [timeConfig, setTimeConfig] = useState<TimeTrackingConfig>(DEFAULT_TIME_CONFIG);
   
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
@@ -374,49 +376,29 @@ export function EpicProgressPage() {
   
   // Detail modal state
   const [selectedEpicKey, setSelectedEpicKey] = useState<string | null>(null);
-  
-  // Load time config
-  useEffect(() => {
-    const loadTimeConfig = async () => {
-      try {
-        const result = await jiraApi.getTimeConfig();
-        if (result.success) {
-          setTimeConfig({
-            workingHoursPerDay: result.workingHoursPerDay,
-            workingDaysPerWeek: result.workingDaysPerWeek
-          });
-        }
-      } catch (error) {
-        console.error('Failed to load time config:', error);
-      }
-    };
-    loadTimeConfig();
-  }, []);
 
+  const [prefixFilter, setPrefixFilter] = useState<TicketPrefixFilter>('all');
+  
   const loadBoards = useCallback(async () => {
-    setIsLoadingBoards(true);
     try {
       const result = await jiraApi.getConfiguredBoards();
-      if (result.success) {
-        setBoards(result.boards);
-        if (result.boards.length > 0) {
-          setSelectedBoardId((current) => current ?? result.boards[0].id);
-        }
+      if (result.success && result.boards?.length) {
+        setSelectedBoardId((current) => current ?? result.boards[0].id);
       }
     } catch (error) {
       console.error('Failed to load boards:', error);
-    } finally {
-      setIsLoadingBoards(false);
     }
   }, []);
 
-  const loadEpics = useCallback(async (boardId: number, filter: EpicTypeFilter) => {
+  const loadEpics = useCallback(async (boardId: number, typeF: EpicTypeFilter, statusF: EpicStatusFilter, pageNum: number = 1, summaryPrefixFilter?: TicketPrefixFilter) => {
     if (!boardId) return;
     setIsLoadingEpics(true);
     try {
-      const result = await epicApi.getProgress(boardId, filter);
+      const result = await epicApi.getProgress(boardId, typeF, statusF, pageNum, pageSize, summaryPrefixFilter !== 'all' ? summaryPrefixFilter : undefined);
       if (result.success) {
-        setEpics(result.epics);
+        setEpics(result.epics ?? []);
+        const total = Number(result.total);
+        setTotalEpics(Number.isNaN(total) ? (result.epics?.length ?? 0) : total);
         setLastUpdate(new Date());
       }
     } catch (error) {
@@ -424,7 +406,7 @@ export function EpicProgressPage() {
     } finally {
       setIsLoadingEpics(false);
     }
-  }, []);
+  }, [pageSize]);
 
   useEffect(() => {
     loadBoards();
@@ -432,9 +414,9 @@ export function EpicProgressPage() {
 
   useEffect(() => {
     if (selectedBoardId) {
-      loadEpics(selectedBoardId, typeFilter);
+      loadEpics(selectedBoardId, typeFilter, statusFilter, page, prefixFilter);
     }
-  }, [selectedBoardId, typeFilter, loadEpics]);
+  }, [selectedBoardId, typeFilter, statusFilter, page, prefixFilter, loadEpics]);
 
   // Handle search
   const handleSearch = useCallback(async (query: string) => {
@@ -446,7 +428,7 @@ export function EpicProgressPage() {
     
     setIsSearching(true);
     try {
-      const result = await epicApi.search(selectedBoardId, query, typeFilter);
+      const result = await epicApi.search(selectedBoardId, query, typeFilter, statusFilter);
       if (result.success) {
         setSearchResults(result.results);
         setShowSearchDropdown(true);
@@ -456,7 +438,7 @@ export function EpicProgressPage() {
     } finally {
       setIsSearching(false);
     }
-  }, [selectedBoardId, typeFilter]);
+  }, [selectedBoardId, typeFilter, statusFilter]);
 
   // Debounced search
   useEffect(() => {
@@ -518,30 +500,10 @@ export function EpicProgressPage() {
 
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:gap-6">
           <div className="flex flex-col gap-1">
-            <label className="text-xs uppercase tracking-wide text-surface-500">Board</label>
-            <div className="relative">
-              {isLoadingBoards && (
-                <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 text-surface-500 animate-spin" />
-              )}
-              <select
-                value={selectedBoardId ?? ''}
-                onChange={(event) => setSelectedBoardId(Number(event.target.value))}
-                className="min-w-[220px] appearance-none rounded-xl bg-surface-900/80 border border-surface-700/50 px-4 py-2.5 text-sm text-surface-200 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
-                disabled={isLoadingBoards || boards.length === 0}
-              >
-                {boards.length === 0 && <option>Aucune board disponible</option>}
-                {boards.map(board => (
-                  <option key={board.id} value={board.id}>{board.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="flex flex-col gap-1">
             <label className="text-xs uppercase tracking-wide text-surface-500">Type</label>
             <div className="flex rounded-xl bg-surface-900/80 border border-surface-700/50 p-1">
               <button
-                onClick={() => setTypeFilter('all')}
+                onClick={() => { setTypeFilter('all'); setPage(1); }}
                 className={`px-4 py-1.5 text-sm rounded-lg transition-colors ${
                   typeFilter === 'all' 
                     ? 'bg-primary-500/20 text-primary-300' 
@@ -551,7 +513,7 @@ export function EpicProgressPage() {
                 Tous
               </button>
               <button
-                onClick={() => setTypeFilter('epic')}
+                onClick={() => { setTypeFilter('epic'); setPage(1); }}
                 className={`px-4 py-1.5 text-sm rounded-lg transition-colors ${
                   typeFilter === 'epic' 
                     ? 'bg-primary-500/20 text-primary-300' 
@@ -561,7 +523,7 @@ export function EpicProgressPage() {
                 Épics
               </button>
               <button
-                onClick={() => setTypeFilter('legend')}
+                onClick={() => { setTypeFilter('legend'); setPage(1); }}
                 className={`px-4 py-1.5 text-sm rounded-lg transition-colors ${
                   typeFilter === 'legend' 
                     ? 'bg-primary-500/20 text-primary-300' 
@@ -570,6 +532,79 @@ export function EpicProgressPage() {
               >
                 Legends
               </button>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs uppercase tracking-wide text-surface-500">Statut</label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => { setStatusFilter('all'); setPage(1); }}
+                  className={`px-4 py-1.5 text-sm rounded-lg transition-colors ${
+                    statusFilter === 'all'
+                      ? 'bg-primary-500/20 text-primary-300'
+                      : 'text-surface-400 hover:text-surface-200'
+                  }`}
+                >
+                  Toutes
+                </button>
+                <button
+                  onClick={() => { setStatusFilter('done'); setPage(1); }}
+                  className={`px-4 py-1.5 text-sm rounded-lg transition-colors ${
+                    statusFilter === 'done'
+                      ? 'bg-primary-500/20 text-primary-300'
+                      : 'text-surface-400 hover:text-surface-200'
+                  }`}
+                >
+                  Terminées
+                </button>
+                <button
+                  onClick={() => { setStatusFilter('new'); setPage(1); }}
+                  className={`px-4 py-1.5 text-sm rounded-lg transition-colors ${
+                    statusFilter === 'new'
+                      ? 'bg-primary-500/20 text-primary-300'
+                      : 'text-surface-400 hover:text-surface-200'
+                  }`}
+                >
+                  À faire
+                </button>
+                <button
+                  onClick={() => { setStatusFilter('indeterminate'); setPage(1); }}
+                  className={`px-4 py-1.5 text-sm rounded-lg transition-colors ${
+                    statusFilter === 'indeterminate'
+                      ? 'bg-primary-500/20 text-primary-300'
+                      : 'text-surface-400 hover:text-surface-200'
+                  }`}
+                >
+                  En cours
+                </button>
+              </div>
+            </div>
+            <div className="flex flex-col gap-1">
+              <label className="text-xs uppercase tracking-wide text-surface-500" title="Filtre les épics/legends dont le résumé commence par ces 3 lettres (ex. FAC064 - ...)">
+                Préfixe résumé (3 lettres)
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => { setPrefixFilter('all'); setPage(1); }}
+                  className={`px-3 py-1.5 text-sm rounded-lg transition-colors font-mono ${
+                    prefixFilter === 'all'
+                      ? 'bg-primary-500/20 text-primary-300'
+                      : 'text-surface-400 hover:text-surface-200'
+                  }`}
+                >
+                  Tous
+                </button>
+                {TICKET_PREFIXES.map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => { setPrefixFilter(p); setPage(1); }}
+                    className={`px-3 py-1.5 text-sm rounded-lg transition-colors font-mono ${
+                      prefixFilter === p ? 'bg-primary-500/20 text-primary-300' : 'text-surface-400 hover:text-surface-200'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
@@ -638,7 +673,6 @@ export function EpicProgressPage() {
       </div>
 
       <div className="flex items-center justify-between text-xs text-surface-500">
-        <span>{selectedBoardId ? `Board selectionnee: ${selectedBoardId}` : 'Aucune board selectionnee'}</span>
         <span>{lastUpdate ? `Derniere mise a jour: ${lastUpdate.toLocaleString()}` : ''}</span>
       </div>
 
@@ -671,7 +705,15 @@ export function EpicProgressPage() {
             >
               <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                 <div>
-                  <div className="text-sm text-surface-500">{epic.issueType}</div>
+                  <div className="flex flex-wrap items-center gap-2 text-sm text-surface-500">
+                    <span>{epic.issueType}</span>
+                    {epic.teams && epic.teams.length > 0 && (
+                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-surface-700/60 text-surface-300" title="Équipe(s)">
+                        <Users className="w-3.5 h-3.5 text-surface-400" />
+                        {epic.teams.join(', ')}
+                      </span>
+                    )}
+                  </div>
                   <div className="text-lg font-semibold text-surface-100 group-hover:text-primary-300 transition-colors">
                     {epic.epicKey} • {epic.summary}
                   </div>
@@ -687,7 +729,7 @@ export function EpicProgressPage() {
                   <span>{epic.progressPercent}%</span>
                 </div>
                 <div className="h-2.5 rounded-full bg-surface-800 overflow-hidden">
-                  <div className={`h-full ${progressColor}`} style={{ width: `${epic.progressPercent}%` }} />
+                  <div className={`h-full ${progressColor}`} style={{ width: `${Math.min(100, epic.progressPercent)}%` }} />
                 </div>
                 {epic.isOverrun && (
                   <div className="text-xs text-danger-400 mt-2">
@@ -696,17 +738,28 @@ export function EpicProgressPage() {
                 )}
               </div>
 
-              <div className="grid gap-3 sm:grid-cols-4 text-sm text-surface-300">
+              <div className="grid gap-3 sm:grid-cols-4 lg:grid-cols-5 text-sm text-surface-300">
                 <div className="rounded-xl bg-surface-800/60 border border-surface-700/60 p-3">
                   <div className="text-xs text-surface-500">
                     Estimation originale ({epic.issueType.toLowerCase().includes('legend') ? 'Épics' : 'US'} enfants)
                   </div>
-                  <div className="font-semibold">{formatHoursFromSeconds(epic.originalEstimateSeconds, timeConfig.workingHoursPerDay)}</div>
+                  <div className="font-semibold">{formatHoursOnly(epic.originalEstimateSeconds)}</div>
                 </div>
                 <div className="rounded-xl bg-surface-800/60 border border-surface-700/60 p-3">
                   <div className="text-xs text-surface-500">Temps passé (tickets + enfants)</div>
-                  <div className="font-semibold">{formatHoursFromSeconds(epic.timeSpentSeconds, timeConfig.workingHoursPerDay)}</div>
+                  <div className="font-semibold">{formatHoursOnly(epic.timeSpentSeconds)}</div>
+                  {epic.macroChiffrageSeconds != null && epic.macroChiffrageSeconds > 0 && (
+                    <div className="text-xs text-surface-500 mt-1">
+                      vs Macro: {epic.timeSpentSeconds > epic.macroChiffrageSeconds ? '+' : ''}{formatHoursOnly(epic.timeSpentSeconds - epic.macroChiffrageSeconds)}
+                    </div>
+                  )}
                 </div>
+                {epic.macroChiffrageSeconds != null && epic.macroChiffrageSeconds >= 0 && (
+                  <div className="rounded-xl bg-surface-800/60 border border-surface-700/60 p-3">
+                    <div className="text-xs text-surface-500">Macro chiffrage</div>
+                    <div className="font-semibold">{formatHoursOnly(epic.macroChiffrageSeconds)}</div>
+                  </div>
+                )}
                 <div className="rounded-xl bg-surface-800/60 border border-surface-700/60 p-3">
                   <div className="text-xs text-surface-500">Story Points</div>
                   <div className="font-semibold text-primary-300">{epic.totalStoryPoints || 0} pts</div>
@@ -721,6 +774,38 @@ export function EpicProgressPage() {
             </button>
           );
         })}
+
+        {/* Pagination */}
+        {!isLoadingEpics && (totalEpics > 0 || epics.length > 0) && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl border border-surface-800 bg-surface-900/40 px-4 py-3">
+            <div className="text-sm text-surface-400">
+              Affichage {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, totalEpics || epics.length)} sur {totalEpics || epics.length} epics
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-surface-800 border border-surface-700 text-surface-300 hover:bg-surface-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                <ChevronLeft className="w-4 h-4" />
+                Précédent
+              </button>
+              <span className="px-3 py-1.5 text-sm text-surface-400">
+                Page {page} sur {Math.max(1, Math.ceil((totalEpics || epics.length) / pageSize))}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPage((p) => p + 1)}
+                disabled={totalEpics > 0 && page * pageSize >= totalEpics}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-surface-800 border border-surface-700 text-surface-300 hover:bg-surface-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Suivant
+                <ChevronRight className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Detail modal */}
@@ -728,7 +813,7 @@ export function EpicProgressPage() {
         <EpicDetailModal 
           epicKey={selectedEpicKey} 
           onClose={() => setSelectedEpicKey(null)}
-          hoursPerDay={timeConfig.workingHoursPerDay}
+          prefixFilter={prefixFilter}
         />
       )}
     </div>

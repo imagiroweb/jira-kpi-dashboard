@@ -28,7 +28,7 @@ services:
       - MONDAY_API_KEY=${MONDAY_API_KEY}
       - SYNC_ENABLED=${SYNC_ENABLED:-true}
       - SYNC_INTERVAL_SECONDS=${SYNC_INTERVAL_SECONDS:-300}
-      - MICROSOFT_REDIRECT_URI=https://jira-kpi.imagiro.fr/auth/microsoft/callback
+      - MICROSOFT_REDIRECT_URI=https://jira-kpi.imagiro.fr/api/auth/microsoft/callback
     depends_on:
       mongodb:
         condition: service_started

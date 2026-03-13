@@ -77,9 +77,13 @@ export interface EpicProgressItem {
   childIssueCount: number;
   originalEstimateSeconds: number;
   timeSpentSeconds: number;
+  /** Macro chiffrage (customfield_10992), en secondes, pour comparaison avec le temps passé */
+  macroChiffrageSeconds?: number | null;
   totalStoryPoints: number;
   progressPercent: number;
   isOverrun: boolean;
+  /** Teams associées (epic/legend + descendants) */
+  teams?: string[];
 }
 
 export interface EpicProgressResponse {
@@ -87,10 +91,16 @@ export interface EpicProgressResponse {
   boardName: string;
   projectKey: string | null;
   epicCount: number;
+  total: number;
+  page: number;
+  pageSize: number;
   epics: EpicProgressItem[];
 }
 
 export type EpicTypeFilter = 'all' | 'epic' | 'legend';
+
+/** Filtre par statut : Terminées (done), À faire (new), En cours (indeterminate) */
+export type EpicStatusFilter = 'all' | 'done' | 'new' | 'indeterminate';
 
 export interface EpicSearchItem {
   epicKey: string;
@@ -128,6 +138,8 @@ export interface EpicDetailsResponse {
   statusCategoryKey: string | null;
   originalEstimateSeconds: number;
   timeSpentSeconds: number;
+  /** Macro chiffrage (customfield_10992), en secondes */
+  macroChiffrageSeconds?: number | null;
   totalStoryPoints: number;
   progressPercent: number;
   isOverrun: boolean;
@@ -135,16 +147,23 @@ export interface EpicDetailsResponse {
 }
 
 export const epicApi = {
-  getProgress: async (boardId: number, typeFilter: EpicTypeFilter = 'all'): Promise<{ success: boolean } & EpicProgressResponse> => {
-    const { data } = await api.get('/jira/epic-progress', {
-      params: { boardId, typeFilter }
-    });
+  getProgress: async (
+    boardId: number,
+    typeFilter: EpicTypeFilter = 'all',
+    statusFilter: EpicStatusFilter = 'all',
+    page: number = 1,
+    pageSize: number = 20,
+    summaryPrefix?: string
+  ): Promise<{ success: boolean } & EpicProgressResponse> => {
+    const params: Record<string, unknown> = { boardId, typeFilter, statusFilter, page, pageSize };
+    if (summaryPrefix && summaryPrefix !== 'all') params.summaryPrefix = summaryPrefix;
+    const { data } = await api.get('/jira/epic-progress', { params });
     return data;
   },
   
-  search: async (boardId: number, query: string, typeFilter: EpicTypeFilter = 'all'): Promise<{ success: boolean } & EpicSearchResponse> => {
+  search: async (boardId: number, query: string, typeFilter: EpicTypeFilter = 'all', statusFilter: EpicStatusFilter = 'all'): Promise<{ success: boolean } & EpicSearchResponse> => {
     const { data } = await api.get('/jira/epic-search', {
-      params: { boardId, query, typeFilter }
+      params: { boardId, query, typeFilter, statusFilter }
     });
     return data;
   },
