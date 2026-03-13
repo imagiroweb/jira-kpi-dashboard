@@ -189,7 +189,7 @@ router.get('/projects', async (req: Request, res: Response) => {
 
 /**
  * Get Epic/Legend progress by team
- * GET /api/jira/epic-progress?boardId=123&typeFilter=epic|legend|all
+ * GET /api/jira/epic-progress?boardId=123&typeFilter=epic|legend|all&statusFilter=all|done|new|indeterminate
  */
 router.get('/epic-progress', async (req: Request, res: Response) => {
   try {
@@ -202,7 +202,11 @@ router.get('/epic-progress', async (req: Request, res: Response) => {
     }
 
     const typeFilter = (req.query.typeFilter as string) || 'all';
-    const result = await worklogAppService.getEpicProgressByBoard(boardId, typeFilter);
+    const statusFilter = (req.query.statusFilter as string) || 'all';
+    const page = parseInt(req.query.page as string, 10) || 1;
+    const pageSize = Math.min(100, Math.max(1, parseInt(req.query.pageSize as string, 10) || 20));
+    const summaryPrefix = (req.query.summaryPrefix as string) || undefined;
+    const result = await worklogAppService.getEpicProgressByBoard(boardId, typeFilter, statusFilter, page, pageSize, summaryPrefix);
     res.json({
       success: true,
       ...result
@@ -219,7 +223,7 @@ router.get('/epic-progress', async (req: Request, res: Response) => {
 
 /**
  * Search Epic/Legend by title (for autocomplete)
- * GET /api/jira/epic-search?boardId=123&query=xxx&typeFilter=epic|legend|all
+ * GET /api/jira/epic-search?boardId=123&query=xxx&typeFilter=epic|legend|all&statusFilter=all|done|new|indeterminate
  */
 router.get('/epic-search', async (req: Request, res: Response) => {
   try {
@@ -233,8 +237,8 @@ router.get('/epic-search', async (req: Request, res: Response) => {
 
     const query = (req.query.query as string) || '';
     const typeFilter = (req.query.typeFilter as string) || 'all';
-    
-    const result = await worklogAppService.searchEpicsByTitle(boardId, query, typeFilter);
+    const statusFilter = (req.query.statusFilter as string) || 'all';
+    const result = await worklogAppService.searchEpicsByTitle(boardId, query, typeFilter, statusFilter);
     res.json({
       success: true,
       ...result

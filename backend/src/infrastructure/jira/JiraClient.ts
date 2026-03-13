@@ -272,6 +272,42 @@ export class JiraClient {
   }
 
   /**
+   * Fetch a single page of issues (for pagination). One request, no automatic follow-up.
+   * Note: /rest/api/3/search/jql does NOT return "total"; use searchApproximateCount() for total.
+   */
+  async searchIssuesPage(
+    jql: string,
+    fields: string = 'key,summary,status,issuetype',
+    maxResults: number = 20,
+    startAt: number = 0
+  ): Promise<JiraSearchResponse> {
+    const response = await this.client.get<JiraSearchResponse>('/rest/api/3/search/jql', {
+      params: { jql, fields, maxResults, startAt }
+    });
+    const data = response.data;
+    const issues = data.issues || [];
+    logger.info(`Fetched page startAt=${startAt} size=${issues.length} with JQL: ${jql.substring(0, 60)}...`);
+    return {
+      startAt: data.startAt ?? startAt,
+      maxResults: data.maxResults ?? issues.length,
+      total: 0,
+      issues
+    };
+  }
+
+  /**
+   * Get approximate total count of issues matching JQL (for pagination).
+   * POST /rest/api/3/search/approximate-count returns { count: number }.
+   */
+  async searchApproximateCount(jql: string): Promise<number> {
+    const response = await this.client.post<{ count?: number }>('/rest/api/3/search/approximate-count', { jql });
+    const count = response.data?.count;
+    const total = typeof count === 'number' && count >= 0 ? count : 0;
+    logger.info(`Approximate count for JQL: ${total}`);
+    return total;
+  }
+
+  /**
    * Get all worklogs for a specific issue (paginated: Jira returns max 100 per page).
    * Fetches all pages so no hours are missing for issues with many worklogs.
    */
