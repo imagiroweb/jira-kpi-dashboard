@@ -272,4 +272,85 @@ describe('authApi', () => {
       await expect(authApi.getRolesForSignup()).rejects.toThrow('Forbidden');
     });
   });
+
+  describe('recordPageView', () => {
+    it('envoie POST /api/auth/me/page-view avec la page', async () => {
+      mockPost.mockResolvedValueOnce({ data: { success: true } });
+
+      await authApi.recordPageView('dashboard');
+
+      expect(mockPost).toHaveBeenCalledWith('/api/auth/me/page-view', { page: 'dashboard' });
+    });
+
+    it('ne lance pas si le serveur répond une erreur (non bloquant)', async () => {
+      mockPost.mockRejectedValueOnce(new Error('Network error'));
+
+      await expect(authApi.recordPageView('support')).resolves.toBeUndefined();
+    });
+  });
+
+  describe('getUserLogs', () => {
+    it('retourne les logs d’activité d’un utilisateur', async () => {
+      const logs = [
+        { id: 'l1', type: 'login', timestamp: '2025-03-14T10:00:00.000Z', meta: undefined },
+        { id: 'l2', type: 'login', timestamp: '2025-03-13T09:00:00.000Z', meta: undefined },
+      ];
+      mockGet.mockResolvedValueOnce({ data: { success: true, logs } });
+
+      const result = await authApi.getUserLogs('user-id-123');
+
+      expect(mockGet).toHaveBeenCalledWith('/api/auth/users/user-id-123/logs', { params: { limit: 100 } });
+      expect(result).toEqual(logs);
+    });
+
+    it('passe le paramètre limit', async () => {
+      mockGet.mockResolvedValueOnce({ data: { success: true, logs: [] } });
+
+      await authApi.getUserLogs('user-id', 10);
+
+      expect(mockGet).toHaveBeenCalledWith('/api/auth/users/user-id/logs', { params: { limit: 10 } });
+    });
+
+    it('lance une erreur si success false', async () => {
+      mockGet.mockResolvedValueOnce({ data: { success: false, error: 'Accès refusé' } });
+
+      await expect(authApi.getUserLogs('user-id')).rejects.toThrow('Accès refusé');
+    });
+  });
+
+  describe('getUserPageStats', () => {
+    it('retourne les stats de navigation (pages, total, percentages, daily)', async () => {
+      const data = {
+        pages: { dashboard: 10, support: 5 },
+        total: 15,
+        percentages: { dashboard: 66.7, support: 33.3 },
+        daily: [{ date: '2025-03-14', pages: { dashboard: 2 }, total: 2 }],
+      };
+      mockGet.mockResolvedValueOnce({ data: { success: true, ...data } });
+
+      const result = await authApi.getUserPageStats('user-id-456');
+
+      expect(mockGet).toHaveBeenCalledWith('/api/auth/users/user-id-456/page-stats', { params: { days: 30 } });
+      expect(result.pages).toEqual(data.pages);
+      expect(result.total).toBe(15);
+      expect(result.percentages).toEqual(data.percentages);
+      expect(result.daily).toEqual(data.daily);
+    });
+
+    it('passe le paramètre days', async () => {
+      mockGet.mockResolvedValueOnce({
+        data: { success: true, pages: {}, total: 0, percentages: {}, daily: [] },
+      });
+
+      await authApi.getUserPageStats('user-id', 7);
+
+      expect(mockGet).toHaveBeenCalledWith('/api/auth/users/user-id/page-stats', { params: { days: 7 } });
+    });
+
+    it('lance une erreur si success false', async () => {
+      mockGet.mockResolvedValueOnce({ data: { success: false, error: 'Erreur serveur' } });
+
+      await expect(authApi.getUserPageStats('user-id')).rejects.toThrow('Erreur serveur');
+    });
+  });
 });

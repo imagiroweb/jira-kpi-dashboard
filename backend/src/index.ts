@@ -131,7 +131,7 @@ const io = new Server(httpServer, {
 
 // Middleware
 app.use(helmet());
-app.use(compression());
+app.use(compression() as unknown as express.RequestHandler);
 app.use(cors({
   origin: allowedOrigins,
   credentials: true
@@ -150,10 +150,14 @@ const limiter = rateLimit({
 app.use('/api/', limiter);
 
 // Swagger Documentation
-app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
-  customCss: '.swagger-ui .topbar { display: none }',
-  customSiteTitle: 'Jira KPI Dashboard API'
-}));
+app.use(
+  '/api-docs',
+  swaggerUi.serve as unknown as express.RequestHandler,
+  swaggerUi.setup(swaggerSpec, {
+    customCss: '.swagger-ui .topbar { display: none }',
+    customSiteTitle: 'Jira KPI Dashboard API'
+  }) as unknown as express.RequestHandler
+);
 
 app.get('/api-docs.json', (req, res) => {
   res.setHeader('Content-Type', 'application/json');

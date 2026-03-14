@@ -499,7 +499,33 @@ router.get('/verify', authenticate, (req: Request, res: Response) => {
 });
 
 /**
- * POST /api/auth/me/page-view - Record a page view (authenticated)
+ * @swagger
+ * /api/auth/me/page-view:
+ *   post:
+ *     summary: Enregistrer une visite de page (utilisateur connecté)
+ *     description: Enregistre un log de type "page_view" pour l'utilisateur courant. Dédupliqué (une même page par minute max).
+ *     tags: [Authentication, Activity Logs]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [page]
+ *             properties:
+ *               page:
+ *                 type: string
+ *                 enum: [dashboard, users, support, epics, marketing, produit, gestionUtilisateurs]
+ *                 description: Identifiant de la page visitée
+ *     responses:
+ *       200:
+ *         description: Visite enregistrée ou ignorée (déduplication)
+ *       400:
+ *         description: Page invalide
+ *       401:
+ *         description: Non authentifié
  */
 router.post(
   '/me/page-view',
@@ -581,7 +607,31 @@ router.get('/users', authenticate, requireSuperAdmin, async (req: Request, res: 
 });
 
 /**
- * GET /api/auth/users/:id/logs - Get activity logs for a user (super_admin only)
+ * @swagger
+ * /api/auth/users/{id}/logs:
+ *   get:
+ *     summary: Liste des logs d'activité d'un utilisateur (super_admin uniquement)
+ *     description: Retourne les logs de connexion, navigation (page_view) et erreurs 500 pour un utilisateur.
+ *     tags: [Authentication, Activity Logs]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: ID de l'utilisateur
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, default: 100 }
+ *         description: Nombre max de logs (1-500)
+ *     responses:
+ *       200:
+ *         description: Liste des logs (id, type, timestamp, meta)
+ *       401:
+ *         description: Non authentifié
+ *       403:
+ *         description: Accès réservé aux super admin
  */
 router.get('/users/:id/logs', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
@@ -607,7 +657,31 @@ router.get('/users/:id/logs', authenticate, requireSuperAdmin, async (req: Reque
 });
 
 /**
- * GET /api/auth/users/:id/page-stats - Get page view stats (daily counts, totals, percentages) for a user (super_admin only)
+ * @swagger
+ * /api/auth/users/{id}/page-stats:
+ *   get:
+ *     summary: Statistiques de navigation d'un utilisateur (super_admin uniquement)
+ *     description: Compteur quotidien de visites par page, totaux et pourcentages sur la période.
+ *     tags: [Authentication, Activity Logs]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: string }
+ *         description: ID de l'utilisateur
+ *       - in: query
+ *         name: days
+ *         schema: { type: integer, default: 30 }
+ *         description: Nombre de jours à prendre en compte (1-365)
+ *     responses:
+ *       200:
+ *         description: pages (compteur par page), total, percentages, daily (compteur quotidien)
+ *       401:
+ *         description: Non authentifié
+ *       403:
+ *         description: Accès réservé aux super admin
  */
 router.get('/users/:id/page-stats', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
