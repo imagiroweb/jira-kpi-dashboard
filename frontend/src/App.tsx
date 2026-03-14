@@ -84,6 +84,10 @@ function AuthenticatedApp({
   currentPage: 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'gestionUtilisateurs';
   setCurrentPage: (page: 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'gestionUtilisateurs') => void;
 }) {
+  useEffect(() => {
+    authApi.recordPageView(currentPage);
+  }, [currentPage]);
+
   const renderPage = () => {
     switch (currentPage) {
       case 'dashboard':

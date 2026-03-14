@@ -5,6 +5,7 @@ import { authService } from '../application/services/AuthService';
 import { authenticate, requireSuperAdmin } from '../middleware/authMiddleware';
 import { User } from '../domain/user/entities/User';
 import { Role, IPageVisibilities, PAGE_IDS } from '../domain/user/entities/Role';
+import { UserActivityLog } from '../domain/user/entities/UserActivityLog';
 import { logger } from '../utils/logger';
 
 /** Répond 503 si MongoDB n'est pas connecté (évite le timeout de 10s des opérations bufferisées) */
@@ -497,6 +498,45 @@ router.get('/verify', authenticate, (req: Request, res: Response) => {
   });
 });
 
+/**
+ * POST /api/auth/me/page-view - Record a page view (authenticated)
+ */
+router.post(
+  '/me/page-view',
+  authenticate,
+  [body('page').isIn([...PAGE_IDS]).withMessage('page invalide')],
+  async (req: Request, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, error: errors.array().map((e: { msg?: string }) => e.msg).join(', ') });
+      }
+      const { page } = req.body as { page: string };
+      const userId = req.user!.userId;
+      const oneMinuteAgo = new Date(Date.now() - 60_000);
+      const existing = await UserActivityLog.findOne({
+        userId,
+        type: 'page_view',
+        'meta.page': page,
+        timestamp: { $gte: oneMinuteAgo }
+      });
+      if (existing) {
+        return res.json({ success: true });
+      }
+      await UserActivityLog.create({
+        userId,
+        type: 'page_view',
+        timestamp: new Date(),
+        meta: { page }
+      });
+      res.json({ success: true });
+    } catch (error) {
+      logger.error('Record page view error:', error);
+      res.status(500).json({ success: false, error: 'Erreur serveur' });
+    }
+  }
+);
+
 // ---------- Super admin: user & role management ----------
 
 /**
@@ -536,6 +576,80 @@ router.get('/users', authenticate, requireSuperAdmin, async (req: Request, res: 
     res.json({ success: true, users: list, roles: roles.map((r: { _id: { toString: () => string }; name: string; pageVisibilities?: unknown }) => ({ id: r._id.toString(), name: r.name, pageVisibilities: r.pageVisibilities })) });
   } catch (error) {
     logger.error('List users error:', error);
+    res.status(500).json({ success: false, error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * GET /api/auth/users/:id/logs - Get activity logs for a user (super_admin only)
+ */
+router.get('/users/:id/logs', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const limit = Math.min(Math.max(parseInt(String(req.query.limit), 10) || 100, 1), 500);
+    const logs = await UserActivityLog.find({ userId: id })
+      .sort({ timestamp: -1 })
+      .limit(limit)
+      .lean();
+    res.json({
+      success: true,
+      logs: logs.map((l) => ({
+        id: (l as { _id: { toString: () => string } })._id.toString(),
+        type: (l as { type: string }).type,
+        timestamp: (l as { timestamp: Date }).timestamp,
+        meta: (l as { meta?: unknown }).meta
+      }))
+    });
+  } catch (error) {
+    logger.error('Get user logs error:', error);
+    res.status(500).json({ success: false, error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * GET /api/auth/users/:id/page-stats - Get page view stats (daily counts, totals, percentages) for a user (super_admin only)
+ */
+router.get('/users/:id/page-stats', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    const days = Math.min(Math.max(parseInt(String(req.query.days), 10) || 30, 1), 365);
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+    const logs = await UserActivityLog.find({
+      userId: id,
+      type: 'page_view',
+      timestamp: { $gte: since }
+    })
+      .lean();
+    const byPage: Record<string, number> = {};
+    const dailyByPage: Record<string, Record<string, number>> = {};
+    logs.forEach((l) => {
+      const meta = (l as { meta?: { page?: string } }).meta;
+      const page = meta?.page;
+      if (!page) return;
+      byPage[page] = (byPage[page] ?? 0) + 1;
+      const dateKey = (l as { timestamp: Date }).timestamp.toISOString().slice(0, 10);
+      if (!dailyByPage[dateKey]) dailyByPage[dateKey] = {};
+      dailyByPage[dateKey][page] = (dailyByPage[dateKey][page] ?? 0) + 1;
+    });
+    const total = Object.values(byPage).reduce((a, b) => a + b, 0);
+    const percentages: Record<string, number> = {};
+    if (total > 0) {
+      Object.keys(byPage).forEach((page) => {
+        percentages[page] = Math.round((byPage[page] / total) * 1000) / 10;
+      });
+    }
+    const daily = Object.entries(dailyByPage)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([date, pages]) => ({ date, pages, total: Object.values(pages).reduce((a, b) => a + b, 0) }));
+    res.json({
+      success: true,
+      pages: byPage,
+      total,
+      percentages,
+      daily
+    });
+  } catch (error) {
+    logger.error('Get user page stats error:', error);
     res.status(500).json({ success: false, error: 'Erreur serveur' });
   }
 });
