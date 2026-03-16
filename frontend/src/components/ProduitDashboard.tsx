@@ -21,9 +21,11 @@ import {
   X,
   TrendingUp,
   MessageSquare,
+  Filter,
+  ChevronDown,
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, RadialBarChart, RadialBar } from 'recharts';
-import { mondayApi, MondayUser, MondayBoard, MondayColumn, MondayItem, MondayWorkspace } from '../services/api';
+import { mondayApi, MondayUser, MondayBoard, MondayColumn, MondayItem, MondayWorkspace, MondayBoardView } from '../services/api';
 
 const PAYS_COLUMN_KEYS = ['pays', 'country', 'country code', 'nationalité'];
 const SITES_ACTIFS_KEYS = ['sites actifs', 'sites_actifs', 'active sites'];
@@ -61,6 +63,20 @@ function isNpsFev2026Workspace(name: string): boolean {
 }
 const NPS_SCORE_KEYS = ['nps', 'score nps', 'note nps', 'recommandation', 'note', 'score', 'note recommandation', 'how likely'];
 const NPS_CATEGORY_KEYS = ['catégorie nps', 'statut nps', 'type nps', 'segment', 'promoteur', 'détracteur', 'passif', 'nps category'];
+
+/** Workspace name for Roadmap Adoria 2026 (exact or partial match). */
+const ROADMAP_ADORIA_2026_KEYS = ['roadmap adoria 2026', 'roadmap adoria', 'adoria 2026', 'roadmap 2026', 'roadmap adoria'];
+function isRoadmapAdoria2026Workspace(name: string): boolean {
+  if (!name || typeof name !== 'string') return false;
+  const n = name.toLowerCase().trim();
+  if (n.includes('roadmap') && (n.includes('adoria') || n.includes('2026'))) return true;
+  return ROADMAP_ADORIA_2026_KEYS.some((k) => n.includes(k));
+}
+const CP_REFERENT_KEYS = ['cp référent', 'cp referent', 'cp réf', 'référent', 'referent'];
+const STATUS_KEYS = ['status', 'statut', 'état', 'state'];
+
+/** Board ID Roadmap Adoria 2026 (pré-sélectionné dans la section KPI Roadmap). */
+const ROADMAP_ADORIA_2026_BOARD_ID = '5191064770';
 
 function findColumn(columns: MondayColumn[], keywords: string[]): MondayColumn | null {
   const normalize = (s: string) =>
@@ -413,6 +429,57 @@ function computeNpsKpis(items: MondayItem[], columns: MondayColumn[]): NpsKpis |
   };
 }
 
+function computeRoadmapKpis(
+  items: MondayItem[],
+  columns: MondayColumn[]
+): {
+  totalFeatures: number;
+  withCpReferent: number;
+  missingCpReferent: number;
+  ratioCpReferentPct: number;
+  byCpReferent: { name: string; count: number }[];
+  byStatus: { name: string; value: number }[];
+} | null {
+  const colCpReferent = findColumn(columns, CP_REFERENT_KEYS);
+  const colStatus = findColumn(columns, STATUS_KEYS);
+  const totalFeatures = items.length;
+  if (totalFeatures === 0) return null;
+
+  let withCpReferent = 0;
+  const cpReferentCount = new Map<string, number>();
+  const statusCount = new Map<string, number>();
+
+  for (const item of items) {
+    const cpVal = colCpReferent ? getItemValue(item, colCpReferent.id) : '';
+    const hasCp = !!cpVal && cpVal.toLowerCase() !== 'sans nom' && cpVal !== '-';
+    if (hasCp) {
+      withCpReferent += 1;
+      cpReferentCount.set(cpVal, (cpReferentCount.get(cpVal) ?? 0) + 1);
+    }
+    const statusVal = colStatus ? getItemValue(item, colStatus.id) : '';
+    const statusLabel = statusVal || 'Non renseigné';
+    statusCount.set(statusLabel, (statusCount.get(statusLabel) ?? 0) + 1);
+  }
+
+  const missingCpReferent = totalFeatures - withCpReferent;
+  const ratioCpReferentPct = totalFeatures > 0 ? (withCpReferent / totalFeatures) * 100 : 0;
+  const byCpReferent = Array.from(cpReferentCount.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+  const byStatus = Array.from(statusCount.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
+
+  return {
+    totalFeatures,
+    withCpReferent,
+    missingCpReferent,
+    ratioCpReferentPct,
+    byCpReferent,
+    byStatus,
+  };
+}
+
 const DONUT_COLORS = ['#f59e0b', '#06b6d4', '#22c55e', '#8b5cf6', '#ec4899', '#6366f1', '#14b8a6', '#f97316'];
 
 export function ProduitDashboard() {
@@ -437,6 +504,13 @@ export function ProduitDashboard() {
   const [npsBoardId, setNpsBoardId] = useState<string>('');
   const [npsData, setNpsData] = useState<{ columns: MondayColumn[]; items: MondayItem[] } | null>(null);
   const [npsLoading, setNpsLoading] = useState(false);
+  const [roadmapBoardId, setRoadmapBoardId] = useState<string>('');
+  const [roadmapData, setRoadmapData] = useState<{ columns: MondayColumn[]; items: MondayItem[] } | null>(null);
+  const [roadmapLoading, setRoadmapLoading] = useState(false);
+  const [roadmapBoards, setRoadmapBoards] = useState<MondayBoard[]>([]);
+  const [roadmapViews, setRoadmapViews] = useState<MondayBoardView[] | null>(null);
+  const [roadmapViewsLoading, setRoadmapViewsLoading] = useState(false);
+  const [roadmapViewsOpen, setRoadmapViewsOpen] = useState(false);
 
   const npsWorkspace = useMemo(
     () =>
@@ -450,6 +524,11 @@ export function ProduitDashboard() {
     [workspaces]
   );
   const isNpsWorkspaceSelected = Boolean(selectedWorkspaceId && npsWorkspace && selectedWorkspaceId === npsWorkspace.id);
+
+  const roadmapWorkspace = useMemo(
+    () => workspaces.find((w) => isRoadmapAdoria2026Workspace(w.name)) ?? null,
+    [workspaces]
+  );
 
   const fetchStatusAndMe = useCallback(async () => {
     setLoading(true);
@@ -502,6 +581,26 @@ export function ProduitDashboard() {
   }, [selectedWorkspaceId, configured]);
 
   useEffect(() => {
+    if (!configured || !roadmapWorkspace) {
+      setRoadmapBoards([]);
+      return;
+    }
+    const load = async () => {
+      try {
+        const boardsRes = await mondayApi.getBoards(100, [roadmapWorkspace.id]);
+        if (boardsRes.success && boardsRes.boards) {
+          setRoadmapBoards(boardsRes.boards);
+        } else {
+          setRoadmapBoards([]);
+        }
+      } catch {
+        setRoadmapBoards([]);
+      }
+    };
+    load();
+  }, [configured, roadmapWorkspace?.id]);
+
+  useEffect(() => {
     if (!suiviBoardId || !configured) {
       setSuiviData(null);
       return;
@@ -535,6 +634,40 @@ export function ProduitDashboard() {
       .finally(() => setNpsLoading(false));
   }, [npsBoardId, configured]);
 
+  useEffect(() => {
+    if (!roadmapBoardId || !configured) {
+      setRoadmapData(null);
+      return;
+    }
+    setRoadmapLoading(true);
+    setRoadmapData(null);
+    mondayApi
+      .getBoard(roadmapBoardId, 500)
+      .then((res) => {
+        if (res.success && res.columns && res.items) {
+          setRoadmapData({ columns: res.columns, items: res.items });
+        }
+      })
+      .finally(() => setRoadmapLoading(false));
+  }, [roadmapBoardId, configured]);
+
+  useEffect(() => {
+    if (!roadmapBoardId || !configured) {
+      setRoadmapViews(null);
+      return;
+    }
+    setRoadmapViewsLoading(true);
+    setRoadmapViews(null);
+    mondayApi
+      .getBoardViews(roadmapBoardId)
+      .then((res) => {
+        if (res.success && res.views) setRoadmapViews(res.views);
+        else setRoadmapViews([]);
+      })
+      .catch(() => setRoadmapViews([]))
+      .finally(() => setRoadmapViewsLoading(false));
+  }, [roadmapBoardId, configured]);
+
   const suiviKpis = useMemo(() => {
     if (!suiviData?.items.length) return null;
     return computeSuiviKpis(suiviData.items, suiviData.columns);
@@ -544,6 +677,21 @@ export function ProduitDashboard() {
     if (!npsData?.items?.length) return null;
     return computeNpsKpis(npsData.items, npsData.columns);
   }, [npsData]);
+
+  const roadmapKpis = useMemo(() => {
+    if (!roadmapData?.items?.length) return null;
+    return computeRoadmapKpis(roadmapData.items, roadmapData.columns);
+  }, [roadmapData]);
+
+  /** Liste de boards pour la section Roadmap : espace dédié si détecté, sinon tous les boards visibles (ex. "Roadmap Adoria 2026" peut être un board, pas un espace). */
+  const boardsForRoadmapSection = roadmapWorkspace ? roadmapBoards : boards;
+
+  /** Pré-sélectionner le board Roadmap Adoria 2026 (ID 5191064770) dès qu'il est disponible. */
+  useEffect(() => {
+    if (roadmapBoardId) return;
+    const found = boardsForRoadmapSection.some((b) => String(b.id) === ROADMAP_ADORIA_2026_BOARD_ID);
+    if (found) setRoadmapBoardId(ROADMAP_ADORIA_2026_BOARD_ID);
+  }, [boardsForRoadmapSection, roadmapBoardId]);
 
   const openBoard = async (board: MondayBoard) => {
     setBoardLoading(true);
@@ -659,6 +807,11 @@ export function ProduitDashboard() {
             {npsWorkspace && selectedWorkspaceId !== npsWorkspace.id && (
               <span className="text-xs text-surface-500">
                 → Pour les KPI NPS Fev 2026 Monday, sélectionnez l&apos;espace « {npsWorkspace.name} »
+              </span>
+            )}
+            {roadmapWorkspace && (
+              <span className="text-xs text-surface-500">
+                → KPI Roadmap : espace « {roadmapWorkspace.name} »
               </span>
             )}
           </div>
@@ -824,6 +977,300 @@ export function ProduitDashboard() {
           {!npsLoading && npsBoardId && (npsData?.items?.length ?? 0) > 0 && !npsKpis && (
             <div className="p-6 text-amber-200/90 text-sm">
               Aucune colonne NPS trouvée. Utilisez une colonne « Score NPS » / « Note » (0-10) ou « Catégorie NPS » (Promoteur, Passif, Détracteur).
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Roadmap Adoria 2026 — 3 KPI : ratio CP référent, répartition par CP, donut statut (toujours visible, board au choix) */}
+      {!selectedBoard && configured && (
+        <section className="mb-8 rounded-2xl border border-surface-700/50 bg-surface-900/30 overflow-hidden">
+          <div className="p-4 border-b border-surface-700/50 bg-surface-800/30 flex flex-wrap items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Target className="w-5 h-5 text-amber-400/80" />
+              <h2 className="text-lg font-semibold text-surface-100">
+                {roadmapWorkspace ? roadmapWorkspace.name : 'Roadmap Adoria 2026'}
+              </h2>
+            </div>
+            <span className="text-xs text-surface-500 hidden sm:inline">— Ratio CP référent · Répartition par CP · Statut</span>
+            <select
+              value={roadmapBoardId}
+              onChange={(e) => setRoadmapBoardId(e.target.value)}
+              className="rounded-xl bg-surface-800 border border-surface-600 text-surface-200 px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50"
+            >
+              <option value="">Choisir un board (ex. Roadmap Adoria 2026)…</option>
+              {boardsForRoadmapSection.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          {boardsForRoadmapSection.length === 0 && !roadmapLoading && (
+            <div className="p-6 text-surface-500 text-sm">
+              Aucun board disponible. Sélectionnez un espace dans le menu ci-dessus ou vérifiez les droits Monday.com.
+            </div>
+          )}
+          {!roadmapLoading && boardsForRoadmapSection.length > 0 && !roadmapBoardId && (
+            <div className="p-6 text-surface-400 text-sm">
+              Sélectionnez un board ci-dessus (ex. « Roadmap Adoria 2026 ») pour afficher les 3 KPI : ratio CP référent, répartition par CP référent, donut par statut.
+            </div>
+          )}
+          {roadmapLoading && (
+            <div className="p-8 flex justify-center">
+              <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
+            </div>
+          )}
+          {!roadmapLoading && roadmapKpis && (
+            <div className="p-6 space-y-6">
+              {/* 1. Ratio CP référent / features + nombre manquant */}
+              <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                <h3 className="text-sm font-semibold text-surface-200 mb-3 flex items-center gap-2">
+                  <User className="w-4 h-4 text-amber-400" />
+                  Ratio CP référent / features
+                </h3>
+                <div className="flex flex-wrap items-end gap-6">
+                  <div>
+                    <div className="text-2xl font-bold text-surface-100 tabular-nums">
+                      {roadmapKpis.withCpReferent} / {roadmapKpis.totalFeatures}
+                    </div>
+                    <div className="text-sm text-surface-500 mt-0.5">
+                      {roadmapKpis.ratioCpReferentPct.toFixed(1)} % des lignes ont un CP référent
+                    </div>
+                  </div>
+                  <div
+                    className={`px-4 py-2 rounded-xl border ${
+                      roadmapKpis.missingCpReferent > 0
+                        ? 'bg-amber-500/10 border-amber-500/40 text-amber-200'
+                        : 'bg-green-500/10 border-green-500/40 text-green-200'
+                    }`}
+                  >
+                    <span className="text-sm font-medium">
+                      {roadmapKpis.missingCpReferent > 0
+                        ? `Il manque ${roadmapKpis.missingCpReferent} nom(s) dans la colonne CP RÉFÉRENT`
+                        : 'Toutes les lignes ont un CP référent'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 2. Répartition par CP référent (projets rattachés) */}
+              {roadmapKpis.byCpReferent.length > 0 && (
+                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                  <h3 className="text-sm font-semibold text-surface-200 mb-4 flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-amber-400" />
+                    Répartition par CP référent (projets rattachés)
+                  </h3>
+                  <div className="h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={roadmapKpis.byCpReferent}
+                        layout="vertical"
+                        margin={{ top: 4, right: 24, left: 120, bottom: 4 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,100,120,0.3)" />
+                        <XAxis type="number" tick={{ fill: 'rgb(148, 163, 184)', fontSize: 12 }} allowDecimals={false} />
+                        <YAxis
+                          type="category"
+                          dataKey="name"
+                          width={115}
+                          tick={{ fill: 'rgb(148, 163, 184)', fontSize: 11 }}
+                          tickFormatter={(v) => (v.length > 20 ? v.slice(0, 18) + '…' : v)}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: 'rgba(30, 30, 40, 0.95)',
+                            border: '1px solid rgba(100, 100, 120, 0.3)',
+                            borderRadius: '8px',
+                            padding: '12px',
+                          }}
+                          formatter={(value: number) => [`${value} projet(s)`, 'Projets']}
+                          labelFormatter={(label) => `CP référent : ${label}`}
+                        />
+                        <Bar dataKey="count" fill="#f59e0b" radius={[0, 4, 4, 0]} name="Projets" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+
+              {/* 3. Donut répartition par statut */}
+              {roadmapKpis.byStatus.length > 0 && (
+                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                  <h3 className="text-sm font-semibold text-surface-200 mb-4 flex items-center gap-2">
+                    <PieChart className="w-4 h-4 text-amber-400" />
+                    Répartition des projets par statut
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-6">
+                    <div className="w-64 h-64 shrink-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={roadmapKpis.byStatus.map((d, i) => ({
+                              ...d,
+                              fill: DONUT_COLORS[i % DONUT_COLORS.length],
+                            }))}
+                            dataKey="value"
+                            nameKey="name"
+                            cx="50%"
+                            cy="50%"
+                            innerRadius="50%"
+                            outerRadius="90%"
+                            paddingAngle={2}
+                            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                          >
+                            {roadmapKpis.byStatus.map((_, i) => (
+                              <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: 'rgba(30, 30, 40, 0.95)',
+                              border: '1px solid rgba(100, 100, 120, 0.3)',
+                              borderRadius: '8px',
+                              padding: '12px',
+                            }}
+                            formatter={(value: number, name: string) => [
+                              `${value} projet(s) (${roadmapKpis && roadmapKpis.totalFeatures > 0 ? ((value / roadmapKpis.totalFeatures) * 100).toFixed(1) : 0} %)`,
+                              name,
+                            ]}
+                          />
+                          <Legend
+                            formatter={(value, entry) => (
+                              <span className="text-surface-300 text-sm">
+                                {value} ({entry?.payload?.value ?? 0})
+                              </span>
+                            )}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      {roadmapKpis.byStatus.map((s, i) => (
+                        <div key={s.name} className="flex items-center gap-2 text-sm">
+                          <span
+                            className="w-3 h-3 rounded-full shrink-0"
+                            style={{ backgroundColor: DONUT_COLORS[i % DONUT_COLORS.length] }}
+                          />
+                          <span className="text-surface-300 truncate">{s.name}</span>
+                          <span className="text-surface-100 font-medium tabular-nums shrink-0">{s.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+          {/* Filtres Monday (vues du board) — visible dès qu'un board est sélectionné */}
+          {!roadmapLoading && roadmapBoardId && (
+            <div className="p-6 pt-0">
+              <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                <button
+                  type="button"
+                  onClick={() => setRoadmapViewsOpen((o) => !o)}
+                  className="w-full flex items-center justify-between gap-2 text-left text-sm font-semibold text-surface-200 hover:text-surface-100"
+                >
+                  <span className="flex items-center gap-2">
+                    <Filter className="w-4 h-4 text-amber-400" />
+                    Filtres Monday (vues du board)
+                  </span>
+                  {roadmapViewsLoading ? (
+                    <Loader2 className="w-4 h-4 text-amber-400 animate-spin" />
+                  ) : (
+                    <span className="text-surface-500">
+                      {roadmapViews?.length ?? 0} vue(s)
+                    </span>
+                  )}
+                  {roadmapViews && roadmapViews.length > 0 && (
+                    <ChevronDown
+                      className={`w-4 h-4 text-surface-500 transition-transform ${roadmapViewsOpen ? 'rotate-180' : ''}`}
+                    />
+                  )}
+                </button>
+                {roadmapViewsOpen && (
+                  <div className="mt-4 space-y-3">
+                    {roadmapViewsLoading && (
+                      <div className="flex items-center gap-2 text-surface-500 text-sm">
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        Chargement des vues…
+                      </div>
+                    )}
+                    {!roadmapViewsLoading && (!roadmapViews || roadmapViews.length === 0) && (
+                      <p className="text-surface-500 text-sm">
+                        Aucune vue récupérée (ou API Monday &lt; 2025-10). Les champs filter/settings sont disponibles à partir de la version 2025-10.
+                      </p>
+                    )}
+                    {!roadmapViewsLoading &&
+                      roadmapViews &&
+                      roadmapViews.length > 0 &&
+                      roadmapViews.map((view) => (
+                        <div
+                          key={view.id}
+                          className="rounded-lg border border-surface-600/50 bg-surface-900/50 p-3 text-sm"
+                        >
+                          <div className="flex items-center gap-2 text-surface-200 font-medium">
+                            {view.name}
+                            <span className="text-surface-500 font-normal">({view.type})</span>
+                            {view.tags?.length ? (
+                              <span className="text-xs text-surface-500">
+                                tags: {view.tags.join(', ')}
+                              </span>
+                            ) : null}
+                          </div>
+                          {view.filter != null && (
+                            <div className="mt-2">
+                              <div className="text-xs text-surface-500 mb-1">Filter</div>
+                              <pre className="overflow-x-auto rounded bg-surface-950 p-2 text-xs text-surface-300 max-h-32 overflow-y-auto">
+                                {typeof view.filter === 'string'
+                                  ? view.filter
+                                  : JSON.stringify(view.filter, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                          {view.settings != null && Object.keys(view.settings as object).length > 0 && (
+                            <div className="mt-2">
+                              <div className="text-xs text-surface-500 mb-1">Settings</div>
+                              <pre className="overflow-x-auto rounded bg-surface-950 p-2 text-xs text-surface-300 max-h-32 overflow-y-auto">
+                                {typeof view.settings === 'string'
+                                  ? view.settings
+                                  : JSON.stringify(view.settings, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                          {view.sort != null && (
+                            <div className="mt-2">
+                              <div className="text-xs text-surface-500 mb-1">Sort</div>
+                              <pre className="overflow-x-auto rounded bg-surface-950 p-2 text-xs text-surface-300">
+                                {typeof view.sort === 'string'
+                                  ? view.sort
+                                  : JSON.stringify(view.sort, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                          {view.filterUserId != null && (
+                            <div className="mt-1 text-xs text-surface-500">
+                              filter_user_id: {view.filterUserId}
+                            </div>
+                          )}
+                          {view.filterTeamId != null && (
+                            <div className="mt-0.5 text-xs text-surface-500">
+                              filter_team_id: {view.filterTeamId}
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {!roadmapLoading && roadmapBoardId && !roadmapKpis && (roadmapData?.items?.length ?? 0) === 0 && (
+            <div className="p-6 text-surface-500 text-sm">Aucune donnée dans ce board.</div>
+          )}
+          {!roadmapLoading && roadmapBoardId && (roadmapData?.items?.length ?? 0) > 0 && !roadmapKpis && (
+            <div className="p-6 text-amber-200/90 text-sm">
+              Colonnes attendues : « CP RÉFÉRENT » (ou similaire) et « Status » / « Statut » pour les indicateurs.
             </div>
           )}
         </section>

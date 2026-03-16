@@ -36,6 +36,19 @@ export interface MondayItem {
   column_values?: Array<{ id: string; text?: string; type: string; value?: string }>;
 }
 
+/** Vue d'un board Monday (filtres, paramètres, tri). filter/settings/sort sont en JSON (API 2025-10). */
+export interface MondayBoardView {
+  id: string;
+  name: string;
+  type: string;
+  filter?: unknown;
+  settings?: unknown;
+  sort?: unknown;
+  tags?: string[];
+  filterUserId?: number;
+  filterTeamId?: number;
+}
+
 interface MondayGraphQLResponse<T> {
   data?: T;
   errors?: Array<{ message: string; locations?: unknown[] }>;
@@ -232,6 +245,57 @@ export class MondayClient {
         column_values: i.column_values,
       })),
     };
+  }
+
+  /**
+   * Récupère les vues d'un board (filtres Monday, paramètres, tri).
+   * Champs filter, settings, sort disponibles à partir de l'API version 2025-10.
+   */
+  async getBoardViews(boardId: string): Promise<MondayBoardView[]> {
+    const result = await this.query<{
+      boards: Array<{
+        views: Array<{
+          id: string;
+          name: string;
+          type: string;
+          filter?: unknown;
+          settings?: unknown;
+          sort?: unknown;
+          tags?: string[];
+          filter_user_id?: number;
+          filter_team_id?: number;
+        }>;
+      }>;
+    }>(
+      `query ($boardId: ID!) {
+        boards(ids: [$boardId]) {
+          views {
+            id
+            name
+            type
+            filter
+            settings
+            sort
+            tags
+            filter_user_id
+            filter_team_id
+          }
+        }
+      }`,
+      { boardId }
+    );
+    const views = result?.boards?.[0]?.views ?? [];
+    return views.map((v) => ({
+      id: String(v.id),
+      name: v.name,
+      type: v.type,
+      filter: v.filter,
+      settings: v.settings,
+      sort: v.sort,
+      tags: v.tags,
+      filterUserId: v.filter_user_id,
+      filterTeamId: v.filter_team_id,
+    }));
   }
 }
 
