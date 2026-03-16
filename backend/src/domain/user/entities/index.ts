@@ -3,4 +3,6 @@ export type { IUser } from './User';
 export { Role } from './Role';
 export type { IRole, IPageVisibilities, PageId } from './Role';
 export { PAGE_IDS } from './Role';
+export { UserActivityLog } from './UserActivityLog';
+export type { IUserActivityLog, UserActivityType, IUserActivityLogMeta } from './UserActivityLog';
 

@@ -59,6 +59,14 @@ export interface UserWithRoleDto {
   roleName: string;
 }
 
+/** Activity log entry (login now; page_view / error_500 later) */
+export interface UserActivityLogEntry {
+  id: string;
+  type: 'login' | 'page_view' | 'error_500';
+  timestamp: string;
+  meta?: { page?: string; durationMs?: number; path?: string; count?: number };
+}
+
 export interface AuthResponse {
   success: boolean;
   token?: string;
@@ -264,6 +272,52 @@ export const authApi = {
     const response = await api.patch<{ success: boolean; role: RoleDto }>(`/api/auth/roles/${roleId}`, data);
     if (!response.data.success) throw new Error((response.data as { error?: string }).error);
     return response.data.role;
+  },
+
+  /**
+   * Record a page view for the current user (authenticated). Deduplicated per page per minute.
+   */
+  async recordPageView(page: string): Promise<void> {
+    try {
+      await api.post<{ success: boolean }>('/api/auth/me/page-view', { page });
+    } catch {
+      // Non-blocking: do not break navigation if tracking fails
+    }
+  },
+
+  /**
+   * Get activity logs for a user (super_admin only). Includes login timestamps; later page_view and error_500.
+   */
+  async getUserLogs(userId: string, limit = 100): Promise<UserActivityLogEntry[]> {
+    const response = await api.get<{ success: boolean; logs: UserActivityLogEntry[] }>(
+      `/api/auth/users/${userId}/logs`,
+      { params: { limit } }
+    );
+    if (!response.data.success) throw new Error((response.data as { error?: string }).error);
+    return response.data.logs;
+  },
+
+  /**
+   * Get page view stats for a user (super_admin only): daily counts, totals, percentages.
+   */
+  async getUserPageStats(
+    userId: string,
+    days = 30
+  ): Promise<{ pages: Record<string, number>; total: number; percentages: Record<string, number>; daily: Array<{ date: string; pages: Record<string, number>; total: number }> }> {
+    const response = await api.get<{
+      success: boolean;
+      pages: Record<string, number>;
+      total: number;
+      percentages: Record<string, number>;
+      daily: Array<{ date: string; pages: Record<string, number>; total: number }>;
+    }>(`/api/auth/users/${userId}/page-stats`, { params: { days } });
+    if (!response.data.success) throw new Error((response.data as { error?: string }).error);
+    return {
+      pages: response.data.pages,
+      total: response.data.total,
+      percentages: response.data.percentages,
+      daily: response.data.daily ?? []
+    };
   },
 
   /**

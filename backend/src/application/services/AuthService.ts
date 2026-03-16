@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { User, IUser } from '../../domain/user/entities/User';
 import { Role, IPageVisibilities, PAGE_IDS } from '../../domain/user/entities/Role';
+import { UserActivityLog } from '../../domain/user/entities/UserActivityLog';
 import { logger } from '../../utils/logger';
 
 const SUPER_ADMIN_EMAIL = 'bdeguil-robin@adoria.com';
@@ -298,6 +299,8 @@ export class AuthService {
       await user.save();
       await this.ensureSuperAdmin(user.email);
 
+      await this.logLoginOncePerMinute(user._id);
+
       const token = this.generateToken({
         userId: user._id.toString(),
         email: user.email,
@@ -375,6 +378,8 @@ export class AuthService {
         await user.save();
       }
 
+      await this.logLoginOncePerMinute(user._id);
+
       if (!user.isActive) {
         return {
           success: false,
@@ -445,6 +450,28 @@ export class AuthService {
       if (updated) logger.info(`Super admin role set for ${email}`);
     } catch (error) {
       logger.error('ensureSuperAdmin error:', error);
+    }
+  }
+
+  /**
+   * Log a login event at most once per user per minute (avoids duplicate logs from double frontend calls).
+   */
+  private async logLoginOncePerMinute(userId: IUser['_id']): Promise<void> {
+    try {
+      const oneMinuteAgo = new Date(Date.now() - 60_000);
+      const existing = await UserActivityLog.findOne({
+        userId,
+        type: 'login',
+        timestamp: { $gte: oneMinuteAgo }
+      });
+      if (existing) return;
+      await UserActivityLog.create({
+        userId,
+        type: 'login',
+        timestamp: new Date()
+      });
+    } catch (err) {
+      logger.error('Failed to log user login activity', err);
     }
   }
 
