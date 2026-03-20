@@ -3,12 +3,9 @@ import {
   Package,
   Loader2,
   AlertCircle,
-  AlertTriangle,
   CheckCircle,
-  LayoutGrid,
   User,
   RefreshCw,
-  ChevronRight,
   List,
   MapPin,
   Target,
@@ -19,16 +16,17 @@ import {
   Clock,
   BarChart3,
   X,
-  TrendingUp,
-  MessageSquare,
+  ChevronDown,
+  Info,
+  Smartphone,
 } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, RadialBarChart, RadialBar } from 'recharts';
 import { mondayApi, MondayUser, MondayBoard, MondayColumn, MondayItem, MondayWorkspace } from '../services/api';
 
-const PAYS_COLUMN_KEYS = ['pays', 'country', 'country code', 'nationalité'];
-const SITES_ACTIFS_KEYS = ['sites actifs', 'sites_actifs', 'active sites'];
-const TARGET_KEYS = ['target', 'objectif', 'cible'];
-const CDC_KEYS = ['cdc déployé', 'cdc', 'cdc deployé', 'cdc deploye'];
+const PAYS_COLUMN_KEYS = ['pays', 'country', 'country code', 'nationalité', 'nationalite'];
+const SITES_ACTIFS_KEYS = ['sites actifs', 'sites_actifs', 'active sites', 'nb sites', 'nombre de sites'];
+const TARGET_KEYS = ['target', 'objectif', 'cible', 'goal'];
+const CDC_KEYS = ['cdc déployé', 'cdc', 'cdc deployé', 'cdc deploye', 'cdc déploye'];
 const SATISFACTION_KEYS = [
   'degré satisfaction client (engagement CP)',
   'degre satisfaction client',
@@ -38,29 +36,47 @@ const SATISFACTION_KEYS = [
   'taux satisfaction',
   'satisfaction global',
 ];
-const DATE_MISE_EN_PROD_KEYS = ['date mise en production', 'mise en production', 'go live', 'lancement production', 'date de lancement en production', 'date lancement production', 'production'];
-const PROJECT_START_DATE_KEYS = ['project start date', 'date début projet', 'start date', 'date de début', 'début projet', 'date start', 'date début'];
-const TOTAL_PROJETS_KEYS = ['total projets', 'nb projets', 'nombre projets', 'total'];
-const UTILISATEURS_ACTIFS_KEYS = ["kpi adoria - nbre d'utilisateurs actifs", 'utilisateurs actifs', 'nb utilisateurs actifs', 'nombre utilisateurs actifs', 'users actifs', 'active users'];
+const DATE_MISE_EN_PROD_KEYS = ['date mise en production', 'mise en production', 'go live', 'lancement production', 'date de lancement en production', 'date lancement production', 'production', 'date prod'];
+const PROJECT_START_DATE_KEYS = ['project start date', 'date début projet', 'start date', 'date de début', 'début projet', 'date start', 'date début', 'début'];
+const TOTAL_PROJETS_KEYS = ['total projets', 'nb projets', 'nombre projets', 'total', 'projets'];
+const UTILISATEURS_ACTIFS_KEYS = [
+  "kpi adoria - nbre d'utilisateurs actifs",
+  "kpi adoria - nbre d\u2019utilisateurs actifs",
+  'kpi adoria - nbre utilisateurs actifs',
+  'nbre d\'utilisateurs actifs',
+  'utilisateurs actifs',
+  'nb utilisateurs actifs',
+  'nombre utilisateurs actifs',
+  'users actifs',
+  'active users',
+];
 const UTILISATEURS_BRUTS_KEYS = ["kpi adoria - nbre d'utilisateurs bruts", 'utilisateurs bruts', 'nb utilisateurs bruts', 'nombre utilisateurs bruts'];
 const REFERENCES_MERCURIAL_KEYS = ['références mercurial', 'references mercurial', 'ref mercurial', 'mercurial', 'nb ref mercurial'];
 const FICHES_TECHNIQUES_ACTIVES_KEYS = ['fiches techniques actives', 'fiche technique active', 'ft actives', 'nb ft actives'];
 const FICHES_TECHNIQUES_BRUT_KEYS = ['kpi adoria - nombre brut de fiches techniques', 'fiches techniques brut', 'fiches techniques brutes', 'ft brut', 'ft brutes', 'nb ft brut'];
+const PRODUITS_GENERIQUES_BRUT_KEYS = ['produits génériques brut', 'total produits génériques brut', 'nb produits génériques brut', 'nombre produits génériques brut', 'produits generiques brut'];
+const PRODUITS_GENERIQUES_ACTIFS_KEYS = ['produits génériques actifs', 'produits génériques actifs brut', 'nb produits génériques actifs', 'produits generiques actifs'];
+const UTILISATION_MOBILE_KEYS = ['utilisation mobile', 'nb utilisation mobile', 'nombre utilisation mobile', 'total utilisation mobile', 'mobile'];
 
-/** Workspace name for NPS Fev 2026 Monday (exact or partial match). */
-const NPS_FEV_2026_WORKSPACE_NAME = 'NPS Fev 2026 Monday';
-/** Flexible match: NPS + (Fev|Fév|Feb) + 2026 + Monday so different spellings still show the NPS KPIs. */
-function isNpsFev2026Workspace(name: string): boolean {
+/** Workspace name for Roadmap Adoria 2026 (exact or partial match). */
+const ROADMAP_ADORIA_2026_KEYS = ['roadmap adoria 2026', 'roadmap adoria', 'adoria 2026', 'roadmap 2026', 'roadmap adoria'];
+function isRoadmapAdoria2026Workspace(name: string): boolean {
   if (!name || typeof name !== 'string') return false;
   const n = name.toLowerCase().trim();
-  const hasNps = n.includes('nps');
-  const hasMonth = n.includes('fev') || n.includes('fév') || n.includes('feb');
-  const hasYear = n.includes('2026');
-  const hasMonday = n.includes('monday');
-  return !!(hasNps && hasYear && (hasMonday || hasMonth));
+  if (n.includes('roadmap') && (n.includes('adoria') || n.includes('2026'))) return true;
+  return ROADMAP_ADORIA_2026_KEYS.some((k) => n.includes(k));
 }
-const NPS_SCORE_KEYS = ['nps', 'score nps', 'note nps', 'recommandation', 'note', 'score', 'note recommandation', 'how likely'];
-const NPS_CATEGORY_KEYS = ['catégorie nps', 'statut nps', 'type nps', 'segment', 'promoteur', 'détracteur', 'passif', 'nps category'];
+const CP_REFERENT_KEYS = ['cp référent', 'cp referent', 'cp réf', 'référent', 'referent'];
+const STATUS_KEYS = ['status', 'statut', 'état', 'state'];
+
+/** Board ID Roadmap Adoria 2026 (chargé par défaut dans la section KPI Roadmap). */
+const ROADMAP_ADORIA_2026_BOARD_ID = '5191064770';
+/** Board ID Suivi clients par cp : variable d’env VITE_MONDAY_SUIVI_CLIENT_BOARD_ID ou valeur par défaut. */
+const SUIVI_CLIENT_CP_BOARD_ID = (import.meta.env?.VITE_MONDAY_SUIVI_CLIENT_BOARD_ID ?? '475358061').trim() || '475358061';
+/** ID de la colonne « KPI adoria - Nbre d'utilisateurs actifs » sur le board Suivi (Monday). */
+const SUIVI_UTILISATEURS_ACTIFS_COLUMN_ID = 'numeric_mkxpq040';
+/** ID de la colonne CDC déployé sur le board Suivi (Monday). */
+const SUIVI_CDC_DEPLOYE_COLUMN_ID = 'numeric_mkwxdthf';
 
 function findColumn(columns: MondayColumn[], keywords: string[]): MondayColumn | null {
   const normalize = (s: string) =>
@@ -73,16 +89,19 @@ function findColumn(columns: MondayColumn[], keywords: string[]): MondayColumn |
 }
 
 function getItemValue(item: MondayItem, columnId: string): string {
-  const cv = item.column_values?.find((c) => c.id === columnId);
+  const cv = item.column_values?.find((c) => String(c.id) === String(columnId));
   return (cv?.text ?? cv?.value ?? '').toString().trim();
 }
 
 /** Extract numeric value from a Monday column (handles "numbers" type with value as JSON e.g. {"number": "5"}). */
 function getItemNumericValue(item: MondayItem, columnId: string): number {
-  const cv = item.column_values?.find((c) => c.id === columnId);
+  const cv = item.column_values?.find((c) => String(c.id) === String(columnId));
   if (!cv) return 0;
   const text = (cv.text ?? '').toString().trim();
   const rawValue = (cv.value ?? '').toString().trim();
+  // Monday API can sometimes return value as number at runtime
+  const rawVal = (cv as { value?: unknown }).value;
+  if (typeof rawVal === 'number' && Number.isFinite(rawVal)) return rawVal;
   // Monday "numbers" column often returns value as JSON {"number": "5"} or similar
   if (rawValue.startsWith('{')) {
     try {
@@ -96,12 +115,14 @@ function getItemNumericValue(item: MondayItem, columnId: string): number {
       // ignore
     }
   }
-  return parseNum(text || rawValue);
+  const fromText = parseNum(text || rawValue);
+  if (Number.isFinite(fromText)) return fromText;
+  return 0;
 }
 
 /** Binary satisfaction column: returns 'satisfait' | 'pas satisfait' | null (empty). Uses text or JSON label. */
 function getSatisfactionStatus(item: MondayItem, columnId: string): 'satisfait' | 'pas satisfait' | null {
-  const cv = item.column_values?.find((c) => c.id === columnId);
+  const cv = item.column_values?.find((c) => String(c.id) === String(columnId));
   let text = (cv?.text ?? '').toString().trim();
   const rawValue = (cv?.value ?? '').toString().trim();
   if (!text && rawValue) {
@@ -180,20 +201,26 @@ function computeSuiviKpis(
   totalReferencesMercurial: number;
   totalFichesTechniquesActives: number;
   totalFichesTechniquesBrut: number;
+  totalProduitsGeneriquesBrut: number;
+  totalProduitsGeneriquesActifs: number;
+  totalUtilisationMobile: number;
 } {
   const colSitesActifs = findColumn(columns, SITES_ACTIFS_KEYS);
   const colTarget = findColumn(columns, TARGET_KEYS);
-  const colCdc = findColumn(columns, CDC_KEYS);
+  const colCdc = columns.find((c) => String(c.id) === SUIVI_CDC_DEPLOYE_COLUMN_ID) ?? findColumn(columns, CDC_KEYS);
   const colSatisfaction = findColumn(columns, SATISFACTION_KEYS);
   const colDateProd = findColumn(columns, DATE_MISE_EN_PROD_KEYS);
   const colStartDate = findColumn(columns, PROJECT_START_DATE_KEYS);
   const colTotalProjets = findColumn(columns, TOTAL_PROJETS_KEYS);
   const colPays = findColumn(columns, PAYS_COLUMN_KEYS);
-  const colUtilisateursActifs = findColumn(columns, UTILISATEURS_ACTIFS_KEYS);
+  const colUtilisateursActifs = columns.find((c) => String(c.id) === SUIVI_UTILISATEURS_ACTIFS_COLUMN_ID) ?? findColumn(columns, UTILISATEURS_ACTIFS_KEYS);
   const colUtilisateursBruts = findColumn(columns, UTILISATEURS_BRUTS_KEYS);
   const colReferencesMercurial = findColumn(columns, REFERENCES_MERCURIAL_KEYS);
   const colFichesTechniquesActives = findColumn(columns, FICHES_TECHNIQUES_ACTIVES_KEYS);
   const colFichesTechniquesBrut = findColumn(columns, FICHES_TECHNIQUES_BRUT_KEYS);
+  const colProduitsGeneriquesBrut = findColumn(columns, PRODUITS_GENERIQUES_BRUT_KEYS);
+  const colProduitsGeneriquesActifs = findColumn(columns, PRODUITS_GENERIQUES_ACTIFS_KEYS);
+  const colUtilisationMobile = findColumn(columns, UTILISATION_MOBILE_KEYS);
 
   let sitesActifs = 0;
   let target = 0;
@@ -203,6 +230,9 @@ function computeSuiviKpis(
   let totalReferencesMercurial = 0;
   let totalFichesTechniquesActives = 0;
   let totalFichesTechniquesBrut = 0;
+  let totalProduitsGeneriquesBrut = 0;
+  let totalProduitsGeneriquesActifs = 0;
+  let totalUtilisationMobile = 0;
   let satisfactionSatisfaitCount = 0;
   const satisfactionByClient: { clientName: string; status: 'satisfait' | 'pas satisfait' }[] = [];
   let totalProjets = 0;
@@ -214,9 +244,9 @@ function computeSuiviKpis(
   const currentYear = new Date().getFullYear();
 
   for (const item of items) {
-    if (colSitesActifs) sitesActifs += parseNum(getItemValue(item, colSitesActifs.id));
-    if (colTarget) target += parseNum(getItemValue(item, colTarget.id));
-    if (colCdc) cdcDeploye += parseNum(getItemValue(item, colCdc.id)) || (getItemValue(item, colCdc.id) ? 1 : 0);
+    if (colSitesActifs) sitesActifs += getItemNumericValue(item, colSitesActifs.id) || parseNum(getItemValue(item, colSitesActifs.id));
+    if (colTarget) target += getItemNumericValue(item, colTarget.id) || parseNum(getItemValue(item, colTarget.id));
+    if (colCdc) cdcDeploye += getItemNumericValue(item, colCdc.id) || parseNum(getItemValue(item, colCdc.id)) || (getItemValue(item, colCdc.id) ? 1 : 0);
     if (colSatisfaction) {
       const status = getSatisfactionStatus(item, colSatisfaction.id);
       if (status) {
@@ -224,12 +254,15 @@ function computeSuiviKpis(
         satisfactionByClient.push({ clientName: item.name || 'Sans nom', status });
       }
     }
-    if (colTotalProjets) totalProjets += parseNum(getItemValue(item, colTotalProjets.id));
-    if (colUtilisateursActifs) totalUtilisateursActifs += getItemNumericValue(item, colUtilisateursActifs.id);
-    if (colUtilisateursBruts) totalUtilisateursBruts += getItemNumericValue(item, colUtilisateursBruts.id);
+    if (colTotalProjets) totalProjets += getItemNumericValue(item, colTotalProjets.id) || parseNum(getItemValue(item, colTotalProjets.id));
+    if (colUtilisateursActifs) totalUtilisateursActifs += getItemNumericValue(item, colUtilisateursActifs.id) || parseNum(getItemValue(item, colUtilisateursActifs.id));
+    if (colUtilisateursBruts) totalUtilisateursBruts += getItemNumericValue(item, colUtilisateursBruts.id) || parseNum(getItemValue(item, colUtilisateursBruts.id));
     if (colReferencesMercurial) totalReferencesMercurial += getItemNumericValue(item, colReferencesMercurial.id);
     if (colFichesTechniquesActives) totalFichesTechniquesActives += getItemNumericValue(item, colFichesTechniquesActives.id);
     if (colFichesTechniquesBrut) totalFichesTechniquesBrut += getItemNumericValue(item, colFichesTechniquesBrut.id);
+    if (colProduitsGeneriquesBrut) totalProduitsGeneriquesBrut += getItemNumericValue(item, colProduitsGeneriquesBrut.id) || parseNum(getItemValue(item, colProduitsGeneriquesBrut.id));
+    if (colProduitsGeneriquesActifs) totalProduitsGeneriquesActifs += getItemNumericValue(item, colProduitsGeneriquesActifs.id) || parseNum(getItemValue(item, colProduitsGeneriquesActifs.id));
+    if (colUtilisationMobile) totalUtilisationMobile += getItemNumericValue(item, colUtilisationMobile.id) || parseNum(getItemValue(item, colUtilisationMobile.id));
     if (colPays) {
       const pays = getItemValue(item, colPays.id) || 'Non renseigné';
       paysCount.set(pays, (paysCount.get(pays) ?? 0) + 1);
@@ -294,122 +327,61 @@ function computeSuiviKpis(
     totalReferencesMercurial,
     totalFichesTechniquesActives,
     totalFichesTechniquesBrut,
+    totalProduitsGeneriquesBrut,
+    totalProduitsGeneriquesActifs,
+    totalUtilisationMobile,
   };
 }
 
-export type NpsCategory = 'promoteur' | 'passif' | 'détracteur';
 
-function getNpsCategoryFromScore(score: number): NpsCategory {
-  if (score >= 9) return 'promoteur';
-  if (score >= 7) return 'passif';
-  return 'détracteur';
-}
+function computeRoadmapKpis(
+  items: MondayItem[],
+  columns: MondayColumn[]
+): {
+  totalFeatures: number;
+  withCpReferent: number;
+  missingCpReferent: number;
+  ratioCpReferentPct: number;
+  byCpReferent: { name: string; count: number }[];
+  byStatus: { name: string; value: number }[];
+} | null {
+  const colCpReferent = findColumn(columns, CP_REFERENT_KEYS);
+  const colStatus = findColumn(columns, STATUS_KEYS);
+  const totalFeatures = items.length;
+  if (totalFeatures === 0) return null;
 
-function getNpsCategoryFromItem(item: MondayItem, scoreColumnId: string, categoryColumnId: string | null): NpsCategory | null {
-  if (categoryColumnId) {
-    const text = getItemValue(item, categoryColumnId).toLowerCase();
-    if (text.includes('promoteur')) return 'promoteur';
-    if (text.includes('passif')) return 'passif';
-    if (text.includes('détracteur') || text.includes('detracteur')) return 'détracteur';
-  }
-  if (!scoreColumnId) return null;
-  const raw = getItemValue(item, scoreColumnId).trim();
-  if (!raw) return null;
-  const num = parseNum(raw);
-  const parsed = Number.isFinite(num) ? num : parseInt(raw.replace(/\D/g, ''), 10);
-  if (Number.isFinite(parsed) && parsed >= 0 && parsed <= 10) return getNpsCategoryFromScore(parsed);
-  return null;
-}
-
-export interface NpsKpis {
-  totalReponses: number;
-  promoteurs: number;
-  passifs: number;
-  detracteurs: number;
-  pctPromoteurs: number;
-  pctPassifs: number;
-  pctDetracteurs: number;
-  scoreNps: number; // -100 à +100
-  scoreNpsSur10: number | null; // moyenne des notes si disponible
-  alerts: { id: string; level: 'danger' | 'warning' | 'info'; message: string }[];
-}
-
-function computeNpsKpis(items: MondayItem[], columns: MondayColumn[]): NpsKpis | null {
-  const colScore = findColumn(columns, NPS_SCORE_KEYS);
-  const colCategory = findColumn(columns, NPS_CATEGORY_KEYS);
-  if (!colScore && !colCategory) return null;
-
-  let promoteurs = 0;
-  let passifs = 0;
-  let detracteurs = 0;
-  let sumScore = 0;
-  let countScore = 0;
+  let withCpReferent = 0;
+  const cpReferentCount = new Map<string, number>();
+  const statusCount = new Map<string, number>();
 
   for (const item of items) {
-    const cat = getNpsCategoryFromItem(item, colScore?.id ?? '', colCategory?.id ?? null);
-    if (!cat) continue;
-    if (cat === 'promoteur') promoteurs += 1;
-    else if (cat === 'passif') passifs += 1;
-    else detracteurs += 1;
-    if (colScore) {
-      const raw = getItemValue(item, colScore.id);
-      const n = parseNum(raw) || (raw ? parseInt(raw.replace(/\D/g, ''), 10) : NaN);
-      if (Number.isFinite(n) && n >= 0 && n <= 10) {
-        sumScore += n;
-        countScore += 1;
-      }
+    const cpVal = colCpReferent ? getItemValue(item, colCpReferent.id) : '';
+    const hasCp = !!cpVal && cpVal.toLowerCase() !== 'sans nom' && cpVal !== '-';
+    if (hasCp) {
+      withCpReferent += 1;
+      cpReferentCount.set(cpVal, (cpReferentCount.get(cpVal) ?? 0) + 1);
     }
+    const statusVal = colStatus ? getItemValue(item, colStatus.id) : '';
+    const statusLabel = statusVal || 'Non renseigné';
+    statusCount.set(statusLabel, (statusCount.get(statusLabel) ?? 0) + 1);
   }
 
-  const totalReponses = promoteurs + passifs + detracteurs;
-  if (totalReponses === 0) {
-    return {
-      totalReponses: 0,
-      promoteurs: 0,
-      passifs: 0,
-      detracteurs: 0,
-      pctPromoteurs: 0,
-      pctPassifs: 0,
-      pctDetracteurs: 0,
-      scoreNps: 0,
-      scoreNpsSur10: null,
-      alerts: [{ id: 'no-data', level: 'info', message: 'Aucune réponse NPS trouvée dans ce board.' }],
-    };
-  }
-
-  const pctPromoteurs = (promoteurs / totalReponses) * 100;
-  const pctPassifs = (passifs / totalReponses) * 100;
-  const pctDetracteurs = (detracteurs / totalReponses) * 100;
-  const scoreNps = pctPromoteurs - pctDetracteurs; // -100 à +100
-  const scoreNpsSur10 = countScore > 0 ? sumScore / countScore : null;
-
-  const alerts: { id: string; level: 'danger' | 'warning' | 'info'; message: string }[] = [];
-  if (scoreNps < 0) {
-    alerts.push({ id: 'nps-negative', level: 'danger', message: 'Score NPS négatif : plus de détracteurs que de promoteurs.' });
-  } else if (scoreNps < 30) {
-    alerts.push({ id: 'nps-low', level: 'warning', message: 'Score NPS sous 30 : marge de progression importante.' });
-  }
-  if (pctDetracteurs > 20) {
-    alerts.push({ id: 'detracteurs-high', level: 'warning', message: `Taux de détracteurs élevé (${pctDetracteurs.toFixed(0)} %) : prioriser les actions correctives.` });
-  }
-  if (pctPromoteurs >= 50 && scoreNps >= 50) {
-    alerts.push({ id: 'nps-good', level: 'info', message: 'Score NPS satisfaisant : maintenir l’effort.' });
-  }
-  if (totalReponses < 10) {
-    alerts.push({ id: 'low-responses', level: 'info', message: `Peu de réponses (${totalReponses}) : les indicateurs sont à prendre avec précaution.` });
-  }
+  const missingCpReferent = totalFeatures - withCpReferent;
+  const ratioCpReferentPct = totalFeatures > 0 ? (withCpReferent / totalFeatures) * 100 : 0;
+  const byCpReferent = Array.from(cpReferentCount.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+  const byStatus = Array.from(statusCount.entries())
+    .map(([name, value]) => ({ name, value }))
+    .sort((a, b) => b.value - a.value);
 
   return {
-    totalReponses,
-    promoteurs,
-    passifs,
-    detracteurs,
-    pctPromoteurs,
-    pctPassifs,
-    pctDetracteurs,
-    scoreNps,
-    scoreNpsSur10,
-    alerts,
+    totalFeatures,
+    withCpReferent,
+    missingCpReferent,
+    ratioCpReferentPct,
+    byCpReferent,
+    byStatus,
   };
 }
 
@@ -419,37 +391,27 @@ export function ProduitDashboard() {
   const [configured, setConfigured] = useState<boolean | null>(null);
   const [me, setMe] = useState<MondayUser | null>(null);
   const [workspaces, setWorkspaces] = useState<MondayWorkspace[]>([]);
-  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<string>('');
   const [boards, setBoards] = useState<MondayBoard[]>([]);
-  const [selectedBoard, setSelectedBoard] = useState<{
-    board: MondayBoard;
-    columns: MondayColumn[];
-    items: MondayItem[];
-  } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [boardLoading, setBoardLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [suiviBoardId, setSuiviBoardId] = useState<string>('');
   const [suiviData, setSuiviData] = useState<{ columns: MondayColumn[]; items: MondayItem[] } | null>(null);
   const [suiviLoading, setSuiviLoading] = useState(false);
   const [showSatisfactionModal, setShowSatisfactionModal] = useState(false);
   const [showDelaiModal, setShowDelaiModal] = useState(false);
-  const [npsBoardId, setNpsBoardId] = useState<string>('');
-  const [npsData, setNpsData] = useState<{ columns: MondayColumn[]; items: MondayItem[] } | null>(null);
-  const [npsLoading, setNpsLoading] = useState(false);
+  const [roadmapBoardId, setRoadmapBoardId] = useState<string>('');
+  const [roadmapData, setRoadmapData] = useState<{ columns: MondayColumn[]; items: MondayItem[] } | null>(null);
+  const [roadmapLoading, setRoadmapLoading] = useState(false);
+  const [roadmapBoards, setRoadmapBoards] = useState<MondayBoard[]>([]);
+  const [roadmapSectionOpen, setRoadmapSectionOpen] = useState(true);
+  const [suiviSectionOpen, setSuiviSectionOpen] = useState(true);
+  const [detailBoard, setDetailBoard] = useState<'roadmap' | 'suivi' | null>(null);
+  const [detailKpi, setDetailKpi] = useState<string | null>(null);
 
-  const npsWorkspace = useMemo(
-    () =>
-      workspaces.find(
-        (w) =>
-          w.name === NPS_FEV_2026_WORKSPACE_NAME ||
-          w.name.includes('NPS Fev 2026') ||
-          w.name.includes('NPS Fev 2026 Monday') ||
-          isNpsFev2026Workspace(w.name)
-      ) ?? null,
+  const roadmapWorkspace = useMemo(
+    () => workspaces.find((w) => isRoadmapAdoria2026Workspace(w.name)) ?? null,
     [workspaces]
   );
-  const isNpsWorkspaceSelected = Boolean(selectedWorkspaceId && npsWorkspace && selectedWorkspaceId === npsWorkspace.id);
 
   const fetchStatusAndMe = useCallback(async () => {
     setLoading(true);
@@ -489,8 +451,7 @@ export function ProduitDashboard() {
     if (!configured) return;
     const load = async () => {
       try {
-        const workspaceIds = selectedWorkspaceId ? [selectedWorkspaceId] : undefined;
-        const boardsRes = await mondayApi.getBoards(100, workspaceIds);
+        const boardsRes = await mondayApi.getBoards(100, undefined);
         if (boardsRes.success && boardsRes.boards) {
           setBoards(boardsRes.boards);
         }
@@ -499,7 +460,27 @@ export function ProduitDashboard() {
       }
     };
     load();
-  }, [selectedWorkspaceId, configured]);
+  }, [configured]);
+
+  useEffect(() => {
+    if (!configured || !roadmapWorkspace) {
+      setRoadmapBoards([]);
+      return;
+    }
+    const load = async () => {
+      try {
+        const boardsRes = await mondayApi.getBoards(100, [roadmapWorkspace.id]);
+        if (boardsRes.success && boardsRes.boards) {
+          setRoadmapBoards(boardsRes.boards);
+        } else {
+          setRoadmapBoards([]);
+        }
+      } catch {
+        setRoadmapBoards([]);
+      }
+    };
+    load();
+  }, [configured, roadmapWorkspace]);
 
   useEffect(() => {
     if (!suiviBoardId || !configured) {
@@ -511,62 +492,141 @@ export function ProduitDashboard() {
     mondayApi
       .getBoard(suiviBoardId, 500)
       .then((res) => {
-        if (res.success && res.columns && res.items) {
-          setSuiviData({ columns: res.columns, items: res.items });
+        if (res.success && res.columns) {
+          setSuiviData({ columns: res.columns, items: Array.isArray(res.items) ? res.items : [] });
         }
       })
+      .catch(() => setSuiviData(null))
       .finally(() => setSuiviLoading(false));
   }, [suiviBoardId, configured]);
 
   useEffect(() => {
-    if (!npsBoardId || !configured) {
-      setNpsData(null);
+    if (!roadmapBoardId || !configured) {
+      setRoadmapData(null);
       return;
     }
-    setNpsLoading(true);
-    setNpsData(null);
+    setRoadmapLoading(true);
+    setRoadmapData(null);
     mondayApi
-      .getBoard(npsBoardId, 500)
+      .getBoard(roadmapBoardId, 500)
       .then((res) => {
         if (res.success && res.columns && res.items) {
-          setNpsData({ columns: res.columns, items: res.items });
+          setRoadmapData({ columns: res.columns, items: res.items });
         }
       })
-      .finally(() => setNpsLoading(false));
-  }, [npsBoardId, configured]);
+      .finally(() => setRoadmapLoading(false));
+  }, [roadmapBoardId, configured]);
 
   const suiviKpis = useMemo(() => {
-    if (!suiviData?.items.length) return null;
-    return computeSuiviKpis(suiviData.items, suiviData.columns);
+    if (!suiviData) return null;
+    return computeSuiviKpis(suiviData.items || [], suiviData.columns || []);
   }, [suiviData]);
 
-  const npsKpis = useMemo(() => {
-    if (!npsData?.items?.length) return null;
-    return computeNpsKpis(npsData.items, npsData.columns);
-  }, [npsData]);
+  /** Données pour la modale détail KPI (répartition par ligne). */
+  const kpiDetailData = useMemo((): { title: string; rows: { name: string; value: number }[] } | { title: string; rows: { name: string; value1: number; value2: number }[] } | null => {
+    if (!detailKpi || !suiviData?.columns?.length || !suiviData?.items?.length) return null;
+    const columns = suiviData.columns;
+    const items = suiviData.items;
+    const getCol = (keys: string[]) => findColumn(columns, keys);
+    const getColById = (id: string) => columns.find((c) => String(c.id) === id) ?? null;
+    const getVal = (item: MondayItem, col: MondayColumn) => getItemNumericValue(item, col.id) || parseNum(getItemValue(item, col.id));
 
-  const openBoard = async (board: MondayBoard) => {
-    setBoardLoading(true);
-    setSelectedBoard(null);
-    try {
-      const res = await mondayApi.getBoard(board.id, 200);
-      if (res.success && res.board && res.columns && res.items) {
-        setSelectedBoard({
-          board: res.board,
-          columns: res.columns,
-          items: res.items,
-        });
+    switch (detailKpi) {
+      case 'sitesActifs': {
+        const col = getCol(SITES_ACTIFS_KEYS);
+        if (!col) return null;
+        const rows = items.map((item) => ({ name: item.name || '—', value: getVal(item, col) }));
+        return { title: 'Sites actifs', rows: rows.sort((a, b) => b.value - a.value) };
       }
-    } catch {
-      setError('Impossible de charger le board');
-    } finally {
-      setBoardLoading(false);
+      case 'target': {
+        const col = getCol(TARGET_KEYS);
+        if (!col) return null;
+        const rows = items.map((item) => ({ name: item.name || '—', value: getVal(item, col) }));
+        return { title: 'Target sites', rows: rows.sort((a, b) => b.value - a.value) };
+      }
+      case 'cdcDeploye': {
+        const col = getColById(SUIVI_CDC_DEPLOYE_COLUMN_ID) ?? getCol(CDC_KEYS);
+        if (!col) return null;
+        const rows = items.map((item) => ({ name: item.name || '—', value: getVal(item, col) || (getItemValue(item, col.id) ? 1 : 0) }));
+        return { title: 'CDC déployé', rows: rows.sort((a, b) => b.value - a.value) };
+      }
+      case 'totalProjets': {
+        const col = getCol(TOTAL_PROJETS_KEYS);
+        if (!col) return null;
+        const rows = items.map((item) => ({ name: item.name || '—', value: getVal(item, col) }));
+        return { title: 'Total projets', rows: rows.sort((a, b) => b.value - a.value) };
+      }
+      case 'totalUtilisateursActifs': {
+        const col = getColById(SUIVI_UTILISATEURS_ACTIFS_COLUMN_ID) ?? getCol(UTILISATEURS_ACTIFS_KEYS);
+        if (!col) return null;
+        const rows = items.map((item) => ({ name: item.name || '—', value: getVal(item, col) }));
+        return { title: 'Utilisateurs actifs', rows: rows.sort((a, b) => b.value - a.value) };
+      }
+      case 'totalUtilisateursBruts': {
+        const col = getCol(UTILISATEURS_BRUTS_KEYS);
+        if (!col) return null;
+        const rows = items.map((item) => ({ name: item.name || '—', value: getVal(item, col) }));
+        return { title: 'Total des utilisateurs', rows: rows.sort((a, b) => b.value - a.value) };
+      }
+      case 'totalUtilisationMobile': {
+        const col = getCol(UTILISATION_MOBILE_KEYS);
+        if (!col) return null;
+        const rows = items.map((item) => ({ name: item.name || '—', value: getVal(item, col) }));
+        return { title: 'Utilisation mobile', rows: rows.sort((a, b) => b.value - a.value) };
+      }
+      case 'totalReferencesMercurial': {
+        const col = getCol(REFERENCES_MERCURIAL_KEYS);
+        if (!col) return null;
+        const rows = items.map((item) => ({ name: item.name || '—', value: getVal(item, col) }));
+        return { title: 'Références Mercurial', rows: rows.sort((a, b) => b.value - a.value) };
+      }
+      case 'fichesTechniques': {
+        const colActives = getCol(FICHES_TECHNIQUES_ACTIVES_KEYS);
+        const colBrut = getCol(FICHES_TECHNIQUES_BRUT_KEYS);
+        if (!colActives && !colBrut) return null;
+        const rows = items.map((item) => ({
+          name: item.name || '—',
+          value1: colActives ? getVal(item, colActives) : 0,
+          value2: colBrut ? getVal(item, colBrut) : 0,
+        }));
+        return { title: 'Fiches techniques (actives / brut)', rows };
+      }
+      case 'produitsGeneriques': {
+        const colBrut = getCol(PRODUITS_GENERIQUES_BRUT_KEYS);
+        const colActifs = getCol(PRODUITS_GENERIQUES_ACTIFS_KEYS);
+        if (!colBrut && !colActifs) return null;
+        const rows = items.map((item) => ({
+          name: item.name || '—',
+          value1: colBrut ? getVal(item, colBrut) : 0,
+          value2: colActifs ? getVal(item, colActifs) : 0,
+        }));
+        return { title: 'Produits génériques (brut / actifs)', rows };
+      }
+      default:
+        return null;
     }
-  };
+  }, [detailKpi, suiviData]);
 
-  const closeBoard = () => {
-    setSelectedBoard(null);
-  };
+  const roadmapKpis = useMemo(() => {
+    if (!roadmapData?.items?.length) return null;
+    return computeRoadmapKpis(roadmapData.items, roadmapData.columns);
+  }, [roadmapData]);
+
+  /** Liste de boards pour la section Roadmap : espace dédié si détecté, sinon tous les boards visibles (ex. "Roadmap Adoria 2026" peut être un board, pas un espace). */
+  const boardsForRoadmapSection = roadmapWorkspace ? roadmapBoards : boards;
+
+  /** Charger par défaut le board Roadmap Adoria 2026 (ID 5191064770) dès qu'il est disponible. */
+  useEffect(() => {
+    if (roadmapBoardId) return;
+    const found = boardsForRoadmapSection.some((b) => String(b.id) === ROADMAP_ADORIA_2026_BOARD_ID);
+    if (found) setRoadmapBoardId(ROADMAP_ADORIA_2026_BOARD_ID);
+  }, [boardsForRoadmapSection, roadmapBoardId]);
+
+  /** Board Suivi : utiliser uniquement l’ID fourni dans le .env (VITE_MONDAY_SUIVI_CLIENT_BOARD_ID). */
+  useEffect(() => {
+    if (!configured || !SUIVI_CLIENT_CP_BOARD_ID || suiviBoardId) return;
+    setSuiviBoardId(SUIVI_CLIENT_CP_BOARD_ID);
+  }, [configured, suiviBoardId]);
 
   if (loading) {
     return (
@@ -641,244 +701,287 @@ export function ProduitDashboard() {
           <CheckCircle className="w-4 h-4" />
           Connecté à Monday.com
         </div>
-        {workspaces.length > 0 && !selectedBoard && (
-          <div className="flex items-center gap-2">
-            <span className="text-sm text-surface-500">Espace :</span>
-            <select
-              value={selectedWorkspaceId}
-              onChange={(e) => setSelectedWorkspaceId(e.target.value)}
-              className="rounded-xl bg-surface-800 border border-surface-600 text-surface-200 px-3 py-1.5 text-sm focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50"
-            >
-              <option value="">Tous les espaces</option>
-              {workspaces.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name}
-                </option>
-              ))}
-            </select>
-            {npsWorkspace && selectedWorkspaceId !== npsWorkspace.id && (
-              <span className="text-xs text-surface-500">
-                → Pour les KPI NPS Fev 2026 Monday, sélectionnez l&apos;espace « {npsWorkspace.name} »
-              </span>
-            )}
-          </div>
-        )}
       </div>
 
-      {/* NPS Fev 2026 Monday — KPI + indicateurs d'alerte */}
-      {!selectedBoard && isNpsWorkspaceSelected && npsWorkspace && (
+      {/* Roadmap Adoria 2026 — KPI par défaut (board fixe), collapse */}
+      {configured && (
         <section className="mb-8 rounded-2xl border border-surface-700/50 bg-surface-900/30 overflow-hidden">
-          <div className="p-4 border-b border-surface-700/50 bg-surface-800/30 flex flex-wrap items-center gap-4">
-            <div className="flex items-center gap-2">
-              <MessageSquare className="w-5 h-5 text-amber-400/80" />
-              <h2 className="text-lg font-semibold text-surface-100">{npsWorkspace.name}</h2>
-            </div>
-            <select
-              value={npsBoardId}
-              onChange={(e) => setNpsBoardId(e.target.value)}
-              className="rounded-xl bg-surface-800 border border-surface-600 text-surface-200 px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50"
+          <div className="p-4 border-b border-surface-700/50 bg-surface-800/30 flex items-center gap-4">
+            <button
+              type="button"
+              onClick={() => setRoadmapSectionOpen((o) => !o)}
+              className="flex-1 flex flex-wrap items-center gap-4 text-left hover:opacity-90 transition-opacity"
             >
-              <option value="">Choisir un board NPS…</option>
-              {boards.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
+              <ChevronDown
+                className={`w-5 h-5 text-surface-400 shrink-0 transition-transform ${roadmapSectionOpen ? '' : '-rotate-90'}`}
+                aria-hidden
+              />
+              <div className="flex items-center gap-2">
+                <Target className="w-5 h-5 text-amber-400/80" />
+                <h2 className="text-lg font-semibold text-surface-100">
+                  {roadmapWorkspace ? roadmapWorkspace.name : 'Roadmap Adoria 2026'}
+                </h2>
+              </div>
+              <span className="text-xs text-surface-500 hidden sm:inline">— Ratio CP référent · Répartition par CP · Statut</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setDetailBoard('roadmap')}
+              className="p-2 rounded-lg text-surface-400 hover:text-amber-400 hover:bg-surface-700/50 transition-colors shrink-0"
+              title="Détail du board"
+            >
+              <Info className="w-5 h-5" />
+            </button>
           </div>
-          {boards.length === 0 && (
+          {roadmapSectionOpen && (
+            <>
+          {boardsForRoadmapSection.length === 0 && !roadmapLoading && (
             <div className="p-6 text-surface-500 text-sm">
-              Aucun board dans cet espace. Vérifiez les droits d&apos;accès sur Monday.com ou le nom de l&apos;espace.
+              Aucun board Roadmap disponible. Vérifiez les droits Monday.com ou l’espace « Roadmap Adoria 2026 ».
             </div>
           )}
-          {!npsLoading && boards.length > 0 && !npsBoardId && (
-            <div className="p-6 text-surface-400 text-sm">
-              Sélectionnez un board ci-dessus pour afficher les KPI NPS.
+          {!roadmapLoading && boardsForRoadmapSection.length > 0 && !roadmapBoardId && (
+            <div className="p-6 text-surface-400 text-sm flex items-center gap-2">
+              <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+              Chargement du board Roadmap Adoria 2026…
             </div>
           )}
-          {npsLoading && (
+          {roadmapLoading && (
             <div className="p-8 flex justify-center">
               <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
             </div>
           )}
-          {!npsLoading && npsKpis && (
+          {!roadmapLoading && roadmapKpis && (
             <div className="p-6 space-y-6">
-              {/* Indicateurs d'alerte */}
-              {npsKpis.alerts.length > 0 && (
-                <div className="space-y-2">
-                  {npsKpis.alerts.map((a) => (
-                    <div
-                      key={a.id}
-                      className={`flex items-center gap-3 rounded-xl border px-4 py-3 ${
-                        a.level === 'danger'
-                          ? 'bg-red-500/10 border-red-500/40 text-red-200'
-                          : a.level === 'warning'
-                            ? 'bg-amber-500/10 border-amber-500/40 text-amber-200'
-                            : 'bg-blue-500/10 border-blue-500/40 text-surface-200'
-                      }`}
-                    >
-                      {a.level === 'danger' ? (
-                        <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
-                      ) : a.level === 'warning' ? (
-                        <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
-                      ) : (
-                        <TrendingUp className="w-5 h-5 text-blue-400 shrink-0" />
-                      )}
-                      <span className="text-sm font-medium">{a.message}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
-                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
-                  <div className="flex items-center gap-2 mb-1">
-                    <TrendingUp className="w-4 h-4 text-amber-400" />
-                    <span className="text-xs font-medium text-surface-500">Score NPS</span>
-                  </div>
-                  <div
-                    className={`text-2xl font-bold tabular-nums ${
-                      npsKpis.scoreNps < 0
-                        ? 'text-red-400'
-                        : npsKpis.scoreNps < 30
-                          ? 'text-amber-400'
-                          : 'text-green-400'
-                    }`}
-                  >
-                    {npsKpis.scoreNps > 0 ? '+' : ''}
-                    {npsKpis.scoreNps.toFixed(0)}
-                  </div>
-                  <div className="text-[10px] text-surface-500 mt-0.5">-100 à +100</div>
-                </div>
-                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
-                  <div className="flex items-center gap-2 mb-1">
-                    <MessageSquare className="w-4 h-4 text-primary-400" />
-                    <span className="text-xs font-medium text-surface-500">Réponses</span>
-                  </div>
-                  <div className="text-xl font-bold text-surface-100 tabular-nums">{npsKpis.totalReponses}</div>
-                </div>
-                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-medium text-surface-500">Promoteurs</span>
-                  </div>
-                  <div className="text-xl font-bold text-green-400 tabular-nums">{npsKpis.pctPromoteurs.toFixed(1)} %</div>
-                  <div className="text-[10px] text-surface-500 mt-0.5">{npsKpis.promoteurs} réponses</div>
-                </div>
-                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-medium text-surface-500">Passifs</span>
-                  </div>
-                  <div className="text-xl font-bold text-surface-300 tabular-nums">{npsKpis.pctPassifs.toFixed(1)} %</div>
-                  <div className="text-[10px] text-surface-500 mt-0.5">{npsKpis.passifs} réponses</div>
-                </div>
-                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xs font-medium text-surface-500">Détracteurs</span>
-                  </div>
-                  <div className="text-xl font-bold text-red-400 tabular-nums">{npsKpis.pctDetracteurs.toFixed(1)} %</div>
-                  <div className="text-[10px] text-surface-500 mt-0.5">{npsKpis.detracteurs} réponses</div>
-                </div>
-                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
-                  <div className="flex items-center gap-2 mb-1">
-                    <BarChart3 className="w-4 h-4 text-surface-400" />
-                    <span className="text-xs font-medium text-surface-500">Note moy.</span>
-                  </div>
-                  <div className="text-xl font-bold text-surface-100 tabular-nums">
-                    {npsKpis.scoreNpsSur10 != null ? npsKpis.scoreNpsSur10.toFixed(1) : '—'} / 10
-                  </div>
-                </div>
-              </div>
-              {/* Répartition NPS (barre visuelle) */}
+              {/* 1. Ratio CP référent / features + nombre manquant */}
               <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
                 <h3 className="text-sm font-semibold text-surface-200 mb-3 flex items-center gap-2">
-                  <BarChart3 className="w-4 h-4 text-amber-400" />
-                  Répartition NPS
+                  <User className="w-4 h-4 text-amber-400" />
+                  Ratio CP référent / features
                 </h3>
-                <div className="flex h-8 rounded-lg overflow-hidden border border-surface-600/50">
+                <div className="flex flex-wrap items-end gap-6">
+                  <div>
+                    <div className="text-2xl font-bold text-surface-100 tabular-nums">
+                      {roadmapKpis.withCpReferent} / {roadmapKpis.totalFeatures}
+                    </div>
+                    <div className="text-sm text-surface-500 mt-0.5">
+                      {roadmapKpis.ratioCpReferentPct.toFixed(1)} % des lignes ont un CP référent
+                    </div>
+                  </div>
                   <div
-                    className="bg-green-500/80 transition-all"
-                    style={{ width: `${npsKpis.pctPromoteurs}%` }}
-                    title={`Promoteurs ${npsKpis.pctPromoteurs.toFixed(1)}%`}
-                  />
-                  <div
-                    className="bg-surface-500/80 transition-all"
-                    style={{ width: `${npsKpis.pctPassifs}%` }}
-                    title={`Passifs ${npsKpis.pctPassifs.toFixed(1)}%`}
-                  />
-                  <div
-                    className="bg-red-500/80 transition-all"
-                    style={{ width: `${npsKpis.pctDetracteurs}%` }}
-                    title={`Détracteurs ${npsKpis.pctDetracteurs.toFixed(1)}%`}
-                  />
-                </div>
-                <div className="flex justify-between mt-2 text-xs text-surface-500">
-                  <span>Promoteurs (9-10)</span>
-                  <span>Passifs (7-8)</span>
-                  <span>Détracteurs (0-6)</span>
+                    className={`px-4 py-2 rounded-xl border ${
+                      roadmapKpis.missingCpReferent > 0
+                        ? 'bg-amber-500/10 border-amber-500/40 text-amber-200'
+                        : 'bg-green-500/10 border-green-500/40 text-green-200'
+                    }`}
+                  >
+                    <span className="text-sm font-medium">
+                      {roadmapKpis.missingCpReferent > 0
+                        ? `Il manque ${roadmapKpis.missingCpReferent} nom(s) dans la colonne CP RÉFÉRENT`
+                        : 'Toutes les lignes ont un CP référent'}
+                    </span>
+                  </div>
                 </div>
               </div>
+
+              {/* 2. Répartition par CP référent (projets rattachés) */}
+              {roadmapKpis.byCpReferent.length > 0 && (
+                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                  <h3 className="text-sm font-semibold text-surface-200 mb-4 flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-amber-400" />
+                    Répartition par CP référent (projets rattachés)
+                  </h3>
+                  <div className="h-72">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={roadmapKpis.byCpReferent}
+                        layout="vertical"
+                        margin={{ top: 4, right: 24, left: 120, bottom: 4 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,100,120,0.3)" />
+                        <XAxis type="number" tick={{ fill: 'rgb(148, 163, 184)', fontSize: 12 }} allowDecimals={false} />
+                        <YAxis
+                          type="category"
+                          dataKey="name"
+                          width={115}
+                          tick={{ fill: 'rgb(148, 163, 184)', fontSize: 11 }}
+                          tickFormatter={(v) => (v.length > 20 ? v.slice(0, 18) + '…' : v)}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: 'rgba(30, 30, 40, 0.95)',
+                            border: '1px solid rgba(100, 100, 120, 0.3)',
+                            borderRadius: '8px',
+                            padding: '12px',
+                          }}
+                          formatter={(value: number) => [`${value} projet(s)`, 'Projets']}
+                          labelFormatter={(label) => `CP référent : ${label}`}
+                        />
+                        <Bar dataKey="count" fill="#f59e0b" radius={[0, 4, 4, 0]} name="Projets" />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                </div>
+              )}
+
+              {/* 3. Donut répartition par statut */}
+              {roadmapKpis.byStatus.length > 0 && (
+                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                  <h3 className="text-sm font-semibold text-surface-200 mb-4 flex items-center gap-2">
+                    <PieChart className="w-4 h-4 text-amber-400" />
+                    Répartition des projets par statut
+                  </h3>
+                  <div className="flex flex-wrap items-center gap-6">
+                    <div className="w-64 h-64 shrink-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={roadmapKpis.byStatus.map((d, i) => ({
+                              ...d,
+                              fill: DONUT_COLORS[i % DONUT_COLORS.length],
+                            }))}
+                            dataKey="value"
+                            nameKey="name"
+                            cx="50%"
+                            cy="50%"
+                            innerRadius="50%"
+                            outerRadius="90%"
+                            paddingAngle={2}
+                            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                          >
+                            {roadmapKpis.byStatus.map((_, i) => (
+                              <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={{
+                              backgroundColor: 'rgba(30, 30, 40, 0.95)',
+                              border: '1px solid rgba(100, 100, 120, 0.3)',
+                              borderRadius: '8px',
+                              padding: '12px',
+                            }}
+                            formatter={(value: number, name: string) => [
+                              `${value} projet(s) (${roadmapKpis && roadmapKpis.totalFeatures > 0 ? ((value / roadmapKpis.totalFeatures) * 100).toFixed(1) : 0} %)`,
+                              name,
+                            ]}
+                          />
+                          <Legend
+                            formatter={(value, entry) => (
+                              <span className="text-surface-300 text-sm">
+                                {value} ({entry?.payload?.value ?? 0})
+                              </span>
+                            )}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                    </div>
+                    <div className="flex-1 min-w-0 space-y-1">
+                      {roadmapKpis.byStatus.map((s, i) => (
+                        <div key={s.name} className="flex items-center gap-2 text-sm">
+                          <span
+                            className="w-3 h-3 rounded-full shrink-0"
+                            style={{ backgroundColor: DONUT_COLORS[i % DONUT_COLORS.length] }}
+                          />
+                          <span className="text-surface-300 truncate">{s.name}</span>
+                          <span className="text-surface-100 font-medium tabular-nums shrink-0">{s.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
-          {!npsLoading && npsBoardId && !npsKpis && (npsData?.items?.length ?? 0) === 0 && (
+          {!roadmapLoading && roadmapBoardId && !roadmapKpis && (roadmapData?.items?.length ?? 0) === 0 && (
             <div className="p-6 text-surface-500 text-sm">Aucune donnée dans ce board.</div>
           )}
-          {!npsLoading && npsBoardId && (npsData?.items?.length ?? 0) > 0 && !npsKpis && (
+          {!roadmapLoading && roadmapBoardId && (roadmapData?.items?.length ?? 0) > 0 && !roadmapKpis && (
             <div className="p-6 text-amber-200/90 text-sm">
-              Aucune colonne NPS trouvée. Utilisez une colonne « Score NPS » / « Note » (0-10) ou « Catégorie NPS » (Promoteur, Passif, Détracteur).
+              Colonnes attendues : « CP RÉFÉRENT » (ou similaire) et « Status » / « Statut » pour les indicateurs.
             </div>
+          )}
+            </>
           )}
         </section>
       )}
 
-      {/* Suivi clients par CP — KPI + donut par pays */}
-      {!selectedBoard && boards.length > 0 && (
-        <section className="mb-8 rounded-2xl border border-surface-700/50 bg-surface-900/30 overflow-hidden">
-          <div className="p-4 border-b border-surface-700/50 bg-surface-800/30 flex flex-wrap items-center gap-4">
+      {/* Suivi clients par cp — KPI (board chargé via VITE_MONDAY_SUIVI_CLIENT_BOARD_ID), collapse */}
+      <section className="mb-8 rounded-2xl border border-surface-700/50 bg-surface-900/30 overflow-hidden">
+        <div className="p-4 border-b border-surface-700/50 bg-surface-800/30 flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => setSuiviSectionOpen((o) => !o)}
+            className="flex-1 flex flex-wrap items-center gap-4 text-left hover:opacity-90 transition-opacity"
+          >
+            <ChevronDown
+              className={`w-5 h-5 text-surface-400 shrink-0 transition-transform ${suiviSectionOpen ? '' : '-rotate-90'}`}
+              aria-hidden
+            />
             <div className="flex items-center gap-2">
               <MapPin className="w-5 h-5 text-amber-400/80" />
-              <h2 className="text-lg font-semibold text-surface-100">Suivi clients par CP</h2>
+              <h2 className="text-lg font-semibold text-surface-100">Suivi clients par cp</h2>
             </div>
-            <select
-              value={suiviBoardId}
-              onChange={(e) => setSuiviBoardId(e.target.value)}
-              className="rounded-xl bg-surface-800 border border-surface-600 text-surface-200 px-3 py-2 text-sm focus:ring-2 focus:ring-amber-500/50 focus:border-amber-500/50"
-            >
-              <option value="">Choisir un board pour les KPI…</option>
-              {boards.map((b) => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
+          </button>
+          <button
+            type="button"
+            onClick={() => setDetailBoard('suivi')}
+            className="p-2 rounded-lg text-surface-400 hover:text-amber-400 hover:bg-surface-700/50 transition-colors shrink-0"
+            title="Détail du board"
+          >
+            <Info className="w-5 h-5" />
+          </button>
+        </div>
+        {suiviSectionOpen && (
+          <>
+        {!SUIVI_CLIENT_CP_BOARD_ID && (
+          <div className="p-6 text-surface-500 text-sm">
+            Définissez <code className="bg-surface-800 px-1 rounded">VITE_MONDAY_SUIVI_CLIENT_BOARD_ID</code> dans le .env avec l’ID du board Monday (ex. 475358061).
           </div>
-          {suiviLoading && (
-            <div className="p-8 flex justify-center">
-              <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
-            </div>
-          )}
-          {!suiviLoading && suiviKpis && (
+        )}
+        {SUIVI_CLIENT_CP_BOARD_ID && suiviLoading && (
+          <div className="p-8 flex justify-center">
+            <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
+          </div>
+        )}
+        {SUIVI_CLIENT_CP_BOARD_ID && suiviBoardId && !suiviLoading && !suiviData && (
+          <div className="p-6 text-amber-200/90 text-sm">
+            Impossible de charger les données du board (ID : {suiviBoardId}). Vérifiez l’ID dans Monday.com et les droits d’accès.
+          </div>
+        )}
+        {SUIVI_CLIENT_CP_BOARD_ID && !suiviLoading && suiviKpis && (
             <div className="p-6 space-y-6">
+              <div className="flex flex-wrap items-center gap-4 mb-2">
+                <span className="text-sm text-surface-500">
+                  {suiviData?.items?.length ?? 0} ligne(s) chargée(s) depuis Monday.com
+                </span>
+                {suiviData?.items?.length !== undefined && suiviData.items.length > 0 && suiviKpis.sitesActifs === 0 && suiviKpis.target === 0 && suiviKpis.cdcDeploye === 0 && suiviKpis.totalUtilisateursActifs === 0 && (
+                  <span className="text-amber-200/90 text-sm">
+                    Données chargées mais colonnes non reconnues. Vérifiez que les intitulés des colonnes du board Monday contiennent par ex. « Sites actifs », « Target », « CDC déployé », « Satisfaction », « Date mise en production », « Total projets ».
+                  </span>
+                )}
+              </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                <button type="button" onClick={() => setDetailKpi('sitesActifs')} className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer">
                   <div className="flex items-center gap-2 mb-1">
                     <Building2 className="w-4 h-4 text-amber-400" />
                     <span className="text-xs font-medium text-surface-500">Sites actifs</span>
                   </div>
                   <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.sitesActifs}</div>
-                </div>
-                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                </button>
+                <button type="button" onClick={() => setDetailKpi('target')} className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer">
                   <div className="flex items-center gap-2 mb-1">
                     <Target className="w-4 h-4 text-primary-400" />
                     <span className="text-xs font-medium text-surface-500">Target sites</span>
                   </div>
                   <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.target}</div>
-                </div>
-                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                </button>
+                <button type="button" onClick={() => setDetailKpi('cdcDeploye')} className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer">
                   <div className="flex items-center gap-2 mb-1">
                     <CheckCircle className="w-4 h-4 text-green-400" />
                     <span className="text-xs font-medium text-surface-500">CDC déployé</span>
                   </div>
                   <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.cdcDeploye}</div>
-                </div>
+                </button>
                 <button
                   type="button"
                   onClick={() => setShowSatisfactionModal(true)}
@@ -913,37 +1016,45 @@ export function ProduitDashboard() {
                     </div>
                   )}
                 </button>
-                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                <button type="button" onClick={() => setDetailKpi('totalProjets')} className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer">
                   <div className="flex items-center gap-2 mb-1">
                     <Folder className="w-4 h-4 text-surface-400" />
                     <span className="text-xs font-medium text-surface-500">Total projets</span>
                   </div>
                   <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.totalProjets}</div>
-                </div>
-                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                </button>
+                <button type="button" onClick={() => setDetailKpi('totalUtilisateursActifs')} className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer">
                   <div className="flex items-center gap-2 mb-1">
                     <User className="w-4 h-4 text-blue-400" />
                     <span className="text-xs font-medium text-surface-500">Utilisateurs actifs</span>
                   </div>
                   <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.totalUtilisateursActifs}</div>
                   <div className="text-[10px] text-surface-500 mt-0.5">somme par site (Nbre d&apos;utilisateurs actifs)</div>
-                </div>
-                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                </button>
+                <button type="button" onClick={() => setDetailKpi('totalUtilisateursBruts')} className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer">
                   <div className="flex items-center gap-2 mb-1">
                     <User className="w-4 h-4 text-surface-400" />
                     <span className="text-xs font-medium text-surface-500">Total des utilisateurs</span>
                   </div>
                   <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.totalUtilisateursBruts}</div>
                   <div className="text-[10px] text-surface-500 mt-0.5">somme par site (Nbre utilisateurs bruts)</div>
-                </div>
-                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                </button>
+                <button type="button" onClick={() => setDetailKpi('totalUtilisationMobile')} className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Smartphone className="w-4 h-4 text-violet-400" />
+                    <span className="text-xs font-medium text-surface-500">Utilisation mobile</span>
+                  </div>
+                  <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.totalUtilisationMobile}</div>
+                  <div className="text-[10px] text-surface-500 mt-0.5">nombre total d&apos;utilisation mobile</div>
+                </button>
+                <button type="button" onClick={() => setDetailKpi('totalReferencesMercurial')} className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer">
                   <div className="flex items-center gap-2 mb-1">
                     <Globe className="w-4 h-4 text-cyan-400" />
                     <span className="text-xs font-medium text-surface-500">Références Mercurial</span>
                   </div>
                   <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.totalReferencesMercurial}</div>
-                </div>
-                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 flex flex-col items-center">
+                </button>
+                <button type="button" onClick={() => setDetailKpi('fichesTechniques')} className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 flex flex-col items-center text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer">
                   <div className="flex items-center gap-2 mb-1 self-start">
                     <List className="w-4 h-4 text-green-400" />
                     <span className="text-xs font-medium text-surface-500">Fiches techniques</span>
@@ -981,8 +1092,60 @@ export function ProduitDashboard() {
                       <div className="text-surface-500 text-sm">—</div>
                     )}
                   </div>
-                </div>
+                </button>
               </div>
+              {/* Diagramme comparatif Produits génériques brut vs actifs */}
+              {(suiviKpis.totalProduitsGeneriquesBrut > 0 || suiviKpis.totalProduitsGeneriquesActifs > 0) && (
+                <button
+                  type="button"
+                  onClick={() => setDetailKpi('produitsGeneriques')}
+                  className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 w-full text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer"
+                >
+                  <h3 className="text-sm font-semibold text-surface-200 mb-4 flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-amber-400" />
+                    Produits génériques : brut vs actifs
+                  </h3>
+                  <div className="h-56">
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart
+                        data={[
+                          { name: 'Total brut', value: suiviKpis.totalProduitsGeneriquesBrut, fill: '#64748b' },
+                          { name: 'Actifs', value: suiviKpis.totalProduitsGeneriquesActifs, fill: '#22c55e' },
+                        ]}
+                        layout="vertical"
+                        margin={{ top: 8, right: 24, left: 80, bottom: 8 }}
+                      >
+                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,100,120,0.3)" />
+                        <XAxis type="number" tick={{ fill: 'rgb(148, 163, 184)', fontSize: 12 }} allowDecimals={false} />
+                        <YAxis
+                          type="category"
+                          dataKey="name"
+                          width={75}
+                          tick={{ fill: 'rgb(148, 163, 184)', fontSize: 12 }}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            backgroundColor: 'rgba(30, 30, 40, 0.95)',
+                            border: '1px solid rgba(100, 100, 120, 0.3)',
+                            borderRadius: '8px',
+                            padding: '12px',
+                          }}
+                          formatter={(value: number) => [value, '']}
+                          labelFormatter={(label) => label}
+                        />
+                        <Bar dataKey="value" radius={[0, 4, 4, 0]} name="">
+                          <Cell fill="#64748b" />
+                          <Cell fill="#22c55e" />
+                        </Bar>
+                      </BarChart>
+                    </ResponsiveContainer>
+                  </div>
+                  <div className="flex justify-between mt-2 text-xs text-surface-500">
+                    <span>Brut : {suiviKpis.totalProduitsGeneriquesBrut}</span>
+                    <span>Actifs : {suiviKpis.totalProduitsGeneriquesActifs}</span>
+                  </div>
+                </button>
+              )}
               {suiviKpis.projectsByYear.length > 0 && (
                 <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
                   <h3 className="text-sm font-semibold text-surface-200 mb-4 flex items-center gap-2">
@@ -1107,119 +1270,200 @@ export function ProduitDashboard() {
               )}
             </div>
           )}
-          {!suiviLoading && suiviBoardId && !suiviKpis && suiviData?.items.length === 0 && (
-            <div className="p-6 text-surface-500 text-sm">Aucune donnée dans ce board.</div>
-          )}
+          </>
+        )}
         </section>
-      )}
 
-      {selectedBoard ? (
-        <div className="rounded-2xl border border-surface-700/50 bg-surface-900/30 overflow-hidden">
-          <div className="p-4 border-b border-surface-700/50 flex items-center justify-between bg-surface-800/30">
-            <div className="flex items-center gap-3">
+      {/* Modal Détail KPI — répartition par ligne/site */}
+      {detailKpi && kpiDetailData && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          onClick={() => setDetailKpi(null)}
+        >
+          <div
+            className="bg-surface-900 border border-surface-700 rounded-2xl shadow-xl w-full max-w-2xl max-h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-surface-700">
+              <h3 className="text-lg font-semibold text-surface-100">Détail — {kpiDetailData.title}</h3>
               <button
-                onClick={closeBoard}
-                className="p-1.5 rounded-lg hover:bg-surface-700/50 text-surface-400 hover:text-surface-200 transition-colors"
-                title="Retour aux boards"
+                type="button"
+                onClick={() => setDetailKpi(null)}
+                className="p-2 rounded-lg hover:bg-surface-800 text-surface-400 hover:text-surface-200"
               >
-                <ChevronRight className="w-5 h-5 rotate-180" />
+                <X className="w-5 h-5" />
               </button>
-              <LayoutGrid className="w-5 h-5 text-amber-400/80" />
-              <h2 className="text-lg font-semibold text-surface-100">
-                {selectedBoard.board.name}
-              </h2>
-              {selectedBoard.board.itemCount != null && (
-                <span className="text-sm text-surface-500">
-                  {selectedBoard.board.itemCount} élément(s)
-                </span>
+            </div>
+            <div className="p-4 overflow-auto flex-1">
+              {kpiDetailData.rows.length === 0 ? (
+                <p className="text-surface-500 text-sm">Aucune donnée.</p>
+              ) : 'value1' in kpiDetailData.rows[0] ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-surface-700/50">
+                        <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">Nom</th>
+                        <th className="text-right py-2 px-3 text-xs font-medium text-surface-500 uppercase">Col. 1</th>
+                        <th className="text-right py-2 px-3 text-xs font-medium text-surface-500 uppercase">Col. 2</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(kpiDetailData.rows as { name: string; value1: number; value2: number }[])
+                        .sort((a, b) => Math.max(b.value1, b.value2) - Math.max(a.value1, a.value2))
+                        .map((row, i) => (
+                          <tr key={i} className="border-b border-surface-700/30">
+                            <td className="py-2 px-3 text-surface-200">{row.name}</td>
+                            <td className="py-2 px-3 text-right tabular-nums text-surface-100">{row.value1}</td>
+                            <td className="py-2 px-3 text-right tabular-nums text-surface-100">{row.value2}</td>
+                          </tr>
+                        ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-surface-700/50">
+                        <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">Nom</th>
+                        <th className="text-right py-2 px-3 text-xs font-medium text-surface-500 uppercase">Valeur</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(kpiDetailData.rows as { name: string; value: number }[]).map((row, i) => (
+                        <tr key={i} className="border-b border-surface-700/30">
+                          <td className="py-2 px-3 text-surface-200">{row.name}</td>
+                          <td className="py-2 px-3 text-right tabular-nums text-surface-100">{row.value}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               )}
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[600px]">
-              <thead>
-                <tr className="border-b border-surface-700/50">
-                  <th className="text-left py-3 px-4 text-xs font-medium text-surface-500 uppercase tracking-wider">
-                    Nom
-                  </th>
-                  {selectedBoard.columns.map((col) => (
-                    <th
-                      key={col.id}
-                      className="text-left py-3 px-4 text-xs font-medium text-surface-500 uppercase tracking-wider"
-                    >
-                      {col.title}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {selectedBoard.items.map((item) => (
-                  <tr
-                    key={item.id}
-                    className="border-b border-surface-700/30 hover:bg-surface-800/30 transition-colors"
-                  >
-                    <td className="py-3 px-4 text-surface-200 font-medium">
-                      {item.name}
-                    </td>
-                    {selectedBoard.columns.map((col) => {
-                      const cv = item.column_values?.find((c) => c.id === col.id);
-                      const text = cv?.text ?? '—';
-                      return (
-                        <td
-                          key={col.id}
-                          className="py-3 px-4 text-surface-400 text-sm"
-                        >
-                          {text}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      ) : (
-        /* Boards list */
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {boardLoading && (
-            <div className="col-span-full flex justify-center py-12">
-              <Loader2 className="w-8 h-8 text-accent-500 animate-spin" />
-            </div>
-          )}
-          {!boardLoading &&
-            boards.map((board) => (
-              <button
-                key={board.id}
-                onClick={() => openBoard(board)}
-                className="text-left p-5 rounded-2xl border border-surface-700/50 bg-surface-900/30 hover:bg-surface-800/50 hover:border-surface-600/50 transition-all group"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-3 min-w-0">
-                    <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center flex-shrink-0 group-hover:bg-amber-500/20 transition-colors">
-                      <List className="w-5 h-5 text-amber-400/80" />
-                    </div>
-                    <div className="min-w-0">
-                      <div className="font-medium text-surface-100 truncate">
-                        {board.name}
-                      </div>
-                      {board.itemCount != null && (
-                        <div className="text-sm text-surface-500">
-                          {board.itemCount} élément(s)
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                  <ChevronRight className="w-5 h-5 text-surface-500 group-hover:text-amber-400/80 flex-shrink-0 transition-colors" />
-                </div>
-              </button>
-            ))}
         </div>
       )}
 
-      {!selectedBoard && !boardLoading && boards.length === 0 && (
-        <div className="rounded-2xl border border-surface-700/50 bg-surface-900/30 p-12 text-center text-surface-500">
-          Aucun board actif pour ce compte Monday.
+      {/* Modal Détail du board (Roadmap ou Suivi) */}
+      {detailBoard && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          onClick={() => setDetailBoard(null)}
+        >
+          <div
+            className="bg-surface-900 border border-surface-700 rounded-2xl shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {detailBoard === 'roadmap' && (
+              <>
+                <div className="flex items-center justify-between p-4 border-b border-surface-700">
+                  <div className="flex items-center gap-2">
+                    <Info className="w-5 h-5 text-amber-400" />
+                    <h3 className="text-lg font-semibold text-surface-100">
+                      Détail du board — {roadmapWorkspace ? roadmapWorkspace.name : 'Roadmap Adoria 2026'}
+                    </h3>
+                    {roadmapBoardId && (
+                      <span className="text-sm text-surface-500">ID : {roadmapBoardId}</span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDetailBoard(null)}
+                    className="p-2 rounded-lg hover:bg-surface-800 text-surface-400 hover:text-surface-200"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="p-4 overflow-auto flex-1">
+                  {!roadmapData ? (
+                    <p className="text-surface-500 text-sm">Aucune donnée chargée.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[600px] text-sm">
+                        <thead>
+                          <tr className="border-b border-surface-700/50">
+                            <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">Nom</th>
+                            {roadmapData.columns.map((col) => (
+                              <th key={col.id} className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">{col.title}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {roadmapData.items.map((item) => (
+                            <tr key={item.id} className="border-b border-surface-700/30 hover:bg-surface-800/30">
+                              <td className="py-2 px-3 text-surface-200 font-medium">{item.name}</td>
+                              {roadmapData.columns.map((col) => {
+                                const cv = item.column_values?.find((c) => c.id === col.id);
+                                const text = (cv?.text ?? cv?.value ?? '—').toString().trim() || '—';
+                                return (
+                                  <td key={col.id} className="py-2 px-3 text-surface-400 truncate max-w-[200px]" title={text}>{text}</td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <p className="text-surface-500 text-xs mt-2">{roadmapData.items.length} ligne(s)</p>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+            {detailBoard === 'suivi' && (
+              <>
+                <div className="flex items-center justify-between p-4 border-b border-surface-700">
+                  <div className="flex items-center gap-2">
+                    <Info className="w-5 h-5 text-amber-400" />
+                    <h3 className="text-lg font-semibold text-surface-100">Détail du board — Suivi clients par cp</h3>
+                    {suiviBoardId && (
+                      <span className="text-sm text-surface-500">ID : {suiviBoardId}</span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setDetailBoard(null)}
+                    className="p-2 rounded-lg hover:bg-surface-800 text-surface-400 hover:text-surface-200"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="p-4 overflow-auto flex-1">
+                  {!suiviData ? (
+                    <p className="text-surface-500 text-sm">Aucune donnée chargée.</p>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[600px] text-sm">
+                        <thead>
+                          <tr className="border-b border-surface-700/50">
+                            <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">Nom</th>
+                            {suiviData.columns.map((col) => (
+                              <th key={col.id} className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">{col.title}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {suiviData.items.map((item) => (
+                            <tr key={item.id} className="border-b border-surface-700/30 hover:bg-surface-800/30">
+                              <td className="py-2 px-3 text-surface-200 font-medium">{item.name}</td>
+                              {suiviData.columns.map((col) => {
+                                const cv = item.column_values?.find((c) => c.id === col.id);
+                                const text = (cv?.text ?? cv?.value ?? '—').toString().trim() || '—';
+                                return (
+                                  <td key={col.id} className="py-2 px-3 text-surface-400 truncate max-w-[200px]" title={text}>{text}</td>
+                                );
+                              })}
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <p className="text-surface-500 text-xs mt-2">{suiviData.items.length} ligne(s)</p>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
 
@@ -1295,7 +1539,7 @@ export function ProduitDashboard() {
                 <div className="text-surface-500 text-sm space-y-2">
                   <p>Aucune donnée de satisfaction renseignée.</p>
                   <p className="text-surface-600 text-xs">
-                    Vérifiez que le board « Suivi clients par CP » contient une colonne nommée « Degré satisfaction client (engagement CP) » et que des valeurs sont renseignées.
+                    Vérifiez que le board « Suivi clients par cp » contient une colonne nommée « Degré satisfaction client (engagement CP) » et que des valeurs sont renseignées.
                   </p>
                 </div>
               ) : (

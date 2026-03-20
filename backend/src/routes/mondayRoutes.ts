@@ -134,4 +134,30 @@ router.get('/boards/:boardId', authenticate, async (req: Request, res: Response)
   }
 });
 
+/**
+ * GET /api/monday/boards/:boardId/views
+ * Récupère les vues du board (filtres Monday, paramètres, tri). API 2025-10+.
+ */
+router.get('/boards/:boardId/views', authenticate, async (req: Request, res: Response) => {
+  try {
+    const client = getMondayClient();
+    if (!client.isConfigured()) {
+      return res.status(503).json({
+        success: false,
+        message: 'Monday.com non configuré (MONDAY_API_KEY manquant)',
+      });
+    }
+    const { boardId } = req.params;
+    const views = await client.getBoardViews(boardId);
+    res.json({ success: true, views });
+  } catch (error) {
+    logger.error('Error fetching Monday board views:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Erreur lors de la récupération des vues/filtres Monday',
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
 export const mondayRoutes = router;

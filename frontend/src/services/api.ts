@@ -542,6 +542,19 @@ export interface MondayItem {
   column_values?: Array<{ id: string; text?: string; type: string; value?: string }>;
 }
 
+/** Vue d'un board Monday (filtres, paramètres, tri). */
+export interface MondayBoardView {
+  id: string;
+  name: string;
+  type: string;
+  filter?: unknown;
+  settings?: unknown;
+  sort?: unknown;
+  tags?: string[];
+  filterUserId?: number;
+  filterTeamId?: number;
+}
+
 export const mondayApi = {
   getStatus: async (): Promise<{ success: boolean; configured: boolean }> => {
     const { data } = await api.get('/monday/status');
@@ -576,6 +589,13 @@ export const mondayApi = {
     const { data } = await api.get(`/monday/boards/${boardId}`, {
       params: { itemsLimit },
     });
+    return data;
+  },
+  /** Récupère les vues et filtres Monday d'un board (API 2025-10+). */
+  getBoardViews: async (
+    boardId: string
+  ): Promise<{ success: boolean; views?: MondayBoardView[] }> => {
+    const { data } = await api.get(`/monday/boards/${boardId}/views`);
     return data;
   },
 };

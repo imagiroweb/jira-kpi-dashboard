@@ -3,7 +3,9 @@ import react from '@vitejs/plugin-react'
 import path from 'path'
 
 // https://vitejs.dev/config/
+// Charger le .env à la racine du projet (VITE_* doivent y être définis, ex. VITE_API_URL=http://localhost:3002/api)
 export default defineConfig({
+  envDir: path.resolve(__dirname, '..'),
   plugins: [react()],
   resolve: {
     alias: {
