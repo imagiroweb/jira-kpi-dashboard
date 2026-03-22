@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { ShieldCheck, Users, Loader2, Save, Plus, X, LogIn, ChevronRight, BarChart3, LayoutDashboard } from 'lucide-react';
+import { ShieldCheck, Users, Loader2, Save, Plus, X, LogIn, ChevronRight, BarChart3, LayoutDashboard, KeyRound, CheckCircle2, XCircle, Mail } from 'lucide-react';
 import {
   BarChart,
   Bar,
@@ -370,7 +370,7 @@ export function UserManagementPage() {
         </section>
       </div>
 
-      {/* Drawer logs de connexion */}
+              {/* Drawer activité utilisateur */}
       {drawerUser && (
         <div className="fixed inset-0 z-50 flex">
           <div
@@ -389,7 +389,7 @@ export function UserManagementPage() {
             <div className="p-4 border-b border-surface-700/50 flex items-center justify-between">
               <div>
                 <h2 id="drawer-title" className="text-lg font-semibold text-surface-100">
-                  Logs de connexion
+                  Activité utilisateur
                 </h2>
                 <p className="text-sm text-surface-400 mt-0.5">
                   {[drawerUser.email, [drawerUser.firstName, drawerUser.lastName].filter(Boolean).join(' ')].filter(Boolean).join(' — ')}
@@ -478,6 +478,65 @@ export function UserManagementPage() {
                   </div>
                 )}
               </div>
+
+              {/* Historique réinitialisation de mot de passe */}
+              {(() => {
+                const resetLogs = drawerLogs.filter(
+                  (l) => l.type === 'password_reset_request' || l.type === 'password_reset_complete'
+                );
+                if (resetLogs.length === 0) return null;
+                return (
+                  <div className="mt-6 pt-4 border-t border-surface-700/50">
+                    <h3 className="text-sm font-medium text-surface-300 flex items-center gap-2 mb-3">
+                      <KeyRound className="w-4 h-4 text-amber-400" />
+                      Réinitialisation de mot de passe
+                    </h3>
+                    <ul className="space-y-2">
+                      {resetLogs.map((log) => {
+                        const isRequest = log.type === 'password_reset_request';
+                        const emailSent = log.meta?.emailSent;
+                        return (
+                          <li
+                            key={log.id}
+                            className={`flex items-start gap-3 p-3 rounded-lg border ${
+                              isRequest
+                                ? emailSent
+                                  ? 'bg-amber-500/5 border-amber-500/20'
+                                  : 'bg-danger-500/5 border-danger-500/20'
+                                : 'bg-success-500/5 border-success-500/20'
+                            }`}
+                          >
+                            <div className="mt-0.5 shrink-0">
+                              {isRequest ? (
+                                emailSent
+                                  ? <Mail className="w-4 h-4 text-amber-400" />
+                                  : <XCircle className="w-4 h-4 text-danger-400" />
+                              ) : (
+                                <CheckCircle2 className="w-4 h-4 text-success-400" />
+                              )}
+                            </div>
+                            <div>
+                              <p className="text-surface-200 text-sm font-medium">
+                                {isRequest
+                                  ? emailSent
+                                    ? 'Lien de reset envoyé par email'
+                                    : 'Demande de reset — email non envoyé'
+                                  : 'Mot de passe réinitialisé avec succès'}
+                              </p>
+                              <p className="text-surface-500 text-xs mt-0.5">
+                                {new Date(log.timestamp).toLocaleString('fr-FR', {
+                                  dateStyle: 'medium',
+                                  timeStyle: 'short'
+                                })}
+                              </p>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                );
+              })()}
             </div>
           </div>
         </div>

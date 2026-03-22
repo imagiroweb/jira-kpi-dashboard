@@ -21,3 +21,5 @@ export { RoleSelectionScreen } from './RoleSelectionScreen';
 export { LoginPage } from './LoginPage';
 export { MicrosoftCallback } from './MicrosoftCallback';
 export { PasswordStrengthIndicator } from './PasswordStrengthIndicator';
+export { ForgotPasswordPage } from './ForgotPasswordPage';
+export { ResetPasswordPage } from './ResetPasswordPage';

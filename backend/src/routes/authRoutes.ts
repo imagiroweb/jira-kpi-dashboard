@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
+import rateLimit from 'express-rate-limit';
 import mongoose from 'mongoose';
 import { authService } from '../application/services/AuthService';
 import { authenticate, requireSuperAdmin } from '../middleware/authMiddleware';
@@ -7,6 +8,15 @@ import { User } from '../domain/user/entities/User';
 import { Role, IPageVisibilities, PAGE_IDS } from '../domain/user/entities/Role';
 import { UserActivityLog } from '../domain/user/entities/UserActivityLog';
 import { logger } from '../utils/logger';
+
+/** Max 5 demandes de reset par IP par 15 minutes */
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 5,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Trop de tentatives. Veuillez réessayer dans 15 minutes.' }
+});
 
 /** Répond 503 si MongoDB n'est pas connecté (évite le timeout de 10s des opérations bufferisées) */
 const requireMongo = (_req: Request, res: Response, next: () => void) => {
@@ -95,7 +105,7 @@ router.post(
     body('email')
       .isEmail()
       .withMessage('Email invalide')
-      .normalizeEmail(),
+      .normalizeEmail({ gmail_remove_dots: false }),
     body('password')
       .isLength({ min: 12 })
       .withMessage('Le mot de passe doit contenir au moins 12 caractères'),
@@ -185,7 +195,7 @@ router.post(
     body('email')
       .isEmail()
       .withMessage('Email invalide')
-      .normalizeEmail(),
+      .normalizeEmail({ gmail_remove_dots: false }),
     body('password')
       .notEmpty()
       .withMessage('Mot de passe requis')
@@ -560,6 +570,61 @@ router.post(
       logger.error('Record page view error:', error);
       res.status(500).json({ success: false, error: 'Erreur serveur' });
     }
+  }
+);
+
+// ---------- Réinitialisation de mot de passe (comptes locaux uniquement) ----------
+
+/**
+ * POST /api/auth/forgot-password
+ * Envoie un email de réinitialisation. Réponse identique si l'email existe ou non (anti-énumération).
+ */
+router.post(
+  '/forgot-password',
+  forgotPasswordLimiter,
+  [body('email').isEmail().withMessage('Email invalide').normalizeEmail({ gmail_remove_dots: false })],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array().map((e) => e.msg) });
+    }
+
+    const result = await authService.requestPasswordReset(req.body.email);
+
+    if (!result.success) {
+      return res.status(500).json({ success: false, error: result.error });
+    }
+
+    res.json({ success: true });
+  }
+);
+
+/**
+ * POST /api/auth/reset-password
+ * Réinitialise le mot de passe via un token valide (usage unique, expire 1h).
+ */
+router.post(
+  '/reset-password',
+  [
+    body('token').isString().notEmpty().withMessage('Token manquant'),
+    body('password')
+      .isLength({ min: 12 })
+      .withMessage('Le mot de passe doit contenir au moins 12 caractères')
+  ],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array().map((e) => e.msg) });
+    }
+
+    const { token, password } = req.body;
+    const result = await authService.resetPassword(token, password);
+
+    if (!result.success) {
+      return res.status(400).json({ success: false, error: result.error });
+    }
+
+    res.json({ success: true });
   }
 );
 

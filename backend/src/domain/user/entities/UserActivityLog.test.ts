@@ -18,13 +18,19 @@ describe('UserActivityLog', () => {
     expect(schema.paths.type).toBeDefined();
     expect(schema.paths.timestamp).toBeDefined();
     expect(schema.paths.meta).toBeDefined();
-    expect(schema.paths.type.options.enum).toEqual(['login', 'page_view', 'error_500']);
+    expect(schema.paths.type.options.enum).toEqual([
+      'login',
+      'page_view',
+      'error_500',
+      'password_reset_request',
+      'password_reset_complete',
+    ]);
   });
 
   it('accepte les types UserActivityType', () => {
-    const types: UserActivityType[] = ['login', 'page_view', 'error_500'];
+    const types: UserActivityType[] = ['login', 'page_view', 'error_500', 'password_reset_request', 'password_reset_complete'];
     types.forEach((type) => {
-      expect(['login', 'page_view', 'error_500']).toContain(type);
+      expect(['login', 'page_view', 'error_500', 'password_reset_request', 'password_reset_complete']).toContain(type);
     });
   });
 

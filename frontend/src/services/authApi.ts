@@ -59,12 +59,12 @@ export interface UserWithRoleDto {
   roleName: string;
 }
 
-/** Activity log entry (login now; page_view / error_500 later) */
+/** Activity log entry */
 export interface UserActivityLogEntry {
   id: string;
-  type: 'login' | 'page_view' | 'error_500';
+  type: 'login' | 'page_view' | 'error_500' | 'password_reset_request' | 'password_reset_complete';
   timestamp: string;
-  meta?: { page?: string; durationMs?: number; path?: string; count?: number };
+  meta?: { page?: string; durationMs?: number; path?: string; count?: number; emailSent?: boolean };
 }
 
 export interface AuthResponse {
@@ -327,6 +327,39 @@ export const authApi = {
     const response = await api.patch<{ success: boolean; user: User }>('/api/auth/me/role', { roleId });
     if (!response.data.success) throw new Error((response.data as { error?: string }).error);
     return response.data.user;
+  },
+
+  /**
+   * Demande un email de réinitialisation de mot de passe.
+   * Répond toujours avec succès (anti-énumération d'email).
+   */
+  async forgotPassword(email: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      await api.post('/api/auth/forgot-password', { email });
+      return { success: true };
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { error?: string } } };
+      return {
+        success: false,
+        error: err.response?.data?.error || 'Erreur lors de la demande de réinitialisation'
+      };
+    }
+  },
+
+  /**
+   * Réinitialise le mot de passe avec un token valide.
+   */
+  async resetPassword(token: string, password: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      await api.post('/api/auth/reset-password', { token, password });
+      return { success: true };
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { error?: string } } };
+      return {
+        success: false,
+        error: err.response?.data?.error || 'Erreur lors de la réinitialisation du mot de passe'
+      };
+    }
   }
 };
 

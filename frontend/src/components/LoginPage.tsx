@@ -12,10 +12,11 @@ import {
   ShieldCheck
 } from 'lucide-react';
 import { PasswordStrengthIndicator } from './PasswordStrengthIndicator';
+import { ForgotPasswordPage } from './ForgotPasswordPage';
 import { useStore } from '../store/useStore';
 import { authApi, MicrosoftConfig, RoleForSignup } from '../services/authApi';
 
-type AuthMode = 'login' | 'register';
+type AuthMode = 'login' | 'register' | 'forgot-password';
 
 // Microsoft Icon Component
 function MicrosoftIcon({ className = '' }: { className?: string }) {
@@ -30,7 +31,9 @@ function MicrosoftIcon({ className = '' }: { className?: string }) {
 }
 
 export function LoginPage() {
-  const [mode, setMode] = useState<AuthMode>('login');
+  const [mode, setMode] = useState<AuthMode>(() =>
+    window.location.pathname === '/forgot-password' ? 'forgot-password' : 'login'
+  );
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -167,6 +170,10 @@ export function LoginPage() {
     setConfirmPassword('');
     setSelectedRoleId('');
   };
+
+  if (mode === 'forgot-password') {
+    return <ForgotPasswordPage onBack={() => setMode('login')} />;
+  }
 
   return (
     <div className="min-h-screen flex items-center justify-center p-4 relative overflow-hidden">
@@ -312,6 +319,19 @@ export function LoginPage() {
                 </button>
               </div>
             </div>
+
+            {/* Forgot password link — login mode only */}
+            {mode === 'login' && (
+              <div className="flex justify-end -mt-1">
+                <button
+                  type="button"
+                  onClick={() => setMode('forgot-password')}
+                  className="text-sm text-surface-500 hover:text-accent-400 transition-colors"
+                >
+                  Mot de passe oublié ?
+                </button>
+              </div>
+            )}
 
             {/* Password Strength Indicator (register only) */}
             {mode === 'register' && (

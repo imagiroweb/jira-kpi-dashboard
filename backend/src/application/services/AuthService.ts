@@ -1,8 +1,10 @@
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { User, IUser } from '../../domain/user/entities/User';
 import { Role, IPageVisibilities, PAGE_IDS } from '../../domain/user/entities/Role';
 import { UserActivityLog } from '../../domain/user/entities/UserActivityLog';
+import { emailService } from '../../infrastructure/email/NodemailerEmailService';
 import { logger } from '../../utils/logger';
 
 const SUPER_ADMIN_EMAIL = 'bdeguil-robin@adoria.com';
@@ -558,6 +560,128 @@ export class AuthService {
     } catch (error) {
       logger.error('Get user error:', error);
       return null;
+    }
+  }
+
+  /**
+   * Demande de réinitialisation de mot de passe.
+   * Génère un token sécurisé, stocke son hash SHA-256 en DB et envoie l'email.
+   * Répond toujours avec succès pour éviter l'énumération d'emails (RGPD / sécurité).
+   */
+  async requestPasswordReset(email: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const user = await User.findOne({
+        email: email.toLowerCase(),
+        provider: 'local'
+      }).select('+passwordResetToken +passwordResetExpires');
+
+      // Toujours répondre avec succès — ne pas révéler si l'email existe
+      if (!user || !user.isActive) {
+        return { success: true };
+      }
+
+      // Token aléatoire 32 octets (64 caractères hex) — jamais stocké en clair
+      const plainToken = crypto.randomBytes(32).toString('hex');
+      const tokenHash = crypto.createHash('sha256').update(plainToken).digest('hex');
+
+      const resetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 heure
+
+      // Utiliser updateOne pour éviter les problèmes de dirty tracking Mongoose
+      // sur les champs select: false
+      await User.updateOne(
+        { _id: user._id },
+        { $set: { passwordResetToken: tokenHash, passwordResetExpires: resetExpires } }
+      );
+
+      const appBaseUrl = (process.env.APP_BASE_URL || 'http://localhost:3001').replace(/\/$/, '');
+      const resetUrl = `${appBaseUrl}/reset-password?token=${plainToken}`;
+
+      const sent = await emailService.sendPasswordResetEmail(
+        { email: user.email, firstName: user.firstName },
+        resetUrl
+      );
+
+      if (!sent) {
+        // Annuler le token pour ne pas laisser l'état incohérent
+        await User.updateOne(
+          { _id: user._id },
+          { $unset: { passwordResetToken: '', passwordResetExpires: '' } }
+        );
+        // Log la tentative échouée
+        await UserActivityLog.create({
+          userId: user._id,
+          type: 'password_reset_request',
+          timestamp: new Date(),
+          meta: { emailSent: false }
+        });
+        return {
+          success: false,
+          error: 'Impossible d\'envoyer l\'email de réinitialisation. Vérifiez la configuration SMTP.'
+        };
+      }
+
+      // Log la demande réussie
+      await UserActivityLog.create({
+        userId: user._id,
+        type: 'password_reset_request',
+        timestamp: new Date(),
+        meta: { emailSent: true }
+      });
+
+      logger.info(`Demande de réinitialisation de mot de passe pour : ${user.email}`);
+      return { success: true };
+    } catch (error) {
+      logger.error('requestPasswordReset error:', error);
+      return { success: false, error: 'Erreur serveur lors de la demande de réinitialisation' };
+    }
+  }
+
+  /**
+   * Réinitialise le mot de passe via un token valide (usage unique, expire en 1h).
+   */
+  async resetPassword(plainToken: string, newPassword: string): Promise<{ success: boolean; error?: string }> {
+    try {
+      const validation = this.validatePassword(newPassword);
+      if (!validation.isValid) {
+        return { success: false, error: validation.errors.join('. ') };
+      }
+
+      const tokenHash = crypto.createHash('sha256').update(plainToken).digest('hex');
+
+      const user = await User.findOne({
+        passwordResetToken: tokenHash,
+        passwordResetExpires: { $gt: new Date() }
+      }).select('+passwordResetToken +passwordResetExpires');
+
+      if (!user) {
+        return {
+          success: false,
+          error: 'Ce lien de réinitialisation est invalide ou a expiré.'
+        };
+      }
+
+      const userId = user._id;
+      const hashedPassword = await this.hashPassword(newPassword);
+
+      await User.updateOne(
+        { _id: userId },
+        {
+          $set: { password: hashedPassword },
+          $unset: { passwordResetToken: '', passwordResetExpires: '' }
+        }
+      );
+
+      await UserActivityLog.create({
+        userId,
+        type: 'password_reset_complete',
+        timestamp: new Date()
+      });
+
+      logger.info(`Mot de passe réinitialisé pour : ${user.email}`);
+      return { success: true };
+    } catch (error) {
+      logger.error('resetPassword error:', error);
+      return { success: false, error: 'Erreur serveur lors de la réinitialisation du mot de passe' };
     }
   }
 }
