@@ -12,6 +12,10 @@ export interface IUser extends Document {
   role?: 'super_admin';
   roleId?: mongoose.Types.ObjectId;
   lastLogin?: Date;
+  /** SHA-256 hash du token de réinitialisation (jamais le plaintext) */
+  passwordResetToken?: string;
+  /** Date d'expiration du token (1h après génération) */
+  passwordResetExpires?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -70,6 +74,14 @@ const UserSchema = new Schema<IUser>(
     },
     lastLogin: {
       type: Date
+    },
+    passwordResetToken: {
+      type: String,
+      select: false
+    },
+    passwordResetExpires: {
+      type: Date,
+      select: false
     }
   },
   {

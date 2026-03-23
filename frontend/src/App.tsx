@@ -10,7 +10,8 @@ import {
   UserManagementPage,
   LoginPage, 
   MicrosoftCallback,
-  RoleSelectionScreen
+  RoleSelectionScreen,
+  ResetPasswordPage
 } from './components';
 import { useStore } from './store/useStore';
 import { authApi } from './services/authApi';
@@ -26,8 +27,11 @@ function App() {
   const logout = useStore((state) => state.logout);
   const [isVerifyingToken, setIsVerifyingToken] = useState(true);
 
-  // Check if we're on Microsoft callback route
+  // Check special routes
   const isMicrosoftCallback = window.location.pathname === '/auth/microsoft/callback';
+  const resetToken = window.location.pathname === '/reset-password'
+    ? new URLSearchParams(window.location.search).get('token')
+    : null;
 
   // Verify token on app load and refresh user (role, visiblePages)
   const updateUser = useStore((state) => state.updateUser);
@@ -50,6 +54,16 @@ function App() {
   // Handle Microsoft callback
   if (isMicrosoftCallback) {
     return <MicrosoftCallback />;
+  }
+
+  // Handle password reset link (accessible sans authentification)
+  if (resetToken) {
+    return (
+      <ResetPasswordPage
+        token={resetToken}
+        onSuccess={() => { window.history.replaceState(null, '', '/'); }}
+      />
+    );
   }
 
   // Show loading while verifying token

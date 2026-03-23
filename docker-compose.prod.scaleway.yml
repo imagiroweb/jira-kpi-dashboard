@@ -29,6 +29,13 @@ services:
       - SYNC_ENABLED=${SYNC_ENABLED:-true}
       - SYNC_INTERVAL_SECONDS=${SYNC_INTERVAL_SECONDS:-300}
       - MICROSOFT_REDIRECT_URI=https://jira-kpi.imagiro.fr/api/auth/microsoft/callback
+      - APP_BASE_URL=https://jira-kpi.imagiro.fr
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_SECURE=${SMTP_SECURE:-false}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-Jira KPI Dashboard}
     depends_on:
       mongodb:
         condition: service_started

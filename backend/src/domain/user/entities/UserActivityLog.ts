@@ -1,9 +1,14 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
-/** Activity types: login now; page_view and error_500 for future use */
-export type UserActivityType = 'login' | 'page_view' | 'error_500';
+/** Activity types */
+export type UserActivityType =
+  | 'login'
+  | 'page_view'
+  | 'error_500'
+  | 'password_reset_request'
+  | 'password_reset_complete';
 
-/** Optional metadata per type (for future features) */
+/** Optional metadata per type */
 export interface IUserActivityLogMeta {
   /** page_view: page identifier (e.g. 'dashboard', 'support') */
   page?: string;
@@ -13,6 +18,8 @@ export interface IUserActivityLogMeta {
   path?: string;
   /** error_500: count of 500 errors in a time window */
   count?: number;
+  /** password_reset_request: whether the email was successfully sent */
+  emailSent?: boolean;
 }
 
 export interface IUserActivityLog extends Document {
@@ -35,7 +42,7 @@ const UserActivityLogSchema = new Schema<IUserActivityLog>(
     },
     type: {
       type: String,
-      enum: ['login', 'page_view', 'error_500'],
+      enum: ['login', 'page_view', 'error_500', 'password_reset_request', 'password_reset_complete'],
       required: true
     },
     timestamp: {
