@@ -318,6 +318,75 @@ describe('authApi', () => {
     });
   });
 
+  describe('forgotPassword', () => {
+    it('retourne success: true si la requête aboutit', async () => {
+      mockPost.mockResolvedValueOnce({ data: { success: true } });
+
+      const result = await authApi.forgotPassword('user@test.com');
+
+      expect(mockPost).toHaveBeenCalledWith('/api/auth/forgot-password', {
+        email: 'user@test.com',
+      });
+      expect(result.success).toBe(true);
+      expect(result.error).toBeUndefined();
+    });
+
+    it("retourne success: false et l'erreur du serveur en cas d'echec", async () => {
+      mockPost.mockRejectedValueOnce({
+        response: { data: { error: 'Impossible d\'envoyer l\'email de réinitialisation. Vérifiez la configuration SMTP.' } },
+      });
+
+      const result = await authApi.forgotPassword('user@test.com');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('SMTP');
+    });
+
+    it("retourne un message generique en cas d'erreur reseau", async () => {
+      mockPost.mockRejectedValueOnce(new Error('Network error'));
+
+      const result = await authApi.forgotPassword('user@test.com');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Erreur lors de la demande de réinitialisation');
+    });
+  });
+
+  describe('resetPassword', () => {
+    it('retourne success: true si le token et le mot de passe sont valides', async () => {
+      mockPost.mockResolvedValueOnce({ data: { success: true } });
+
+      const result = await authApi.resetPassword('my-reset-token', 'MonMotDePasse123!');
+
+      expect(mockPost).toHaveBeenCalledWith('/api/auth/reset-password', {
+        token: 'my-reset-token',
+        password: 'MonMotDePasse123!',
+      });
+      expect(result.success).toBe(true);
+      expect(result.error).toBeUndefined();
+    });
+
+    it("retourne success: false et l'erreur du serveur si le token est invalide", async () => {
+      mockPost.mockRejectedValueOnce({
+        response: { data: { error: 'Ce lien de réinitialisation est invalide ou a expiré.' } },
+      });
+
+      const result = await authApi.resetPassword('expired-token', 'MonMotDePasse123!');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain('invalide ou a expiré');
+    });
+
+    it("retourne un message generique en cas d'erreur reseau", async () => {
+      mockPost.mockRejectedValueOnce(new Error('Network error'));
+
+      const result = await authApi.resetPassword('token', 'MonMotDePasse123!');
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Erreur lors de la réinitialisation du mot de passe');
+    });
+  });
+
   describe('getUserPageStats', () => {
     it('retourne les stats de navigation (pages, total, percentages, daily)', async () => {
       const data = {
