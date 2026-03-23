@@ -114,6 +114,11 @@ const connectMongoDB = async () => {
 connectMongoDB();
 
 const app = express();
+// Derrière Traefik / un reverse proxy, X-Forwarded-For est présent : requis pour express-rate-limit (sinon ValidationError).
+if (process.env.NODE_ENV === 'production') {
+  const hops = Number(process.env.TRUST_PROXY_HOPS);
+  app.set('trust proxy', Number.isFinite(hops) && hops > 0 ? hops : 1);
+}
 const httpServer = createServer(app);
 
 // Socket.io configuration
