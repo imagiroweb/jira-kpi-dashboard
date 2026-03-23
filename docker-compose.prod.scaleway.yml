@@ -38,6 +38,8 @@ services:
       - SMTP_PASS=${SMTP_PASS}
       - EMAIL_FROM=${EMAIL_FROM:-}
       - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-Jira KPI Dashboard}
+      - SMTP_TLS_SERVERNAME=${SMTP_TLS_SERVERNAME:-}
+      - SMTP_TLS_REJECT_UNAUTHORIZED=${SMTP_TLS_REJECT_UNAUTHORIZED:-}
     depends_on:
       mongodb:
         condition: service_started

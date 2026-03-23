@@ -25,6 +25,7 @@ import { setupSocketHandlers } from './websocket/socketHandler';
 import { swaggerSpec } from './config/swagger';
 import { schedulerService } from './services/schedulerService';
 import { Role } from './domain/user/entities/Role';
+import { emailService } from './infrastructure/email/NodemailerEmailService';
 
 // MongoDB connection
 const connectMongoDB = async () => {
@@ -205,6 +206,8 @@ httpServer.listen(PORT, HOST, () => {
   
   // Initialize scheduler for automatic sync with WebSocket notifications
   schedulerService.initialize(io);
+
+  void emailService.verify();
 });
 
 export { io };

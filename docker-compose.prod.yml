@@ -69,6 +69,8 @@ services:
       - SMTP_PASS=${SMTP_PASS:-}
       - EMAIL_FROM=${EMAIL_FROM:-}
       - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-Jira KPI Dashboard}
+      - SMTP_TLS_SERVERNAME=${SMTP_TLS_SERVERNAME:-}
+      - SMTP_TLS_REJECT_UNAUTHORIZED=${SMTP_TLS_REJECT_UNAUTHORIZED:-}
     volumes:
       - backend_uploads:/app/uploads
       - backend_logs:/app/logs

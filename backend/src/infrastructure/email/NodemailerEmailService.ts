@@ -1,6 +1,21 @@
 import nodemailer, { Transporter } from 'nodemailer';
 import { logger } from '../../utils/logger';
 
+function logSmtpFailure(label: string, error: unknown): void {
+  if (error && typeof error === 'object') {
+    const e = error as Record<string, unknown>;
+    logger.error(label, {
+      message: e.message,
+      code: e.code,
+      command: e.command,
+      responseCode: e.responseCode,
+      response: e.response
+    });
+  } else {
+    logger.error(label, error);
+  }
+}
+
 export class NodemailerEmailService {
   private transporter: Transporter | null = null;
 
@@ -20,14 +35,28 @@ export class NodemailerEmailService {
       return;
     }
 
+    const tlsServername = (process.env.SMTP_TLS_SERVERNAME || '').trim() || undefined;
+    const tlsRejectUnauthorized =
+      process.env.SMTP_TLS_REJECT_UNAUTHORIZED === 'false'
+        ? false
+        : process.env.NODE_ENV === 'production';
+
+    // Port 587 = submission STARTTLS (Mailcow, la plupart des relais). Port 465 = TLS direct (secure=true).
+    // Port 588 SOGo interne : souvent TLS direct ; si timeout, préférer 587 + cette logique.
+    const startTlsExplicit = process.env.SMTP_STARTTLS === 'true';
+    const startTlsAuto587 = !secure && port === 587 && process.env.SMTP_STARTTLS !== 'false';
+    const requireTLS = startTlsExplicit || startTlsAuto587;
+
     this.transporter = nodemailer.createTransport({
       host,
       port,
       secure,
+      requireTLS,
       auth: { user, pass },
       tls: {
-        // Accepter les certificats auto-signés en développement
-        rejectUnauthorized: process.env.NODE_ENV === 'production'
+        // Connexion par nom Docker (ex. postfix-mailcow) : le cert présente mail.imagiro.fr → définir SMTP_TLS_SERVERNAME
+        ...(tlsServername ? { servername: tlsServername } : {}),
+        rejectUnauthorized: tlsRejectUnauthorized
       }
     });
   }
@@ -57,6 +86,10 @@ export class NodemailerEmailService {
     const fromName = process.env.EMAIL_FROM_NAME || 'Jira KPI Dashboard';
     // EMAIL_FROM : adresse expéditeur vérifiée (ex. noreply@domaine). Sur Scaleway TEM, SMTP_USER est souvent l’ID projet, pas une adresse.
     const fromAddress = (process.env.EMAIL_FROM || process.env.SMTP_USER || '').trim();
+    if (!fromAddress) {
+      logger.error('SMTP : adresse expéditeur vide (EMAIL_FROM / SMTP_USER) — envoi annulé');
+      return false;
+    }
     const recipientName = to.firstName || 'Utilisateur';
 
     const html = `<!DOCTYPE html>
@@ -153,7 +186,7 @@ Conformément au RGPD, vos données ne sont pas partagées avec des tiers.`;
       logger.info(`Email de réinitialisation envoyé à : ${to.email}`);
       return true;
     } catch (error) {
-      logger.error('Échec envoi email SMTP:', error);
+      logSmtpFailure('Échec envoi email SMTP', error);
       return false;
     }
   }
@@ -165,7 +198,8 @@ Conformément au RGPD, vos données ne sont pas partagées avec des tiers.`;
       await this.transporter.verify();
       logger.info('Connexion SMTP vérifiée avec succès');
     } catch (error) {
-      logger.warn('Connexion SMTP échouée — vérifiez SMTP_HOST / SMTP_USER / SMTP_PASS :', error);
+      logger.warn('Connexion SMTP échouée — vérifiez SMTP_HOST / SMTP_USER / SMTP_PASS / TLS :');
+      logSmtpFailure('Détail vérification SMTP', error);
     }
   }
 }

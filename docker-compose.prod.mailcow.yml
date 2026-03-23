@@ -18,8 +18,12 @@
 # 3) Dans /opt/jira-kpi-dashboard/.env :
 #    MAILCOW_DOCKER_NETWORK=<valeur exacte de l’étape 1>
 #    SMTP_HOST=<nom de l’étape 2>
-#    SMTP_PORT=588
-#    SMTP_SECURE=true
+#    Préféré (Postfix Mailcow, même réseau Docker) :
+#    SMTP_PORT=587
+#    SMTP_SECURE=false
+#    SMTP_TLS_SERVERNAME=mail.imagiro.fr
+#    (STARTTLS est activé automatiquement pour le port 587 dans le backend.)
+#    Variante TLS directe si 587 ne convient pas : SMTP_PORT=465, SMTP_SECURE=true
 #    (+ SMTP_USER / SMTP_PASS / APP_BASE_URL comme avant)
 
 services:
