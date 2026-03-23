@@ -35,6 +35,7 @@ services:
       - SMTP_SECURE=${SMTP_SECURE:-false}
       - SMTP_USER=${SMTP_USER}
       - SMTP_PASS=${SMTP_PASS}
+      - EMAIL_FROM=${EMAIL_FROM:-}
       - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-Jira KPI Dashboard}
     depends_on:
       mongodb:

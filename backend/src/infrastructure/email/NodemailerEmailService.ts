@@ -55,7 +55,8 @@ export class NodemailerEmailService {
     }
 
     const fromName = process.env.EMAIL_FROM_NAME || 'Jira KPI Dashboard';
-    const fromAddress = process.env.SMTP_USER || '';
+    // EMAIL_FROM : adresse expéditeur vérifiée (ex. noreply@domaine). Sur Scaleway TEM, SMTP_USER est souvent l’ID projet, pas une adresse.
+    const fromAddress = (process.env.EMAIL_FROM || process.env.SMTP_USER || '').trim();
     const recipientName = to.firstName || 'Utilisateur';
 
     const html = `<!DOCTYPE html>

@@ -60,6 +60,15 @@ services:
       - MICROSOFT_CLIENT_ID=${MICROSOFT_CLIENT_ID:-}
       - MICROSOFT_TENANT_ID=${MICROSOFT_TENANT_ID:-common}
       - MICROSOFT_REDIRECT_URI=${MICROSOFT_REDIRECT_URI:-}
+      # Réinitialisation mot de passe (Nodemailer) — requis en prod si comptes locaux
+      - APP_BASE_URL=${APP_BASE_URL:-}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_SECURE=${SMTP_SECURE:-false}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - EMAIL_FROM=${EMAIL_FROM:-}
+      - EMAIL_FROM_NAME=${EMAIL_FROM_NAME:-Jira KPI Dashboard}
     volumes:
       - backend_uploads:/app/uploads
       - backend_logs:/app/logs
