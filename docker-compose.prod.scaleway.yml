@@ -1,5 +1,6 @@
 # Override pour déploiement Scaleway Dedibox avec Traefik
 # Usage: docker compose -f docker-compose.prod.yml -f docker-compose.prod.ghcr.yml -f docker-compose.prod.scaleway.yml up -d
+# SMTP Mailcow sur le même serveur : ajouter -f docker-compose.prod.mailcow.yml (voir ce fichier).
 #
 # Prérequis sur le serveur :
 #   - Traefik tournant sur le réseau externe "traefik-public"
