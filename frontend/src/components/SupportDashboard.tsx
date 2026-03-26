@@ -117,11 +117,16 @@ export function SupportDashboard() {
   const setDateRange = useStore((state) => state.setDateRange);
   const isAuthenticated = useStore((state) => state.isAuthenticated);
   const kpiRefreshTrigger = useStore((state) => state.kpiRefreshTrigger);
-  
-  const [kpiData, setKpiData] = useState<SupportKPIData | null>(null);
+
+  const kpiData = useStore((state) => state.supportKpiPayload) as SupportKPIData | null;
+  const setSupportKpiPayload = useStore((state) => state.setSupportKpiPayload);
+  const lastUpdate = useStore((state) => state.supportKpiLastUpdate);
+  const setSupportKpiLastUpdate = useStore((state) => state.setSupportKpiLastUpdate);
+  const useActiveSprint = useStore((state) => state.supportUseActiveSprint);
+  const setSupportUseActiveSprint = useStore((state) => state.setSupportUseActiveSprint);
+  const setSupportLastFiltersKey = useStore((state) => state.setSupportLastFiltersKey);
+
   const [isLoading, setIsLoading] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-  const [useActiveSprint, setUseActiveSprint] = useState(true);
   
   // Snapshot states
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -139,76 +144,93 @@ export function SupportDashboard() {
   const [showResolutionDetails, setShowResolutionDetails] = useState(false);
   // First response (1ère prise en charge) details modal state
   const [showFirstResponseDetails, setShowFirstResponseDetails] = useState(false);
-  const didMountLoad = useRef(false);
+
+  const filtersKey = useMemo(
+    () => `${dateRange.from}|${dateRange.to}|${useActiveSprint}`,
+    [dateRange.from, dateRange.to, useActiveSprint]
+  );
+  const filtersKeyRef = useRef(filtersKey);
+  filtersKeyRef.current = filtersKey;
 
   // silent = true means no loading state (for background refreshes)
-  const loadKPIs = useCallback(async (silent = false) => {
-    if (!silent) {
-      setIsLoading(true);
-    }
-    
-    try {
-      const params = new URLSearchParams();
-      
-      // Only add date params if not using active sprint mode
-      if (!useActiveSprint) {
-        params.append('from', dateRange.from);
-        params.append('to', dateRange.to);
+  const loadKPIs = useCallback(
+    async (silent = false) => {
+      if (!silent) {
+        setIsLoading(true);
       }
-      // Add a flag to indicate active sprint mode
-      params.append('activeSprint', String(useActiveSprint));
 
-      const response = await fetch(`${API_BASE_URL}/worklog/support-kpi?${params}`);
-      
-      if (response.ok) {
-        const result = await response.json();
-        if (result.success) {
-          // Only update if data actually changed
-          const hasChanged = JSON.stringify(result) !== JSON.stringify(kpiData);
-          if (hasChanged) {
-            setKpiData(result);
-            setLastUpdate(new Date());
+      try {
+        const params = new URLSearchParams();
+
+        if (!useActiveSprint) {
+          params.append('from', dateRange.from);
+          params.append('to', dateRange.to);
+        }
+        params.append('activeSprint', String(useActiveSprint));
+
+        const response = await fetch(`${API_BASE_URL}/worklog/support-kpi?${params}`);
+
+        if (response.ok) {
+          const result = await response.json();
+          if (result.success) {
+            const prev = useStore.getState().supportKpiPayload;
+            const hasChanged = JSON.stringify(result) !== JSON.stringify(prev);
+            if (hasChanged) {
+              setSupportKpiPayload(result);
+              setSupportKpiLastUpdate(new Date());
+            }
+            const key = filtersKeyRef.current;
+            if (key) {
+              setSupportLastFiltersKey(key);
+            }
           }
         }
+      } catch (err) {
+        console.error('Failed to load Support KPIs:', err);
+      } finally {
+        if (!silent) {
+          setIsLoading(false);
+        }
       }
-    } catch (err) {
-      console.error('Failed to load Support KPIs:', err);
-    } finally {
-      if (!silent) {
-        setIsLoading(false);
-      }
+    },
+    [
+      dateRange.from,
+      dateRange.to,
+      useActiveSprint,
+      setSupportKpiPayload,
+      setSupportKpiLastUpdate,
+      setSupportLastFiltersKey
+    ]
+  );
+
+  /** Skip HTTP when persisted cache matches current filters; socket triggers silent refresh. */
+  useEffect(() => {
+    if (!filtersKey) return;
+    const { supportLastFiltersKey, supportKpiPayload } = useStore.getState();
+    if (supportLastFiltersKey === filtersKey && supportKpiPayload != null) {
+      return;
     }
-  }, [dateRange, useActiveSprint, kpiData]);
-
-  // Load once on mount (ref avoids re-run when loadKPIs identity changes after first load)
-  useEffect(() => {
-    if (didMountLoad.current) return;
-    didMountLoad.current = true;
     loadKPIs(false);
-  }, [loadKPIs]);
+  }, [filtersKey, loadKPIs]);
 
-  // Reload when date range or mode changes (with loading indicator)
   useEffect(() => {
-    loadKPIs(false);
-  }, [dateRange.from, dateRange.to, useActiveSprint, loadKPIs]);
-
-  // Silent refresh when kpiRefreshTrigger changes (no loading indicator)
-  useEffect(() => {
-    if (kpiRefreshTrigger > 0) {
-      loadKPIs(true);
-    }
+    if (kpiRefreshTrigger <= 0) return;
+    loadKPIs(true);
   }, [kpiRefreshTrigger, loadKPIs]);
 
   // Handle date change - switch to custom date mode
-  const handleDateChange = useCallback((newRange: { from: string; to: string }) => {
-    setUseActiveSprint(false);
-    setDateRange(newRange);
-  }, [setDateRange]);
+  const handleDateChange = useCallback(
+    (newRange: { from: string; to: string }) => {
+      setSupportUseActiveSprint(false);
+      setDateRange(newRange);
+    },
+    [setDateRange, setSupportUseActiveSprint]
+  );
 
   // Switch back to active sprint mode
   const handleActiveSprintClick = useCallback(() => {
-    setUseActiveSprint(true);
-  }, []);
+    setSupportUseActiveSprint(true);
+  }, [setSupportUseActiveSprint]);
 
   // Calculate progress percentage based on ponderation
   const progressPercent = useMemo(() => {

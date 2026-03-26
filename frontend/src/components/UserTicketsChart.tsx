@@ -23,6 +23,8 @@ interface UserTicketsChartProps {
   dateRange: { from: string; to: string };
   selectedProjects: string[];
   useActiveSprint?: boolean;
+  sharedReportPayload?: unknown | null;
+  isSharedReportLoading?: boolean;
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
@@ -51,7 +53,13 @@ function formatHours(hours: number): string {
   return `${hours.toFixed(1)}h`;
 }
 
-export function UserTicketsChart({ dateRange, selectedProjects, useActiveSprint = false }: UserTicketsChartProps) {
+export function UserTicketsChart({
+  dateRange,
+  selectedProjects,
+  useActiveSprint = false,
+  sharedReportPayload = null,
+  isSharedReportLoading = false
+}: UserTicketsChartProps) {
   // Users list
   const [users, setUsers] = useState<UserOption[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(true);
@@ -64,59 +72,40 @@ export function UserTicketsChart({ dateRange, selectedProjects, useActiveSprint 
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load users from worklog report
+  // Liste utilisateurs : même payload que UserWorkloadChart (plus de doublon GET /worklog/report)
   useEffect(() => {
-    const loadUsers = async () => {
+    if (isSharedReportLoading) {
       setLoadingUsers(true);
-      try {
-        const params = new URLSearchParams();
-        if (useActiveSprint) {
-          params.append('activeSprint', 'true');
-        } else {
-          params.append('from', dateRange.from);
-          params.append('to', dateRange.to);
-        }
-        params.append('groupBy', 'user');
-        if (selectedProjects.length === 1) {
-          params.append('projectKey', selectedProjects[0]);
-        }
+      return;
+    }
 
-        const response = await fetch(`${API_BASE_URL}/worklog/report?${params}`);
-        
-        // Handle rate limiting and errors
-        if (response.status === 429) {
-          console.warn('Rate limited, retrying in 2 seconds...');
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          setLoadingUsers(false);
-          return;
-        }
-        
-        if (!response.ok) {
-          console.error(`Server error: ${response.status}`);
-          setLoadingUsers(false);
-          return;
-        }
-        
-        const result = await response.json();
-
-        if (result.success && Array.isArray(result.data)) {
-          const userList = result.data.map((user: { accountId?: string; displayName?: string; timeSpentHours?: number }) => ({
-            accountId: user.accountId,
-            displayName: user.displayName,
-            totalHours: user.timeSpentHours || 0
-          }));
-          userList.sort((a: UserOption, b: UserOption) => b.totalHours - a.totalHours);
-          setUsers(userList);
-        }
-      } catch (err) {
-        console.error('Failed to load users:', err);
-      } finally {
-        setLoadingUsers(false);
+    if (sharedReportPayload != null) {
+      const result = sharedReportPayload as { success?: boolean; data?: unknown };
+      if (result.success && Array.isArray(result.data)) {
+        const userList = result.data.map(
+          (user: {
+            accountId?: string;
+            displayName?: string;
+            totalHours?: number;
+            timeSpentHours?: number;
+          }) => ({
+            accountId: user.accountId ?? user.displayName ?? '',
+            displayName: user.displayName ?? 'Unknown',
+            totalHours: user.totalHours ?? user.timeSpentHours ?? 0
+          })
+        );
+        userList.sort((a: UserOption, b: UserOption) => b.totalHours - a.totalHours);
+        setUsers(userList);
+      } else {
+        setUsers([]);
       }
-    };
+      setLoadingUsers(false);
+      return;
+    }
 
-    loadUsers();
-  }, [dateRange, selectedProjects, useActiveSprint]);
+    setUsers([]);
+    setLoadingUsers(false);
+  }, [sharedReportPayload, isSharedReportLoading]);
 
   // Load tickets for selected user
   useEffect(() => {
@@ -132,14 +121,14 @@ export function UserTicketsChart({ dateRange, selectedProjects, useActiveSprint 
       try {
         const params = new URLSearchParams();
         if (useActiveSprint) {
-          params.append('openSprints', 'true');
+          params.append('activeSprint', 'true');
         } else {
           params.append('from', dateRange.from);
           params.append('to', dateRange.to);
         }
         params.append('accountId', selectedUser.accountId);
-        if (selectedProjects.length === 1) {
-          params.append('projectKey', selectedProjects[0]);
+        if (selectedProjects.length > 0) {
+          params.append('projectKeys', selectedProjects.join(','));
         }
 
         const response = await fetch(`${API_BASE_URL}/worklog/search?${params}`);
@@ -160,7 +149,6 @@ export function UserTicketsChart({ dateRange, selectedProjects, useActiveSprint 
         if (result.success && Array.isArray(result.worklogs)) {
           // Group worklogs by issue
           const ticketMap = new Map<string, TicketData>();
-          console.log(ticketMap);
 
           for (const worklog of result.worklogs) {
             const key = worklog.issueKey;

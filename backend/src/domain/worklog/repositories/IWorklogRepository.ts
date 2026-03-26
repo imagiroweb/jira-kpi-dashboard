@@ -36,7 +36,10 @@ export interface IWorklogRepository {
 export interface WorklogSearchParams {
   from?: string;
   to?: string;
+  /** Un seul projet (JQL project = "KEY") */
   projectKey?: string;
+  /** Plusieurs projets (JQL project in ("A","B")) — prioritaire si défini */
+  projectKeys?: string[];
   issueKey?: string;
   accountId?: string;
   teamName?: string;

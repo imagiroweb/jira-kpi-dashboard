@@ -18,6 +18,7 @@ export class SearchWorklogsUseCase {
       from: params.from,
       to: params.to,
       projectKey: params.projectKey,
+      projectKeys: params.projectKeys,
       issueKey: params.issueKey,
       accountId: params.accountId,
       teamName: params.teamName,
@@ -34,6 +35,7 @@ export class SearchWorklogsUseCase {
         from: params.from,
         to: params.to,
         projectKey: params.projectKey,
+        projectKeys: params.projectKeys,
         issueKey: params.issueKey,
         accountId: params.accountId,
         teamName: params.teamName,
@@ -50,6 +52,7 @@ export interface SearchWorklogsRequest {
   from?: string;
   to?: string;
   projectKey?: string;
+  projectKeys?: string[];
   issueKey?: string;
   accountId?: string;
   teamName?: string;

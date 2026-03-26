@@ -1,6 +1,14 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronLeft, ChevronRight, Flag, Loader2, Search, Users, X } from 'lucide-react';
-import { epicApi, EpicProgressItem, EpicTypeFilter, EpicStatusFilter, EpicSearchItem, EpicChildIssue, EpicDetailsResponse, jiraApi } from '../services/api';
+import {
+  epicApi,
+  EpicSearchItem,
+  EpicChildIssue,
+  EpicDetailsResponse,
+  EpicProgressResponse,
+  jiraApi
+} from '../services/api';
+import { useStore } from '../store/useStore';
 
 /** Affiche toujours en heures (et minutes si < 1h), sans jours */
 function formatHoursOnly(seconds: number): string {
@@ -355,17 +363,33 @@ function EpicDetailModal({
   );
 }
 
+const EPICS_PAGE_SIZE = 20;
+
 export function EpicProgressPage() {
-  const [selectedBoardId, setSelectedBoardId] = useState<number | null>(null);
-  const [typeFilter, setTypeFilter] = useState<EpicTypeFilter>('all');
-  const [statusFilter, setStatusFilter] = useState<EpicStatusFilter>('all');
-  const [epics, setEpics] = useState<EpicProgressItem[]>([]);
-  const [totalEpics, setTotalEpics] = useState(0);
-  const [page, setPage] = useState(1);
-  const [pageSize] = useState(20);
+  const kpiRefreshTrigger = useStore((s) => s.kpiRefreshTrigger);
+
+  const epicsPayload = useStore((s) => s.epicsProgressPayload) as
+    | ({ success?: boolean } & EpicProgressResponse)
+    | null;
+  const setEpicsProgressPayload = useStore((s) => s.setEpicsProgressPayload);
+  const setEpicsProgressLastUpdate = useStore((s) => s.setEpicsProgressLastUpdate);
+  const setEpicsLastFiltersKey = useStore((s) => s.setEpicsLastFiltersKey);
+  const selectedBoardId = useStore((s) => s.epicsSelectedBoardId);
+  const typeFilter = useStore((s) => s.epicsTypeFilter);
+  const setEpicsTypeFilter = useStore((s) => s.setEpicsTypeFilter);
+  const statusFilter = useStore((s) => s.epicsStatusFilter);
+  const setEpicsStatusFilter = useStore((s) => s.setEpicsStatusFilter);
+  const page = useStore((s) => s.epicsPage);
+  const setEpicsPage = useStore((s) => s.setEpicsPage);
+  const prefixFilter = useStore((s) => s.epicsPrefixFilter) as TicketPrefixFilter;
+  const setEpicsPrefixFilter = useStore((s) => s.setEpicsPrefixFilter);
+  const lastUpdate = useStore((s) => s.epicsProgressLastUpdate);
+
+  const epics = epicsPayload?.epics ?? [];
+  const totalEpics = epicsPayload?.total ?? 0;
+
   const [isLoadingEpics, setIsLoadingEpics] = useState(false);
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null);
-  
+
   // Search state
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<EpicSearchItem[]>([]);
@@ -377,46 +401,80 @@ export function EpicProgressPage() {
   // Detail modal state
   const [selectedEpicKey, setSelectedEpicKey] = useState<string | null>(null);
 
-  const [prefixFilter, setPrefixFilter] = useState<TicketPrefixFilter>('all');
-  
+  const filtersKey = useMemo(() => {
+    if (!selectedBoardId) return '';
+    return `${selectedBoardId}|${typeFilter}|${statusFilter}|${page}|${EPICS_PAGE_SIZE}|${prefixFilter}`;
+  }, [selectedBoardId, typeFilter, statusFilter, page, prefixFilter]);
+
+  const filtersKeyRef = useRef(filtersKey);
+  filtersKeyRef.current = filtersKey;
+
   const loadBoards = useCallback(async () => {
     try {
       const result = await jiraApi.getConfiguredBoards();
       if (result.success && result.boards?.length) {
-        setSelectedBoardId((current) => current ?? result.boards[0].id);
+        const st = useStore.getState();
+        if (st.epicsSelectedBoardId == null) {
+          st.setEpicsSelectedBoardId(result.boards[0].id);
+        }
       }
     } catch (error) {
       console.error('Failed to load boards:', error);
     }
   }, []);
 
-  const loadEpics = useCallback(async (boardId: number, typeF: EpicTypeFilter, statusF: EpicStatusFilter, pageNum: number = 1, summaryPrefixFilter?: TicketPrefixFilter) => {
-    if (!boardId) return;
-    setIsLoadingEpics(true);
-    try {
-      const result = await epicApi.getProgress(boardId, typeF, statusF, pageNum, pageSize, summaryPrefixFilter !== 'all' ? summaryPrefixFilter : undefined);
-      if (result.success) {
-        setEpics(result.epics ?? []);
-        const total = Number(result.total);
-        setTotalEpics(Number.isNaN(total) ? (result.epics?.length ?? 0) : total);
-        setLastUpdate(new Date());
+  const loadEpics = useCallback(
+    async (silent = false) => {
+      const {
+        epicsSelectedBoardId: boardId,
+        epicsTypeFilter: tf,
+        epicsStatusFilter: sf,
+        epicsPage: pageNum,
+        epicsPrefixFilter: pf
+      } = useStore.getState();
+      if (!boardId) return;
+      if (!silent) setIsLoadingEpics(true);
+      try {
+        const result = await epicApi.getProgress(
+          boardId,
+          tf,
+          sf,
+          pageNum,
+          EPICS_PAGE_SIZE,
+          pf !== 'all' ? (pf as TicketPrefixFilter) : undefined
+        );
+        if (result.success) {
+          setEpicsProgressPayload(result);
+          setEpicsProgressLastUpdate(new Date());
+          const key = filtersKeyRef.current;
+          if (key) setEpicsLastFiltersKey(key);
+        }
+      } catch (error) {
+        console.error('Failed to load epic progress:', error);
+      } finally {
+        if (!silent) setIsLoadingEpics(false);
       }
-    } catch (error) {
-      console.error('Failed to load epic progress:', error);
-    } finally {
-      setIsLoadingEpics(false);
-    }
-  }, [pageSize]);
+    },
+    [setEpicsProgressPayload, setEpicsProgressLastUpdate, setEpicsLastFiltersKey]
+  );
 
   useEffect(() => {
     loadBoards();
   }, [loadBoards]);
 
   useEffect(() => {
-    if (selectedBoardId) {
-      loadEpics(selectedBoardId, typeFilter, statusFilter, page, prefixFilter);
+    if (!selectedBoardId || !filtersKey) return;
+    const { epicsLastFiltersKey: lastKey, epicsProgressPayload: cached } = useStore.getState();
+    if (lastKey === filtersKey && cached != null) {
+      return;
     }
-  }, [selectedBoardId, typeFilter, statusFilter, page, prefixFilter, loadEpics]);
+    loadEpics(false);
+  }, [selectedBoardId, filtersKey, loadEpics]);
+
+  useEffect(() => {
+    if (kpiRefreshTrigger <= 0) return;
+    loadEpics(true);
+  }, [kpiRefreshTrigger, loadEpics]);
 
   // Handle search
   const handleSearch = useCallback(async (query: string) => {
@@ -503,7 +561,7 @@ export function EpicProgressPage() {
             <label className="text-xs uppercase tracking-wide text-surface-500">Type</label>
             <div className="flex rounded-xl bg-surface-900/80 border border-surface-700/50 p-1">
               <button
-                onClick={() => { setTypeFilter('all'); setPage(1); }}
+                onClick={() => { setEpicsTypeFilter('all'); setEpicsPage(1); }}
                 className={`px-4 py-1.5 text-sm rounded-lg transition-colors ${
                   typeFilter === 'all' 
                     ? 'bg-primary-500/20 text-primary-300' 
@@ -513,7 +571,7 @@ export function EpicProgressPage() {
                 Tous
               </button>
               <button
-                onClick={() => { setTypeFilter('epic'); setPage(1); }}
+                onClick={() => { setEpicsTypeFilter('epic'); setEpicsPage(1); }}
                 className={`px-4 py-1.5 text-sm rounded-lg transition-colors ${
                   typeFilter === 'epic' 
                     ? 'bg-primary-500/20 text-primary-300' 
@@ -523,7 +581,7 @@ export function EpicProgressPage() {
                 Épics
               </button>
               <button
-                onClick={() => { setTypeFilter('legend'); setPage(1); }}
+                onClick={() => { setEpicsTypeFilter('legend'); setEpicsPage(1); }}
                 className={`px-4 py-1.5 text-sm rounded-lg transition-colors ${
                   typeFilter === 'legend' 
                     ? 'bg-primary-500/20 text-primary-300' 
@@ -537,7 +595,7 @@ export function EpicProgressPage() {
               <label className="text-xs uppercase tracking-wide text-surface-500">Statut</label>
               <div className="flex flex-wrap gap-2">
                 <button
-                  onClick={() => { setStatusFilter('all'); setPage(1); }}
+                  onClick={() => { setEpicsStatusFilter('all'); setEpicsPage(1); }}
                   className={`px-4 py-1.5 text-sm rounded-lg transition-colors ${
                     statusFilter === 'all'
                       ? 'bg-primary-500/20 text-primary-300'
@@ -547,7 +605,7 @@ export function EpicProgressPage() {
                   Toutes
                 </button>
                 <button
-                  onClick={() => { setStatusFilter('done'); setPage(1); }}
+                  onClick={() => { setEpicsStatusFilter('done'); setEpicsPage(1); }}
                   className={`px-4 py-1.5 text-sm rounded-lg transition-colors ${
                     statusFilter === 'done'
                       ? 'bg-primary-500/20 text-primary-300'
@@ -557,7 +615,7 @@ export function EpicProgressPage() {
                   Terminées
                 </button>
                 <button
-                  onClick={() => { setStatusFilter('new'); setPage(1); }}
+                  onClick={() => { setEpicsStatusFilter('new'); setEpicsPage(1); }}
                   className={`px-4 py-1.5 text-sm rounded-lg transition-colors ${
                     statusFilter === 'new'
                       ? 'bg-primary-500/20 text-primary-300'
@@ -567,7 +625,7 @@ export function EpicProgressPage() {
                   À faire
                 </button>
                 <button
-                  onClick={() => { setStatusFilter('indeterminate'); setPage(1); }}
+                  onClick={() => { setEpicsStatusFilter('indeterminate'); setEpicsPage(1); }}
                   className={`px-4 py-1.5 text-sm rounded-lg transition-colors ${
                     statusFilter === 'indeterminate'
                       ? 'bg-primary-500/20 text-primary-300'
@@ -584,7 +642,7 @@ export function EpicProgressPage() {
               </label>
               <div className="flex flex-wrap gap-2">
                 <button
-                  onClick={() => { setPrefixFilter('all'); setPage(1); }}
+                  onClick={() => { setEpicsPrefixFilter('all'); setEpicsPage(1); }}
                   className={`px-3 py-1.5 text-sm rounded-lg transition-colors font-mono ${
                     prefixFilter === 'all'
                       ? 'bg-primary-500/20 text-primary-300'
@@ -596,7 +654,7 @@ export function EpicProgressPage() {
                 {TICKET_PREFIXES.map((p) => (
                   <button
                     key={p}
-                    onClick={() => { setPrefixFilter(p); setPage(1); }}
+                    onClick={() => { setEpicsPrefixFilter(p); setEpicsPage(1); }}
                     className={`px-3 py-1.5 text-sm rounded-lg transition-colors font-mono ${
                       prefixFilter === p ? 'bg-primary-500/20 text-primary-300' : 'text-surface-400 hover:text-surface-200'
                     }`}
@@ -779,12 +837,12 @@ export function EpicProgressPage() {
         {!isLoadingEpics && (totalEpics > 0 || epics.length > 0) && (
           <div className="flex flex-col sm:flex-row items-center justify-between gap-4 rounded-2xl border border-surface-800 bg-surface-900/40 px-4 py-3">
             <div className="text-sm text-surface-400">
-              Affichage {(page - 1) * pageSize + 1}-{Math.min(page * pageSize, totalEpics || epics.length)} sur {totalEpics || epics.length} epics
+              Affichage {(page - 1) * EPICS_PAGE_SIZE + 1}-{Math.min(page * EPICS_PAGE_SIZE, totalEpics || epics.length)} sur {totalEpics || epics.length} epics
             </div>
             <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                onClick={() => setEpicsPage(Math.max(1, page - 1))}
                 disabled={page <= 1}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-surface-800 border border-surface-700 text-surface-300 hover:bg-surface-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
@@ -792,12 +850,12 @@ export function EpicProgressPage() {
                 Précédent
               </button>
               <span className="px-3 py-1.5 text-sm text-surface-400">
-                Page {page} sur {Math.max(1, Math.ceil((totalEpics || epics.length) / pageSize))}
+                Page {page} sur {Math.max(1, Math.ceil((totalEpics || epics.length) / EPICS_PAGE_SIZE))}
               </span>
               <button
                 type="button"
-                onClick={() => setPage((p) => p + 1)}
-                disabled={totalEpics > 0 && page * pageSize >= totalEpics}
+                onClick={() => setEpicsPage(page + 1)}
+                disabled={totalEpics > 0 && page * EPICS_PAGE_SIZE >= totalEpics}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-surface-800 border border-surface-700 text-surface-300 hover:bg-surface-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 Suivant

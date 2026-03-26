@@ -62,6 +62,30 @@ router.get('/configured-boards', async (req: Request, res: Response) => {
 });
 
 /**
+ * Sprint dashboard: all configured boards at once (parallel server-side fetches).
+ * GET /api/jira/dashboard/sprint-issues-all
+ * Query: from, to (optional) — same semantics as GET /board/:boardId/sprint-issues
+ */
+router.get('/dashboard/sprint-issues-all', async (req: Request, res: Response) => {
+  try {
+    const from = req.query.from as string | undefined;
+    const to = req.query.to as string | undefined;
+    const boards = await worklogAppService.getSprintIssuesForAllConfiguredBoards(from, to);
+    res.json({
+      success: true,
+      boards
+    });
+  } catch (error) {
+    logger.error('Error fetching batch sprint issues:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch sprint issues for all boards',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
  * Get issues for a specific board (SprintDashboard).
  * GET /api/jira/board/:boardId/sprint-issues
  * Query: from, to (optional) - when provided, returns all project issues updated in that date range (no sprint filter).

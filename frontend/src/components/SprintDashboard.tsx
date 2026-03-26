@@ -29,6 +29,54 @@ function formatHours(hours: number): string {
   return `${(hours / 8).toFixed(1)}j`;
 }
 
+function sprintJsonToBoardStats(board: ConfiguredBoard, sprintResult: Record<string, unknown>): BoardStats {
+  const statusCounts = (sprintResult.statusCounts as {
+    total: number;
+    todo: number;
+    inProgress: number;
+    qa: number;
+    resolved: number;
+  }) || { total: 0, todo: 0, inProgress: 0, qa: 0, resolved: 0 };
+  const storyPointsByStatus = (sprintResult.storyPointsByStatus as {
+    total: number;
+    todo: number;
+    inProgress: number;
+    qa: number;
+    resolved: number;
+  }) || { total: 0, todo: 0, inProgress: 0, qa: 0, resolved: 0 };
+  const totalTimeSeconds = (sprintResult.totalTimeSeconds as number) || 0;
+  const backlog = (sprintResult.backlog as { ticketCount: number; storyPoints: number }) || {
+    ticketCount: 0,
+    storyPoints: 0
+  };
+  const issues = (sprintResult.issues as Array<{ originalEstimateSeconds: number | null }>) || [];
+  const totalTimeHours = totalTimeSeconds / 3600;
+  const estimatedPoints = issues.reduce(
+    (sum, t) => sum + (t.originalEstimateSeconds ? t.originalEstimateSeconds / 3600 / 8 : 0),
+    0
+  );
+  return {
+    boardId: board.id,
+    name: board.name,
+    projectKey: board.projectKey,
+    color: board.color,
+    totalPoints: storyPointsByStatus.total,
+    todoPoints: storyPointsByStatus.todo,
+    inProgressPoints: storyPointsByStatus.inProgress,
+    qaPoints: storyPointsByStatus.qa,
+    resolvedPoints: storyPointsByStatus.resolved,
+    estimatedPoints,
+    totalTickets: statusCounts.total,
+    todoTickets: statusCounts.todo,
+    inProgressTickets: statusCounts.inProgress,
+    qaTickets: statusCounts.qa,
+    resolvedTickets: statusCounts.resolved,
+    totalTimeHours,
+    backlogTickets: backlog.ticketCount || 0,
+    backlogPoints: backlog.storyPoints || 0
+  };
+}
+
 export function SprintDashboard() {
   // Use global store
   const dateRange = useStore((state) => state.dateRange);
@@ -39,17 +87,25 @@ export function SprintDashboard() {
   const setLastUpdate = useStore((state) => state.setDashboardLastUpdate);
   const isLoading = useStore((state) => state.dashboardLoading);
   const setIsLoading = useStore((state) => state.setDashboardLoading);
+  const useActiveSprint = useStore((state) => state.dashboardUseActiveSprint);
+  const setDashboardUseActiveSprint = useStore((state) => state.setDashboardUseActiveSprint);
+  const setDashboardLastFiltersKey = useStore((state) => state.setDashboardLastFiltersKey);
   
   // Boards configurés depuis le backend
   const [configuredBoards, setConfiguredBoards] = useState<ConfiguredBoard[]>([]);
   const [boardsLoaded, setBoardsLoaded] = useState(false);
-  const [useActiveSprint, setUseActiveSprint] = useState(true);
   
   // Auth state
   const isAuthenticated = useStore((state) => state.isAuthenticated);
   
   // Real-time refresh trigger
   const kpiRefreshTrigger = useStore((state) => state.kpiRefreshTrigger);
+
+  const filtersKey = useMemo(() => {
+    if (configuredBoards.length === 0) return '';
+    const ids = [...configuredBoards.map((b) => b.id)].sort((a, b) => a - b).join(',');
+    return `${ids}|${dateRange.from}|${dateRange.to}|${useActiveSprint}`;
+  }, [configuredBoards, dateRange.from, dateRange.to, useActiveSprint]);
   
   // Snapshot states
   const [showSaveModal, setShowSaveModal] = useState(false);
@@ -62,7 +118,8 @@ export function SprintDashboard() {
   const [loadingSnapshots, setLoadingSnapshots] = useState(false);
   const [selectedSnapshot, setSelectedSnapshot] = useState<DashboardSnapshotFull | null>(null);
   const [loadingSnapshot, setLoadingSnapshot] = useState(false);
-  const didInitialLoad = useRef(false);
+  const filtersKeyRef = useRef(filtersKey);
+  filtersKeyRef.current = filtersKey;
 
   // Charger les boards configurés depuis l'API
   useEffect(() => {
@@ -93,149 +150,130 @@ export function SprintDashboard() {
     loadConfiguredBoards();
   }, []);
 
-  // Load data for all boards
-  // silent = true means no loading state (for background refreshes)
-  const loadAllBoards = useCallback(async (forceRefresh = false, silent = false) => {
-    // Skip if boards not loaded yet or already have data
-    if (configuredBoards.length === 0) {
-      return;
-    }
-    
-    if (!forceRefresh && projectsStats.length > 0) {
-      return;
-    }
-    
-    // Only show loading indicator for non-silent refreshes
-    if (!silent) {
-      setIsLoading(true);
-    }
-    
-    const allStats: BoardStats[] = [];
-    
-    // Load boards sequentially to avoid rate limiting
-    for (const board of configuredBoards) {
+  /** silent = true: background refresh (socket). Uses batch API, parallel fallback. */
+  const loadAllBoards = useCallback(
+    async (silent = false) => {
+      if (configuredBoards.length === 0) return;
+
+      if (!silent) {
+        setIsLoading(true);
+      }
+
+      const params = new URLSearchParams();
+      if (!useActiveSprint && dateRange.from && dateRange.to) {
+        params.set('from', dateRange.from);
+        params.set('to', dateRange.to);
+      }
+      const query = params.toString();
+
+      let allStats: BoardStats[] = [];
+
       try {
-        // Sprint actif: pas de from/to. Période personnalisée: from/to pour issues mises à jour dans la plage
-        const params = new URLSearchParams();
-        if (!useActiveSprint && dateRange.from && dateRange.to) {
-          params.set('from', dateRange.from);
-          params.set('to', dateRange.to);
-        }
-        const query = params.toString();
-        const sprintIssuesResponse = await fetch(
-          `${API_BASE_URL}/jira/board/${board.id}/sprint-issues${query ? `?${query}` : ''}`
+        const batchRes = await fetch(
+          `${API_BASE_URL}/jira/dashboard/sprint-issues-all${query ? `?${query}` : ''}`
         );
-        
-        if (sprintIssuesResponse.status === 429) {
-          await new Promise(r => setTimeout(r, 2000));
-          continue;
-        }
-        
-        let sprintData = {
-          statusCounts: { total: 0, todo: 0, inProgress: 0, qa: 0, resolved: 0 },
-          storyPointsByStatus: { total: 0, todo: 0, inProgress: 0, qa: 0, resolved: 0 },
-          totalStoryPoints: 0,
-          totalTimeSeconds: 0,
-          backlog: { ticketCount: 0, storyPoints: 0 },
-          issues: [] as Array<{ originalEstimateSeconds: number | null }>
-        };
-        
-        if (sprintIssuesResponse.ok) {
-          const sprintResult = await sprintIssuesResponse.json();
-          if (sprintResult.success) {
-            sprintData = {
-              ...sprintResult,
-              storyPointsByStatus: sprintResult.storyPointsByStatus || { total: 0, todo: 0, inProgress: 0, qa: 0, resolved: 0 },
-              totalTimeSeconds: sprintResult.totalTimeSeconds || 0
-            };
+
+        if (batchRes.ok) {
+          const batchJson = await batchRes.json();
+          if (batchJson.success && Array.isArray(batchJson.boards)) {
+            const byId = new Map<number, (typeof batchJson.boards)[0]>();
+            for (const row of batchJson.boards as Array<{ boardId: number; sprint?: Record<string, unknown> }>) {
+              byId.set(row.boardId, row);
+            }
+            allStats = configuredBoards.map((board) => {
+              const row = byId.get(board.id);
+              if (row?.sprint) {
+                return sprintJsonToBoardStats(board, row.sprint as Record<string, unknown>);
+              }
+              return sprintJsonToBoardStats(board, {});
+            });
           }
         }
 
-        // Time is now calculated per-board in the backend from actual board issues
-        const totalTimeHours = (sprintData.totalTimeSeconds || 0) / 3600;
-
-        // Calculate estimated points from sprint issues
-        const estimatedPoints = sprintData.issues.reduce(
-          (sum, t) => sum + (t.originalEstimateSeconds ? (t.originalEstimateSeconds / 3600 / 8) : 0), 
-          0
-        );
-        
-        // Build stats using sprint issues for status counters
-        const stats: BoardStats = {
-          boardId: board.id,
-          name: board.name,
-          projectKey: board.projectKey,
-          color: board.color,
-          totalPoints: sprintData.storyPointsByStatus.total,
-          todoPoints: sprintData.storyPointsByStatus.todo,
-          inProgressPoints: sprintData.storyPointsByStatus.inProgress,
-          qaPoints: sprintData.storyPointsByStatus.qa,
-          resolvedPoints: sprintData.storyPointsByStatus.resolved,
-          estimatedPoints,
-          totalTickets: sprintData.statusCounts.total,
-          todoTickets: sprintData.statusCounts.todo,
-          inProgressTickets: sprintData.statusCounts.inProgress,
-          qaTickets: sprintData.statusCounts.qa,
-          resolvedTickets: sprintData.statusCounts.resolved,
-          totalTimeHours,
-          backlogTickets: sprintData.backlog?.ticketCount || 0,
-          backlogPoints: sprintData.backlog?.storyPoints || 0
-        };
-        
-        allStats.push(stats);
-        
-        // Small delay between requests
-        await new Promise(r => setTimeout(r, 300));
-        
+        if (allStats.length === 0) {
+          const fetches = configuredBoards.map(async (board) => {
+            const sprintIssuesResponse = await fetch(
+              `${API_BASE_URL}/jira/board/${board.id}/sprint-issues${query ? `?${query}` : ''}`
+            );
+            if (sprintIssuesResponse.status === 429) {
+              return sprintJsonToBoardStats(board, {});
+            }
+            if (!sprintIssuesResponse.ok) {
+              return sprintJsonToBoardStats(board, {});
+            }
+            const sprintResult = await sprintIssuesResponse.json();
+            if (sprintResult.success) {
+              return sprintJsonToBoardStats(board, sprintResult as Record<string, unknown>);
+            }
+            return sprintJsonToBoardStats(board, {});
+          });
+          allStats = await Promise.all(fetches);
+        }
       } catch (err) {
-        console.error(`Failed to load board ${board.id}:`, err);
+        console.error('loadAllBoards failed:', err);
       }
-    }
-    
-    // Only update state if data actually changed (prevents unnecessary re-renders)
-    const hasChanged = JSON.stringify(allStats) !== JSON.stringify(projectsStats);
-    if (hasChanged) {
-      setProjectsStats(allStats);
-      setLastUpdate(new Date());
-    }
-    
-    if (!silent) {
-      setIsLoading(false);
-    }
-  }, [dateRange, useActiveSprint, configuredBoards, projectsStats, setIsLoading, setProjectsStats, setLastUpdate]);
+
+      const prev = useStore.getState().dashboardStats;
+      const hasChanged = JSON.stringify(allStats) !== JSON.stringify(prev);
+      const key = filtersKeyRef.current;
+      if (hasChanged) {
+        setProjectsStats(allStats);
+        setLastUpdate(new Date());
+      }
+      if (key && allStats.length === configuredBoards.length && configuredBoards.length > 0) {
+        setDashboardLastFiltersKey(key);
+      }
+
+      if (!silent) {
+        setIsLoading(false);
+      }
+    },
+    [
+      configuredBoards,
+      dateRange.from,
+      dateRange.to,
+      useActiveSprint,
+      setIsLoading,
+      setProjectsStats,
+      setLastUpdate,
+      setDashboardLastFiltersKey
+    ]
+  );
 
   // Handle date change - switch to custom date mode
-  const handleDateChange = useCallback((newRange: { from: string; to: string }) => {
-    setUseActiveSprint(false);
-    setDateRange(newRange);
-  }, [setDateRange]);
+  const handleDateChange = useCallback(
+    (newRange: { from: string; to: string }) => {
+      setDashboardUseActiveSprint(false);
+      setDateRange(newRange);
+    },
+    [setDateRange, setDashboardUseActiveSprint]
+  );
 
   // Switch back to active sprint mode
   const handleActiveSprintClick = useCallback(() => {
-    setUseActiveSprint(true);
-    // Force reload with active sprint
-    loadAllBoards(true);
-  }, [loadAllBoards]);
+    setDashboardUseActiveSprint(true);
+  }, [setDashboardUseActiveSprint]);
 
-  // Load once when boards are loaded (ref avoids re-run when projectsStats updates)
+  /** Load when filters or boards change — skip HTTP if cache matches (navigation back / persisted session). */
   useEffect(() => {
-    if (!boardsLoaded || configuredBoards.length === 0 || didInitialLoad.current) return;
-    didInitialLoad.current = true;
-    loadAllBoards(true);
-  }, [boardsLoaded, configuredBoards.length, loadAllBoards]);
+    if (!boardsLoaded || configuredBoards.length === 0 || !filtersKey) return;
 
-  // Reload when date range or sprint/custom mode changes (with loading indicator)
-  useEffect(() => {
-    if (configuredBoards.length > 0) {
-      loadAllBoards(true, false);
+    const { dashboardStats, dashboardLastFiltersKey: lastKey } = useStore.getState();
+    const statsMatchBoards =
+      dashboardStats.length === configuredBoards.length &&
+      configuredBoards.every((b) => dashboardStats.some((s) => s.boardId === b.id));
+
+    if (lastKey === filtersKey && statsMatchBoards) {
+      return;
     }
-  }, [configuredBoards.length, loadAllBoards, dateRange.from, dateRange.to, useActiveSprint]);
+
+    loadAllBoards(false);
+  }, [boardsLoaded, configuredBoards, filtersKey, loadAllBoards]);
 
   // Silent refresh when kpiRefreshTrigger changes (no loading indicator)
   useEffect(() => {
-    if (configuredBoards.length > 0 && kpiRefreshTrigger > 0) {
-      loadAllBoards(true, true);
-    }
+    if (configuredBoards.length === 0 || kpiRefreshTrigger <= 0) return;
+    loadAllBoards(true);
   }, [configuredBoards.length, kpiRefreshTrigger, loadAllBoards]);
 
   // Totals

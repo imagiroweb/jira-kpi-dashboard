@@ -13,7 +13,7 @@ class SchedulerService {
   private io: Server | null = null;
   private syncInterval: NodeJS.Timeout | null = null;
   private isRunning = false;
-  private intervalSeconds = 10;
+  private intervalSeconds = 14400;
 
   /**
    * Initialize the scheduler with Socket.IO instance
@@ -22,7 +22,7 @@ class SchedulerService {
     this.io = io;
     
     const defaultConfig: SchedulerConfig = {
-      syncIntervalSeconds: parseInt(process.env.SYNC_INTERVAL_SECONDS || '10', 10),
+      syncIntervalSeconds: parseInt(process.env.SYNC_INTERVAL_SECONDS || '14400', 10),
       enabled: process.env.SYNC_ENABLED !== 'false',
     };
 

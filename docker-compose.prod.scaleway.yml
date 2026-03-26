@@ -28,7 +28,7 @@ services:
       - BREVO_API_KEY=${BREVO_API_KEY}
       - MONDAY_API_KEY=${MONDAY_API_KEY}
       - SYNC_ENABLED=${SYNC_ENABLED:-true}
-      - SYNC_INTERVAL_SECONDS=${SYNC_INTERVAL_SECONDS:-300}
+      - SYNC_INTERVAL_SECONDS=${SYNC_INTERVAL_SECONDS:-14400}
       - MICROSOFT_REDIRECT_URI=https://jira-kpi.imagiro.fr/api/auth/microsoft/callback
       - APP_BASE_URL=https://jira-kpi.imagiro.fr
       - SMTP_HOST=${SMTP_HOST}
