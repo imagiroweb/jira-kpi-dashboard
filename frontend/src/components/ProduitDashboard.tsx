@@ -3,6 +3,7 @@ import {
   Package,
   Loader2,
   AlertCircle,
+  AlertTriangle,
   CheckCircle,
   User,
   RefreshCw,
@@ -20,8 +21,41 @@ import {
   Info,
   Smartphone,
 } from 'lucide-react';
-import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, BarChart, Bar, XAxis, YAxis, CartesianGrid, RadialBarChart, RadialBar } from 'recharts';
+import {
+  PieChart,
+  Pie,
+  Cell,
+  ResponsiveContainer,
+  Tooltip,
+  Legend,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  RadialBarChart,
+  RadialBar,
+  LabelList,
+} from 'recharts';
 import { mondayApi, MondayUser, MondayBoard, MondayColumn, MondayItem, MondayWorkspace } from '../services/api';
+import {
+  EMPTY_ROADMAP_KPIS,
+  STATUS_KEYS,
+  calendarDaysInclusiveFromTodayToQuarterEnd,
+  calendarQuarterFromDate,
+  classifyRoadmapKanbanBucket,
+  computeRoadmapKpis,
+  findRoadmapDateColumn,
+  getQuarterEndDate,
+  getRoadmapDateColumnRaw,
+  getRoadmapItemStatusLabel,
+  isRoadmapStatusDone,
+  parseRoadmapDateColumnEndDate,
+  parseRoadmapDateColumnRange,
+  roadmapRangeFullyInQuarterCurrentYear,
+  type CalendarQuarter,
+  type RoadmapKanbanBucket,
+} from '../domain/roadmapAdoriaKpi';
 
 const PAYS_COLUMN_KEYS = ['pays', 'country', 'country code', 'nationalité', 'nationalite'];
 const SITES_ACTIFS_KEYS = ['sites actifs', 'sites_actifs', 'active sites', 'nb sites', 'nombre de sites'];
@@ -66,9 +100,6 @@ function isRoadmapAdoria2026Workspace(name: string): boolean {
   if (n.includes('roadmap') && (n.includes('adoria') || n.includes('2026'))) return true;
   return ROADMAP_ADORIA_2026_KEYS.some((k) => n.includes(k));
 }
-const CP_REFERENT_KEYS = ['cp référent', 'cp referent', 'cp réf', 'référent', 'referent'];
-const STATUS_KEYS = ['status', 'statut', 'état', 'state'];
-
 /** Board ID Roadmap Adoria 2026 (chargé par défaut dans la section KPI Roadmap). */
 const ROADMAP_ADORIA_2026_BOARD_ID = '5191064770';
 /** Board ID Suivi clients par cp : variable d’env VITE_MONDAY_SUIVI_CLIENT_BOARD_ID ou valeur par défaut. */
@@ -334,57 +365,6 @@ function computeSuiviKpis(
 }
 
 
-function computeRoadmapKpis(
-  items: MondayItem[],
-  columns: MondayColumn[]
-): {
-  totalFeatures: number;
-  withCpReferent: number;
-  missingCpReferent: number;
-  ratioCpReferentPct: number;
-  byCpReferent: { name: string; count: number }[];
-  byStatus: { name: string; value: number }[];
-} | null {
-  const colCpReferent = findColumn(columns, CP_REFERENT_KEYS);
-  const colStatus = findColumn(columns, STATUS_KEYS);
-  const totalFeatures = items.length;
-  if (totalFeatures === 0) return null;
-
-  let withCpReferent = 0;
-  const cpReferentCount = new Map<string, number>();
-  const statusCount = new Map<string, number>();
-
-  for (const item of items) {
-    const cpVal = colCpReferent ? getItemValue(item, colCpReferent.id) : '';
-    const hasCp = !!cpVal && cpVal.toLowerCase() !== 'sans nom' && cpVal !== '-';
-    if (hasCp) {
-      withCpReferent += 1;
-      cpReferentCount.set(cpVal, (cpReferentCount.get(cpVal) ?? 0) + 1);
-    }
-    const statusVal = colStatus ? getItemValue(item, colStatus.id) : '';
-    const statusLabel = statusVal || 'Non renseigné';
-    statusCount.set(statusLabel, (statusCount.get(statusLabel) ?? 0) + 1);
-  }
-
-  const missingCpReferent = totalFeatures - withCpReferent;
-  const ratioCpReferentPct = totalFeatures > 0 ? (withCpReferent / totalFeatures) * 100 : 0;
-  const byCpReferent = Array.from(cpReferentCount.entries())
-    .map(([name, count]) => ({ name, count }))
-    .sort((a, b) => b.count - a.count);
-  const byStatus = Array.from(statusCount.entries())
-    .map(([name, value]) => ({ name, value }))
-    .sort((a, b) => b.value - a.value);
-
-  return {
-    totalFeatures,
-    withCpReferent,
-    missingCpReferent,
-    ratioCpReferentPct,
-    byCpReferent,
-    byStatus,
-  };
-}
-
 const DONUT_COLORS = ['#f59e0b', '#06b6d4', '#22c55e', '#8b5cf6', '#ec4899', '#6366f1', '#14b8a6', '#f97316'];
 
 export function ProduitDashboard() {
@@ -407,6 +387,9 @@ export function ProduitDashboard() {
   const [suiviSectionOpen, setSuiviSectionOpen] = useState(true);
   const [detailBoard, setDetailBoard] = useState<'roadmap' | 'suivi' | null>(null);
   const [detailKpi, setDetailKpi] = useState<string | null>(null);
+  const [roadmapQuarterFilter, setRoadmapQuarterFilter] = useState<'all' | 'Q1' | 'Q2' | 'Q3' | 'Q4'>('all');
+  /** Statuts cochés ; vide = pas de filtre sur le statut (tous). */
+  const [roadmapStatusSelected, setRoadmapStatusSelected] = useState<string[]>([]);
 
   const roadmapWorkspace = useMemo(
     () => workspaces.find((w) => isRoadmapAdoria2026Workspace(w.name)) ?? null,
@@ -607,10 +590,130 @@ export function ProduitDashboard() {
     }
   }, [detailKpi, suiviData]);
 
+  const roadmapDateColumn = useMemo(
+    () => (roadmapData?.columns ? findRoadmapDateColumn(roadmapData.columns) : null),
+    [roadmapData?.columns]
+  );
+
+  const roadmapStatusColumn = useMemo(
+    () => (roadmapData?.columns ? findColumn(roadmapData.columns, STATUS_KEYS) : null),
+    [roadmapData?.columns]
+  );
+
+  const roadmapStatusOptions = useMemo(() => {
+    if (!roadmapData?.items?.length || !roadmapStatusColumn) return [];
+    const labels = new Set<string>();
+    for (const item of roadmapData.items) {
+      labels.add(getRoadmapItemStatusLabel(item, roadmapStatusColumn));
+    }
+    return Array.from(labels).sort((a, b) => a.localeCompare(b, 'fr'));
+  }, [roadmapData?.items, roadmapStatusColumn]);
+
+  const roadmapItemsForKpis = useMemo(() => {
+    if (!roadmapData?.items?.length) return [];
+    let items = roadmapData.items;
+    if (roadmapQuarterFilter !== 'all' && roadmapDateColumn) {
+      const currentYear = new Date().getFullYear();
+      const qTarget: CalendarQuarter =
+        roadmapQuarterFilter === 'Q1' ? 1 : roadmapQuarterFilter === 'Q2' ? 2 : roadmapQuarterFilter === 'Q3' ? 3 : 4;
+      items = items.filter((item) => {
+        const raw = getRoadmapDateColumnRaw(item, roadmapDateColumn.id);
+        const { start, end } = parseRoadmapDateColumnRange(raw);
+        if (!start || !end) return false;
+        return roadmapRangeFullyInQuarterCurrentYear(start, end, qTarget, currentYear);
+      });
+    }
+    if (roadmapStatusSelected.length > 0 && roadmapStatusColumn) {
+      const allowed = new Set(roadmapStatusSelected);
+      items = items.filter((item) => allowed.has(getRoadmapItemStatusLabel(item, roadmapStatusColumn)));
+    }
+    return items;
+  }, [
+    roadmapData?.items,
+    roadmapDateColumn,
+    roadmapQuarterFilter,
+    roadmapStatusColumn,
+    roadmapStatusSelected,
+  ]);
+
   const roadmapKpis = useMemo(() => {
     if (!roadmapData?.items?.length) return null;
-    return computeRoadmapKpis(roadmapData.items, roadmapData.columns);
-  }, [roadmapData]);
+    if (roadmapItemsForKpis.length === 0) return EMPTY_ROADMAP_KPIS;
+    return computeRoadmapKpis(roadmapItemsForKpis, roadmapData.columns);
+  }, [roadmapData, roadmapItemsForKpis]);
+
+  /** RAF (trimestre courant = filtre) + projets en retard (2ᵉ date avant aujourd’hui), dans l’encart Ratio CP. */
+  const roadmapCpEncartIndicators = useMemo(() => {
+    const now = new Date();
+    const currentQ = calendarQuarterFromDate(now);
+    const year = now.getFullYear();
+
+    let showRaf = false;
+    let rafNotDoneCount = 0;
+    let daysLeftInQuarter = 0;
+    let quarterEndLabel = '';
+
+    if (
+      roadmapQuarterFilter !== 'all' &&
+      roadmapDateColumn &&
+      roadmapStatusColumn
+    ) {
+      const selectedQ: CalendarQuarter =
+        roadmapQuarterFilter === 'Q1' ? 1 : roadmapQuarterFilter === 'Q2' ? 2 : roadmapQuarterFilter === 'Q3' ? 3 : 4;
+      if (currentQ === selectedQ) {
+        showRaf = true;
+        const qEnd = getQuarterEndDate(year, selectedQ);
+        quarterEndLabel = qEnd.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' });
+        daysLeftInQuarter = calendarDaysInclusiveFromTodayToQuarterEnd(now, qEnd);
+
+        for (const item of roadmapItemsForKpis) {
+          const raw = getRoadmapDateColumnRaw(item, roadmapDateColumn.id);
+          const { end: endDate } = parseRoadmapDateColumnRange(raw);
+          if (!endDate) continue;
+          if (endDate.getFullYear() !== year || calendarQuarterFromDate(endDate) !== selectedQ) continue;
+          if (isRoadmapStatusDone(getRoadmapItemStatusLabel(item, roadmapStatusColumn))) continue;
+          rafNotDoneCount += 1;
+        }
+      }
+    }
+
+    return {
+      showRaf,
+      rafNotDoneCount,
+      daysLeftInQuarter,
+      quarterEndLabel,
+    };
+  }, [roadmapItemsForKpis, roadmapDateColumn, roadmapStatusColumn, roadmapQuarterFilter]);
+
+  const roadmapKanbanBuckets = useMemo(() => {
+    const now = new Date();
+    const buckets: Record<RoadmapKanbanBucket, MondayItem[]> = {
+      done: [],
+      todo: [],
+      encours: [],
+      retard: [],
+    };
+    for (const item of roadmapItemsForKpis) {
+      const b = classifyRoadmapKanbanBucket(item, roadmapStatusColumn, roadmapDateColumn, now);
+      buckets[b].push(item);
+    }
+    const sortByName = (a: MondayItem, b: MondayItem) =>
+      (a.name || '').localeCompare(b.name || '', 'fr');
+    buckets.done.sort(sortByName);
+    buckets.todo.sort(sortByName);
+    buckets.encours.sort(sortByName);
+    buckets.retard.sort(sortByName);
+    return buckets;
+  }, [roadmapItemsForKpis, roadmapStatusColumn, roadmapDateColumn]);
+
+  useEffect(() => {
+    setRoadmapQuarterFilter('all');
+    setRoadmapStatusSelected([]);
+  }, [roadmapBoardId]);
+
+  useEffect(() => {
+    setRoadmapStatusSelected((prev) => prev.filter((s) => roadmapStatusOptions.includes(s)));
+  }, [roadmapStatusOptions]);
 
   /** Liste de boards pour la section Roadmap : espace dédié si détecté, sinon tous les boards visibles (ex. "Roadmap Adoria 2026" peut être un board, pas un espace). */
   const boardsForRoadmapSection = roadmapWorkspace ? roadmapBoards : boards;
@@ -753,9 +856,198 @@ export function ProduitDashboard() {
           )}
           {!roadmapLoading && roadmapKpis && (
             <div className="p-6 space-y-6">
+              {(roadmapDateColumn || roadmapStatusColumn) && (
+                <div className="flex flex-wrap items-end gap-x-8 gap-y-3 pb-1 border-b border-surface-700/40">
+                  {roadmapDateColumn && (
+                    <div className="flex flex-wrap items-center gap-3 min-w-0">
+                      <span className="text-xs font-medium text-surface-500 uppercase tracking-wide shrink-0">
+                        Trimestre
+                      </span>
+                      <div
+                        className="flex flex-wrap gap-1.5"
+                        role="group"
+                        aria-label="Filtrer les KPI Roadmap par trimestre (date de fin, colonne DATE)"
+                      >
+                        {(['all', 'Q1', 'Q2', 'Q3', 'Q4'] as const).map((key) => (
+                          <button
+                            key={key}
+                            type="button"
+                            onClick={() => setRoadmapQuarterFilter(key)}
+                            className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                              roadmapQuarterFilter === key
+                                ? 'bg-amber-500/20 border-amber-500/50 text-amber-200'
+                                : 'bg-surface-800/50 border-surface-700/50 text-surface-400 hover:text-surface-200 hover:border-surface-600/60'
+                            }`}
+                          >
+                            {key === 'all' ? 'Tous' : key}
+                          </button>
+                        ))}
+                      </div>
+                      <span className="text-xs text-surface-500 hidden lg:inline max-w-[34rem]">
+                        Filtre Q1–Q4 : année civile en cours uniquement ; 1ʳᵉ et 2ᵉ date dans le même trimestre (plages sur
+                        années passées exclues).
+                      </span>
+                    </div>
+                  )}
+                  {roadmapStatusColumn && roadmapStatusOptions.length > 0 && (
+                    <div className="flex flex-col gap-2 min-w-0 max-w-full sm:max-w-[36rem]">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-medium text-surface-500 uppercase tracking-wide shrink-0">
+                          Statut
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setRoadmapStatusSelected([])}
+                          className="text-xs text-amber-400/90 hover:text-amber-300 underline-offset-2 hover:underline"
+                        >
+                          Tous les statuts
+                        </button>
+                        <span className="text-xs text-surface-500 hidden sm:inline">
+                          (aucune case = tout afficher)
+                        </span>
+                      </div>
+                      <div
+                        className="flex flex-wrap gap-x-4 gap-y-2 max-h-36 overflow-y-auto rounded-lg border border-surface-700/40 bg-surface-900/40 px-3 py-2"
+                        role="group"
+                        aria-label="Filtrer par un ou plusieurs statuts"
+                      >
+                        {roadmapStatusOptions.map((s) => {
+                          const checked = roadmapStatusSelected.includes(s);
+                          return (
+                            <label
+                              key={s}
+                              className="inline-flex items-center gap-2 cursor-pointer select-none text-sm text-surface-200"
+                            >
+                              <input
+                                type="checkbox"
+                                className="rounded border-surface-600 bg-surface-900 text-amber-500 focus:ring-amber-500/40"
+                                checked={checked}
+                                onChange={() => {
+                                  setRoadmapStatusSelected((prev) => {
+                                    if (prev.includes(s)) return prev.filter((x) => x !== s);
+                                    return [...prev, s].sort((a, b) => a.localeCompare(b, 'fr'));
+                                  });
+                                }}
+                              />
+                              <span className="truncate max-w-[14rem]" title={s}>
+                                {s}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {(roadmapQuarterFilter !== 'all' || roadmapStatusSelected.length > 0) &&
+                roadmapItemsForKpis.length === 0 &&
+                (roadmapData?.items?.length ?? 0) > 0 && (
+                  <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100/90">
+                    Aucune ligne ne correspond aux filtres sélectionnés (trimestre : année en cours, plage dans le trimestre ;
+                    et/ou statut).
+                  </div>
+                )}
+              {/* Vue projets : 4 colonnes (filtres actifs) */}
+              {roadmapItemsForKpis.length > 0 && (
+                <div className="rounded-xl border border-surface-700/50 bg-surface-900/20 p-4">
+                  <h3 className="text-sm font-semibold text-surface-200 mb-1 flex items-center gap-2">
+                    <List className="w-4 h-4 text-amber-400" />
+                    Projets par colonne
+                  </h3>
+                  <p className="text-xs text-surface-500 mb-4">
+                    Vue des lignes visibles avec les filtres actifs — pas un tableau.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                    {(
+                      [
+                        {
+                          key: 'done' as const,
+                          title: 'Done',
+                          subtitle: 'Statuts terminés',
+                          className:
+                            'border-emerald-500/35 bg-emerald-950/20',
+                          titleClass: 'text-emerald-200',
+                        },
+                        {
+                          key: 'todo' as const,
+                          title: 'To do',
+                          subtitle: 'À faire, backlog…',
+                          className: 'border-slate-500/35 bg-slate-900/40',
+                          titleClass: 'text-slate-200',
+                        },
+                        {
+                          key: 'encours' as const,
+                          title: 'En cours',
+                          subtitle: 'Tous les autres statuts',
+                          className: 'border-amber-500/35 bg-amber-950/15',
+                          titleClass: 'text-amber-200/95',
+                        },
+                        {
+                          key: 'retard' as const,
+                          title: 'En retard',
+                          subtitle: '2ᵉ date avant aujourd’hui (hors done)',
+                          className: 'border-red-500/40 bg-red-950/25',
+                          titleClass: 'text-red-200/95',
+                        },
+                      ] as const
+                    ).map((col) => {
+                      const items = roadmapKanbanBuckets[col.key];
+                      return (
+                        <div
+                          key={col.key}
+                          className={`flex flex-col rounded-xl border p-3 min-h-[8rem] max-h-[min(70vh,28rem)] ${col.className}`}
+                        >
+                          <div className="shrink-0 pb-2 border-b border-white/5 mb-2">
+                            <div className={`text-sm font-semibold ${col.titleClass}`}>{col.title}</div>
+                            <div className="text-[11px] text-surface-500 mt-0.5 leading-snug">{col.subtitle}</div>
+                            <div className="text-xs text-surface-400 tabular-nums mt-1">{items.length} projet(s)</div>
+                          </div>
+                          <ul className="space-y-2 overflow-y-auto flex-1 pr-1 text-sm">
+                            {items.map((item) => {
+                              const st = roadmapStatusColumn
+                                ? getRoadmapItemStatusLabel(item, roadmapStatusColumn)
+                                : null;
+                              const rawD = roadmapDateColumn
+                                ? getRoadmapDateColumnRaw(item, roadmapDateColumn.id)
+                                : '';
+                              const endD = rawD ? parseRoadmapDateColumnEndDate(rawD) : null;
+                              return (
+                                <li
+                                  key={item.id}
+                                  className="rounded-lg bg-surface-950/50 border border-surface-800/60 px-2.5 py-2"
+                                >
+                                  <div className="text-surface-100 font-medium leading-snug break-words">
+                                    {item.name || '—'}
+                                  </div>
+                                  {col.key === 'retard' && endD && (
+                                    <div className="text-[11px] text-red-300/90 tabular-nums mt-1">
+                                      Échéance {endD.toLocaleDateString('fr-FR')}
+                                    </div>
+                                  )}
+                                  {col.key === 'encours' && st && (
+                                    <div className="text-[11px] text-surface-500 mt-1 truncate" title={st}>
+                                      {st}
+                                    </div>
+                                  )}
+                                  {(col.key === 'todo' || col.key === 'done') && st && (
+                                    <div className="text-[11px] text-surface-500 mt-1 truncate" title={st}>
+                                      {st}
+                                    </div>
+                                  )}
+                                </li>
+                              );
+                            })}
+                          </ul>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               {/* 1. Ratio CP référent / features + nombre manquant */}
-              <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
-                <h3 className="text-sm font-semibold text-surface-200 mb-3 flex items-center gap-2">
+              <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 space-y-4">
+                <h3 className="text-sm font-semibold text-surface-200 flex items-center gap-2">
                   <User className="w-4 h-4 text-amber-400" />
                   Ratio CP référent / features
                 </h3>
@@ -782,112 +1074,188 @@ export function ProduitDashboard() {
                     </span>
                   </div>
                 </div>
+
+                {roadmapCpEncartIndicators.showRaf && roadmapCpEncartIndicators.rafNotDoneCount > 0 && (
+                  <div className="flex gap-3 rounded-xl border border-amber-500/45 bg-amber-500/10 px-4 py-3 text-amber-100/95">
+                    <AlertTriangle className="w-5 h-5 shrink-0 text-amber-400 mt-0.5" aria-hidden />
+                    <div className="text-sm leading-relaxed">
+                      <p className="font-medium text-amber-100">RAF sur le trimestre en cours</p>
+                      <p className="mt-1 text-amber-100/90">
+                        Il reste{' '}
+                        <strong className="text-amber-50 tabular-nums">
+                          {roadmapCpEncartIndicators.rafNotDoneCount}
+                        </strong>{' '}
+                        projet(s) non terminé(s) (hors statuts considérés comme faits) à boucler avant la fin du{' '}
+                        {roadmapQuarterFilter} {new Date().getFullYear()} (
+                        {roadmapCpEncartIndicators.quarterEndLabel}) — soit{' '}
+                        <strong className="tabular-nums">{roadmapCpEncartIndicators.daysLeftInQuarter}</strong> jour(s)
+                        calendaire(s) restant(s) à compter d’aujourd’hui.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
               </div>
 
-              {/* 2. Répartition par CP référent (projets rattachés) */}
-              {roadmapKpis.byCpReferent.length > 0 && (
-                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
-                  <h3 className="text-sm font-semibold text-surface-200 mb-4 flex items-center gap-2">
-                    <BarChart3 className="w-4 h-4 text-amber-400" />
-                    Répartition par CP référent (projets rattachés)
-                  </h3>
-                  <div className="h-72">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <BarChart
-                        data={roadmapKpis.byCpReferent}
-                        layout="vertical"
-                        margin={{ top: 4, right: 24, left: 120, bottom: 4 }}
-                      >
-                        <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,100,120,0.3)" />
-                        <XAxis type="number" tick={{ fill: 'rgb(148, 163, 184)', fontSize: 12 }} allowDecimals={false} />
-                        <YAxis
-                          type="category"
-                          dataKey="name"
-                          width={115}
-                          tick={{ fill: 'rgb(148, 163, 184)', fontSize: 11 }}
-                          tickFormatter={(v) => (v.length > 20 ? v.slice(0, 18) + '…' : v)}
-                        />
-                        <Tooltip
-                          contentStyle={{
-                            backgroundColor: 'rgba(30, 30, 40, 0.95)',
-                            border: '1px solid rgba(100, 100, 120, 0.3)',
-                            borderRadius: '8px',
-                            padding: '12px',
-                          }}
-                          formatter={(value: number) => [`${value} projet(s)`, 'Projets']}
-                          labelFormatter={(label) => `CP référent : ${label}`}
-                        />
-                        <Bar dataKey="count" fill="#f59e0b" radius={[0, 4, 4, 0]} name="Projets" />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
-              )}
-
-              {/* 3. Donut répartition par statut */}
-              {roadmapKpis.byStatus.length > 0 && (
-                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
-                  <h3 className="text-sm font-semibold text-surface-200 mb-4 flex items-center gap-2">
-                    <PieChart className="w-4 h-4 text-amber-400" />
-                    Répartition des projets par statut
-                  </h3>
-                  <div className="flex flex-wrap items-center gap-6">
-                    <div className="w-64 h-64 shrink-0">
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie
-                            data={roadmapKpis.byStatus.map((d, i) => ({
-                              ...d,
-                              fill: DONUT_COLORS[i % DONUT_COLORS.length],
-                            }))}
-                            dataKey="value"
-                            nameKey="name"
-                            cx="50%"
-                            cy="50%"
-                            innerRadius="50%"
-                            outerRadius="90%"
-                            paddingAngle={2}
-                            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+              {/* Répartitions CP / PM / Statut — grille responsive (côte à côte sur xl) */}
+              {(roadmapKpis.byCpReferent.length > 0 ||
+                roadmapKpis.byPm.length > 0 ||
+                roadmapKpis.byStatus.length > 0) && (
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 items-stretch">
+                  {roadmapKpis.byCpReferent.length > 0 && (
+                    <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 min-w-0 flex flex-col">
+                      <h3 className="text-sm font-semibold text-surface-200 mb-4 flex items-center gap-2 shrink-0">
+                        <BarChart3 className="w-4 h-4 text-amber-400" />
+                        Répartition par CP référent (projets rattachés)
+                      </h3>
+                      <div className="h-72 min-h-[16rem] w-full flex-1">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart
+                            data={roadmapKpis.byCpReferent}
+                            layout="vertical"
+                            margin={{ top: 4, right: 16, left: 88, bottom: 4 }}
                           >
-                            {roadmapKpis.byStatus.map((_, i) => (
-                              <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />
-                            ))}
-                          </Pie>
-                          <Tooltip
-                            contentStyle={{
-                              backgroundColor: 'rgba(30, 30, 40, 0.95)',
-                              border: '1px solid rgba(100, 100, 120, 0.3)',
-                              borderRadius: '8px',
-                              padding: '12px',
-                            }}
-                            formatter={(value: number, name: string) => [
-                              `${value} projet(s) (${roadmapKpis && roadmapKpis.totalFeatures > 0 ? ((value / roadmapKpis.totalFeatures) * 100).toFixed(1) : 0} %)`,
-                              name,
-                            ]}
-                          />
-                          <Legend
-                            formatter={(value, entry) => (
-                              <span className="text-surface-300 text-sm">
-                                {value} ({entry?.payload?.value ?? 0})
-                              </span>
-                            )}
-                          />
-                        </PieChart>
-                      </ResponsiveContainer>
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,100,120,0.3)" />
+                            <XAxis type="number" tick={{ fill: 'rgb(148, 163, 184)', fontSize: 11 }} allowDecimals={false} />
+                            <YAxis
+                              type="category"
+                              dataKey="name"
+                              width={82}
+                              tick={{ fill: 'rgb(148, 163, 184)', fontSize: 10 }}
+                              tickFormatter={(v) => (v.length > 18 ? v.slice(0, 16) + '…' : v)}
+                            />
+                            <Tooltip
+                              contentStyle={{
+                                backgroundColor: 'rgba(30, 30, 40, 0.95)',
+                                border: '1px solid rgba(100, 100, 120, 0.3)',
+                                borderRadius: '8px',
+                                padding: '12px',
+                              }}
+                              formatter={(value: number) => [`${value} projet(s)`, 'Projets']}
+                              labelFormatter={(label) => `CP référent : ${label}`}
+                            />
+                            <Bar dataKey="count" fill="#f59e0b" radius={[0, 4, 4, 0]} name="Projets" />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0 space-y-1">
-                      {roadmapKpis.byStatus.map((s, i) => (
-                        <div key={s.name} className="flex items-center gap-2 text-sm">
-                          <span
-                            className="w-3 h-3 rounded-full shrink-0"
-                            style={{ backgroundColor: DONUT_COLORS[i % DONUT_COLORS.length] }}
-                          />
-                          <span className="text-surface-300 truncate">{s.name}</span>
-                          <span className="text-surface-100 font-medium tabular-nums shrink-0">{s.value}</span>
-                        </div>
-                      ))}
+                  )}
+
+                  {roadmapKpis.byPm.length > 0 && (
+                    <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 min-w-0 flex flex-col">
+                      <h3 className="text-sm font-semibold text-surface-200 mb-2 flex items-center gap-2 shrink-0">
+                        <BarChart3 className="w-4 h-4 text-cyan-400" />
+                        Répartition des projets par PM
+                      </h3>
+                      <p className="text-xs text-surface-500 mb-3 shrink-0">
+                        Total par PM — sans nom : « Non attribués ».
+                      </p>
+                      <div className="h-72 min-h-[16rem] w-full flex-1">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart
+                            data={roadmapKpis.byPm}
+                            layout="vertical"
+                            margin={{ top: 4, right: 16, left: 88, bottom: 4 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,100,120,0.3)" />
+                            <XAxis type="number" tick={{ fill: 'rgb(148, 163, 184)', fontSize: 11 }} allowDecimals={false} />
+                            <YAxis
+                              type="category"
+                              dataKey="name"
+                              width={82}
+                              tick={{ fill: 'rgb(148, 163, 184)', fontSize: 10 }}
+                              tickFormatter={(v) => (v.length > 18 ? v.slice(0, 16) + '…' : v)}
+                            />
+                            <Tooltip
+                              contentStyle={{
+                                backgroundColor: 'rgba(30, 30, 40, 0.95)',
+                                border: '1px solid rgba(100, 100, 120, 0.3)',
+                                borderRadius: '8px',
+                                padding: '12px',
+                              }}
+                              formatter={(value: number) => [`${value} projet(s)`, 'Total']}
+                              labelFormatter={(label) => `PM : ${label}`}
+                            />
+                            <Bar dataKey="count" fill="#06b6d4" radius={[0, 4, 4, 0]} name="Projets" />
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                  {roadmapKpis.byStatus.length > 0 && (
+                    <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 min-w-0 flex flex-col">
+                      <h3 className="text-sm font-semibold text-surface-200 mb-4 flex items-center gap-2 shrink-0">
+                        <BarChart3 className="w-4 h-4 text-amber-400" />
+                        Répartition des projets par statut
+                      </h3>
+                      <div className="w-full h-[min(22rem,50vh)] min-h-[16rem] flex-1">
+                        <ResponsiveContainer width="100%" height="100%">
+                          <BarChart
+                            data={roadmapKpis.byStatus.map((d, i) => ({
+                              name: d.name,
+                              value: d.value,
+                              fill: DONUT_COLORS[i % DONUT_COLORS.length],
+                              pct:
+                                roadmapKpis.totalFeatures > 0
+                                  ? ((d.value / roadmapKpis.totalFeatures) * 100).toFixed(1)
+                                  : '0',
+                            }))}
+                            margin={{ top: 24, right: 8, left: 4, bottom: 4 }}
+                          >
+                            <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,100,120,0.3)" vertical={false} />
+                            <XAxis
+                              dataKey="name"
+                              type="category"
+                              tick={{ fill: 'rgb(148, 163, 184)', fontSize: 10 }}
+                              interval={0}
+                              tickFormatter={(v) =>
+                                typeof v === 'string' && v.length > 14 ? `${v.slice(0, 12)}…` : String(v)
+                              }
+                              angle={-40}
+                              textAnchor="end"
+                              height={68}
+                            />
+                            <YAxis
+                              type="number"
+                              allowDecimals={false}
+                              tick={{ fill: 'rgb(148, 163, 184)', fontSize: 11 }}
+                              width={36}
+                            />
+                            <Tooltip
+                              contentStyle={{
+                                backgroundColor: 'rgba(30, 30, 40, 0.95)',
+                                border: '1px solid rgba(100, 100, 120, 0.3)',
+                                borderRadius: '8px',
+                                padding: '12px',
+                              }}
+                              formatter={(value: number, _name: string, props) => {
+                                const pct = props?.payload?.pct ?? '0';
+                                return [`${value} projet(s) (${pct} % du total)`, 'Projets'];
+                              }}
+                              labelFormatter={(label) => `Statut : ${label}`}
+                            />
+                            <Bar dataKey="value" radius={[4, 4, 0, 0]} name="Projets" isAnimationActive={false}>
+                              {roadmapKpis.byStatus.map((_, i) => (
+                                <Cell key={i} fill={DONUT_COLORS[i % DONUT_COLORS.length]} />
+                              ))}
+                              <LabelList
+                                dataKey="value"
+                                position="top"
+                                fill="rgb(203, 213, 225)"
+                                fontSize={10}
+                                formatter={(v: number) =>
+                                  roadmapKpis.totalFeatures > 0
+                                    ? `${v} (${((v / roadmapKpis.totalFeatures) * 100).toFixed(1)} %)`
+                                    : `${v}`
+                                }
+                              />
+                            </Bar>
+                          </BarChart>
+                        </ResponsiveContainer>
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
