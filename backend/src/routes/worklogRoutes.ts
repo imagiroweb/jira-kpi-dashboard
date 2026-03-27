@@ -9,23 +9,34 @@ import { emitKPIUpdate, emitSyncProgress, emitAlert } from '../websocket/socketH
 
 const router = Router();
 
+/** Parse `projectKeys` / `projectKeys` répété (Express peut renvoyer string | string[]). */
+function parseProjectKeysFromQuery(req: Request): string[] {
+  const raw = req.query.projectKeys;
+  if (raw === undefined || raw === null) return [];
+  if (Array.isArray(raw)) {
+    return raw
+      .flatMap((r) => String(r).split(','))
+      .map((k) => k.trim())
+      .filter(Boolean);
+  }
+  return String(raw)
+    .split(',')
+    .map((k) => k.trim())
+    .filter(Boolean);
+}
+
 /**
  * projectKeys (CSV) > projectKey > projets configurés (.env).
- * Permet JQL `project in (A,B,…)` pour l’alignement avec les filtres multi-projets.
+ * Toujours `projectKeys: [...]` quand le client envoie ?projectKeys= — évite les ambiguïtés (1 clé vs .env).
  */
 async function resolveWorklogProjectFilter(
   req: Request
 ): Promise<{ projectKey?: string; projectKeys?: string[] }> {
-  const pksRaw = req.query.projectKeys as string | undefined;
-  if (pksRaw !== undefined && String(pksRaw).trim() !== '') {
-    const keys = String(pksRaw)
-      .split(',')
-      .map((k) => k.trim())
-      .filter(Boolean);
-    if (keys.length === 1) return { projectKey: keys[0] };
-    if (keys.length > 1) return { projectKeys: keys };
+  const keys = parseProjectKeysFromQuery(req);
+  if (keys.length > 0) {
+    return { projectKeys: [...new Set(keys)] };
   }
-  const pk = (req.query.projectKey as string | undefined)?.trim();
+  const pk = typeof req.query.projectKey === 'string' ? req.query.projectKey.trim() : '';
   if (pk) return { projectKey: pk };
 
   const configured = await worklogAppService.getConfiguredProjects();

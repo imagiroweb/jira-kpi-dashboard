@@ -52,15 +52,40 @@ export class JiraWorklogRepository implements IWorklogRepository {
   }
 
   async search(params: WorklogSearchParams): Promise<Worklog[]> {
+    // Plusieurs projets : une recherche JQL par projet puis fusion (somme = tous les worklogs).
+    // Plus fiable que `project in (A,B)` seul (pagination / JQL selon instances Jira).
+    if (params.projectKeys && params.projectKeys.length > 0) {
+      const unique = [...new Set(params.projectKeys.map((k) => k.trim()).filter(Boolean))];
+      if (unique.length > 1) {
+        const parts = await Promise.all(
+          unique.map((pk) =>
+            this.search({
+              ...params,
+              projectKeys: undefined,
+              projectKey: pk
+            })
+          )
+        );
+        const merged: Worklog[] = [];
+        const seen = new Set<string>();
+        for (const part of parts) {
+          for (const w of part) {
+            if (!seen.has(w.id)) {
+              seen.add(w.id);
+              merged.push(w);
+            }
+          }
+        }
+        return merged;
+      }
+    }
+
     const jqlParts: string[] = [];
 
     if (params.projectKeys && params.projectKeys.length > 0) {
       const unique = [...new Set(params.projectKeys.map((k) => k.trim()).filter(Boolean))];
       if (unique.length === 1) {
         jqlParts.push(`project = "${unique[0]}"`);
-      } else if (unique.length > 1) {
-        const list = unique.map((k) => `"${k.replace(/"/g, '')}"`).join(', ');
-        jqlParts.push(`project in (${list})`);
       }
     } else if (params.projectKey) {
       jqlParts.push(`project = "${params.projectKey}"`);

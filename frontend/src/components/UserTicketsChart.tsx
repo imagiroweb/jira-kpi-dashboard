@@ -115,6 +115,13 @@ export function UserTicketsChart({
     }
 
     const loadTickets = async () => {
+      if (selectedProjects.length === 0) {
+        setTickets([]);
+        setIsLoading(false);
+        setError(null);
+        return;
+      }
+
       setIsLoading(true);
       setError(null);
 
@@ -127,9 +134,7 @@ export function UserTicketsChart({
           params.append('to', dateRange.to);
         }
         params.append('accountId', selectedUser.accountId);
-        if (selectedProjects.length > 0) {
-          params.append('projectKeys', selectedProjects.join(','));
-        }
+        params.append('projectKeys', selectedProjects.join(','));
 
         const response = await fetch(`${API_BASE_URL}/worklog/search?${params}`);
         

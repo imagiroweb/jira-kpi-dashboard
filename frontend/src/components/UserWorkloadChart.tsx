@@ -140,6 +140,13 @@ export function UserWorkloadChart({
   // Données : rapport sauvegardé (fetch local) ou payload partagé depuis UserDetailPage (un seul GET /worklog/report)
   useEffect(() => {
     if (selectedReportId) {
+      if (selectedProjects.length === 0) {
+        setIsLoading(false);
+        setData([]);
+        setSummary(null);
+        setError(null);
+        return;
+      }
       let cancelled = false;
       const fetchSaved = async () => {
         setIsLoading(true);
@@ -148,9 +155,7 @@ export function UserWorkloadChart({
           const params = new URLSearchParams();
           params.append('from', dateRange.from);
           params.append('to', dateRange.to);
-          if (selectedProjects.length > 0) {
-            params.append('projectKeys', selectedProjects.join(','));
-          }
+          params.append('projectKeys', selectedProjects.join(','));
           const response = await fetch(
             `${API_BASE_URL}/worklog/saved-reports/${selectedReportId}/execute?${params}`
           );

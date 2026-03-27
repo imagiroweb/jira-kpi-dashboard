@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { FolderKanban, ChevronDown, Check, X } from 'lucide-react';
 import { jiraApi } from '../services/api';
+import { useStore } from '../store/useStore';
 
 interface Project {
   key: string;
@@ -15,32 +16,26 @@ interface ProjectSelectorProps {
 }
 
 export function ProjectSelector({ value, onChange, className = '' }: ProjectSelectorProps) {
+  const setSelectableProjectKeys = useStore((s) => s.setSelectableProjectKeys);
   const [isOpen, setIsOpen] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [configuredProjects, setConfiguredProjects] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Load projects from API
+  // Load projects from API — ne pas forcer JIRA_PROJECT_KEY seul : sélection vide = « tous » (clés dans le store)
   useEffect(() => {
     const loadProjects = async () => {
       setIsLoading(true);
       try {
         const response = await jiraApi.getProjects();
-        console.log('Projects API response:', response);
-        
+
         if (response.success && response.data) {
-          setProjects(response.data as Project[]);
-          
-          // Extract configured projects from response
+          const list = response.data as Project[];
+          setProjects(list);
           const configured = response.configuredProjects || [];
-          console.log('Configured projects:', configured);
           setConfiguredProjects(configured);
-          
-          // If no projects selected, default to configured projects
-          if (value.length === 0 && configured.length > 0) {
-            onChange(configured);
-          }
+          setSelectableProjectKeys(list.map((p) => p.key));
         }
       } catch (error) {
         console.error('Failed to load projects:', error);
@@ -50,7 +45,7 @@ export function ProjectSelector({ value, onChange, className = '' }: ProjectSele
     };
 
     loadProjects();
-  }, [value.length, onChange]);
+  }, [setSelectableProjectKeys]);
 
   const toggleProject = useCallback((projectKey: string) => {
     if (value.includes(projectKey)) {
@@ -81,10 +76,10 @@ export function ProjectSelector({ value, onChange, className = '' }: ProjectSele
     p.name.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // Display label
+  // Display label — vide = aucun projet (pas de requête côté page Utilisateurs)
   const getDisplayLabel = () => {
     if (value.length === 0) {
-      return 'Tous les projets';
+      return 'Aucun projet';
     }
     if (value.length === 1) {
       return value[0];
@@ -212,7 +207,9 @@ export function ProjectSelector({ value, onChange, className = '' }: ProjectSele
             {/* Footer */}
             <div className="p-3 border-t border-surface-700 flex items-center justify-between">
               <span className="text-xs text-surface-500">
-                {value.length} sélectionné{value.length > 1 ? 's' : ''}
+                {value.length === 0
+                  ? 'Aucun sélectionné'
+                  : `${value.length} sélectionné${value.length > 1 ? 's' : ''}`}
               </span>
               <button
                 onClick={() => setIsOpen(false)}

@@ -84,7 +84,9 @@ interface AppState {
   // Shared date range across pages
   dateRange: { from: string; to: string };
   selectedProjects: string[];
-  
+  /** Clés projet listées par GET /jira/projects (non persisté) — sélection vide = « tous » = ces clés */
+  selectableProjectKeys: string[];
+
   // Dashboard cache
   dashboardStats: BoardStats[];
   dashboardLastUpdate: Date | null;
@@ -131,6 +133,7 @@ interface AppState {
   setCurrentPage: (page: PageType) => void;
   setDateRange: (range: { from: string; to: string }) => void;
   setSelectedProjects: (projects: string[]) => void;
+  setSelectableProjectKeys: (keys: string[]) => void;
   setDashboardStats: (stats: BoardStats[]) => void;
   setDashboardLastUpdate: (date: Date | null) => void;
   setDashboardLoading: (loading: boolean) => void;
@@ -168,6 +171,7 @@ export const useStore = create<AppState>()(
       currentPage: 'dashboard',
       dateRange: getDefaultDateRange(),
       selectedProjects: [],
+      selectableProjectKeys: [],
       dashboardStats: [],
       dashboardLastUpdate: null,
       dashboardLoading: false,
@@ -230,7 +234,8 @@ export const useStore = create<AppState>()(
           usersPageUseActiveSprint: true,
           usersReportPayload: null,
           usersReportLastUpdate: null,
-          usersLastFiltersKey: null
+          usersLastFiltersKey: null,
+          selectableProjectKeys: []
         });
       },
       
@@ -247,6 +252,7 @@ export const useStore = create<AppState>()(
       setCurrentPage: (page) => set({ currentPage: page }),
       setDateRange: (range) => set({ dateRange: range }),
       setSelectedProjects: (projects) => set({ selectedProjects: projects }),
+      setSelectableProjectKeys: (keys) => set({ selectableProjectKeys: keys }),
       setDashboardStats: (stats) => set({ dashboardStats: stats }),
       setDashboardLastUpdate: (date) => set({ dashboardLastUpdate: date }),
       setDashboardLoading: (loading) => set({ dashboardLoading: loading }),

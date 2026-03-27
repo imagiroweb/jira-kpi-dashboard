@@ -25,8 +25,12 @@ export function UserDetailPage() {
 
   const [reportLoading, setReportLoading] = useState(false);
 
+  /** Au moins un projet doit être sélectionné — sinon aucune requête (pas de fallback « tous » / AD côté API) */
   const filtersKey = useMemo(() => {
-    const proj = [...selectedProjects].sort().join(',');
+    const proj =
+      selectedProjects.length > 0
+        ? [...selectedProjects].sort().join(',')
+        : 'none';
     return `${dateRange.from}|${dateRange.to}|${usersPageUseActiveSprint}|${proj}`;
   }, [dateRange.from, dateRange.to, usersPageUseActiveSprint, selectedProjects]);
 
@@ -35,12 +39,16 @@ export function UserDetailPage() {
 
   const fetchUsersReport = useCallback(
     async (silent = false) => {
+      const { dateRange: dr, selectedProjects: sp, usersPageUseActiveSprint: active } = useStore.getState();
+      if (sp.length === 0) {
+        return;
+      }
+
       if (!silent) {
         setReportLoading(true);
         setUsersReportPayload(null);
       }
       try {
-        const { dateRange: dr, selectedProjects: sp, usersPageUseActiveSprint: active } = useStore.getState();
         const params = new URLSearchParams();
         if (active) {
           params.append('activeSprint', 'true');
@@ -49,9 +57,7 @@ export function UserDetailPage() {
           params.append('to', dr.to);
         }
         params.append('groupBy', 'user');
-        if (sp.length > 0) {
-          params.append('projectKeys', sp.join(','));
-        }
+        params.append('projectKeys', sp.join(','));
 
         const response = await fetch(`${API_BASE_URL}/worklog/report?${params}`);
 
@@ -65,6 +71,9 @@ export function UserDetailPage() {
 
         const result = await response.json();
         if (result.success) {
+          if (useStore.getState().selectedProjects.length === 0) {
+            return;
+          }
           setUsersReportPayload(result);
           setUsersReportLastUpdate(new Date());
           const key = filtersKeyRef.current;
@@ -81,18 +90,33 @@ export function UserDetailPage() {
   );
 
   useEffect(() => {
+    if (selectedProjects.length === 0) {
+      setUsersReportPayload(null);
+      setUsersLastFiltersKey(null);
+      setUsersReportLastUpdate(null);
+    }
+  }, [
+    selectedProjects.length,
+    setUsersReportPayload,
+    setUsersLastFiltersKey,
+    setUsersReportLastUpdate
+  ]);
+
+  useEffect(() => {
     if (!filtersKey) return;
+    if (selectedProjects.length === 0) return;
     const { usersLastFiltersKey: lastKey, usersReportPayload: cached } = useStore.getState();
     if (lastKey === filtersKey && cached != null) {
       return;
     }
     fetchUsersReport(false);
-  }, [filtersKey, fetchUsersReport]);
+  }, [filtersKey, fetchUsersReport, selectedProjects.length]);
 
   useEffect(() => {
     if (kpiRefreshTrigger <= 0) return;
+    if (selectedProjects.length === 0) return;
     fetchUsersReport(true);
-  }, [kpiRefreshTrigger, fetchUsersReport]);
+  }, [kpiRefreshTrigger, fetchUsersReport, selectedProjects.length]);
 
   const handleDateChange = useCallback(
     (newDateRange: { from: string; to: string }) => {
