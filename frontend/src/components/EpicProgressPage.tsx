@@ -385,7 +385,7 @@ export function EpicProgressPage() {
   const setEpicsPrefixFilter = useStore((s) => s.setEpicsPrefixFilter);
   const lastUpdate = useStore((s) => s.epicsProgressLastUpdate);
 
-  const epics = epicsPayload?.epics ?? [];
+  const epics = useMemo(() => epicsPayload?.epics ?? [], [epicsPayload?.epics]);
   const totalEpics = epicsPayload?.total ?? 0;
 
   const [isLoadingEpics, setIsLoadingEpics] = useState(false);
