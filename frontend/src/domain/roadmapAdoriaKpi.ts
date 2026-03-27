@@ -138,7 +138,7 @@ export function getItemValue(item: MondayItem, columnId: string): string {
 export function getRoadmapDateColumnRaw(item: MondayItem, columnId: string): string {
   const cv = item.column_values?.find((c) => String(c.id) === String(columnId));
   if (!cv) return '';
-  let text = (cv.text ?? '').toString().trim();
+  const text = (cv.text ?? '').toString().trim();
   if (text) return text;
   const rawValue = (cv.value ?? '').toString().trim();
   if (rawValue.startsWith('{')) {
