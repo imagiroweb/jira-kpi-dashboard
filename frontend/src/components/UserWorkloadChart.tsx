@@ -18,6 +18,9 @@ interface UserWorkloadChartProps {
   dateRange: { from: string; to: string };
   selectedProjects: string[];
   useActiveSprint?: boolean;
+  /** Réponse JSON de GET /worklog/report — chargée une fois par UserDetailPage */
+  sharedReportPayload?: unknown | null;
+  isSharedReportLoading?: boolean;
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
@@ -41,15 +44,64 @@ function getUserColor(index: number): string {
   return colors[index % colors.length];
 }
 
-export function UserWorkloadChart({ dateRange, selectedProjects, useActiveSprint = false }: UserWorkloadChartProps) {
+type WorkloadSummary = {
+  totalHours: number;
+  worklogCount: number;
+  uniqueUsers: number;
+};
+
+function parseWorkloadFromReportResult(result: {
+  success?: boolean;
+  data?: unknown;
+  summary?: WorkloadSummary | null;
+  message?: string;
+}): { userData: UserWorkloadData[]; summary: WorkloadSummary | null; error: string | null } {
+  if (!result.success) {
+    return {
+      userData: [],
+      summary: null,
+      error: result.message || 'Erreur lors du chargement'
+    };
+  }
+  let userData: UserWorkloadData[] = [];
+  if (Array.isArray(result.data)) {
+    userData = result.data.map(
+      (user: {
+        accountId?: string;
+        displayName?: string;
+        timeSpentHours?: number;
+        totalHours?: number;
+        worklogCount?: number;
+      }) => ({
+        accountId: String(user.accountId || user.displayName || ''),
+        displayName: user.displayName || 'Unknown',
+        totalHours: user.totalHours ?? user.timeSpentHours ?? 0,
+        worklogCount: user.worklogCount || 0
+      })
+    );
+  } else if (result.data && typeof result.data === 'object') {
+    userData = Object.entries(result.data as Record<string, number>).map(([displayName, hours]) => ({
+      accountId: displayName,
+      displayName,
+      totalHours: typeof hours === 'number' ? hours : 0,
+      worklogCount: 0
+    }));
+  }
+  userData.sort((a, b) => b.totalHours - a.totalHours);
+  return { userData, summary: result.summary || null, error: null };
+}
+
+export function UserWorkloadChart({
+  dateRange,
+  selectedProjects,
+  useActiveSprint = false,
+  sharedReportPayload = null,
+  isSharedReportLoading = false
+}: UserWorkloadChartProps) {
   const [data, setData] = useState<UserWorkloadData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [summary, setSummary] = useState<{
-    totalHours: number;
-    worklogCount: number;
-    uniqueUsers: number;
-  } | null>(null);
+  const [summary, setSummary] = useState<WorkloadSummary | null>(null);
 
   // Saved reports
   const [savedReports, setSavedReports] = useState<SavedReport[]>([]);
@@ -85,95 +137,89 @@ export function UserWorkloadChart({ dateRange, selectedProjects, useActiveSprint
     loadReports();
   }, []);
 
-  // Load workload data
+  // Données : rapport sauvegardé (fetch local) ou payload partagé depuis UserDetailPage (un seul GET /worklog/report)
   useEffect(() => {
-    const fetchData = async () => {
-      setIsLoading(true);
-      setError(null);
-      
-      try {
-        let response;
-        
-        if (selectedReportId) {
-          // Execute saved report
+    if (selectedReportId) {
+      if (selectedProjects.length === 0) {
+        setIsLoading(false);
+        setData([]);
+        setSummary(null);
+        setError(null);
+        return;
+      }
+      let cancelled = false;
+      const fetchSaved = async () => {
+        setIsLoading(true);
+        setError(null);
+        try {
           const params = new URLSearchParams();
           params.append('from', dateRange.from);
           params.append('to', dateRange.to);
-          if (selectedProjects.length === 1) {
-            params.append('projectKey', selectedProjects[0]);
-          }
-          
-          response = await fetch(
+          params.append('projectKeys', selectedProjects.join(','));
+          const response = await fetch(
             `${API_BASE_URL}/worklog/saved-reports/${selectedReportId}/execute?${params}`
           );
-        } else {
-          // Default: use report endpoint
-          const params = new URLSearchParams();
-          if (useActiveSprint) {
-            params.append('activeSprint', 'true');
-          } else {
-            params.append('from', dateRange.from);
-            params.append('to', dateRange.to);
+          if (response.status === 429) {
+            if (!cancelled) setError('Trop de requêtes. Veuillez patienter quelques secondes.');
+            return;
           }
-          params.append('groupBy', 'user');
-          if (selectedProjects.length === 1) {
-            params.append('projectKey', selectedProjects[0]);
+          if (!response.ok) {
+            if (!cancelled) setError(`Erreur serveur: ${response.status}`);
+            return;
           }
-          
-          response = await fetch(`${API_BASE_URL}/worklog/report?${params}`);
+          const result = await response.json();
+          if (cancelled) return;
+          const parsed = parseWorkloadFromReportResult(result);
+          setData(parsed.userData);
+          setSummary(parsed.summary);
+          setError(parsed.error);
+        } catch (err) {
+          console.error('Failed to fetch workload data:', err);
+          if (!cancelled) setError('Impossible de charger les données WorklogPro');
+        } finally {
+          if (!cancelled) setIsLoading(false);
         }
-        
-        // Handle rate limiting and errors
-        if (response.status === 429) {
-          setError('Trop de requêtes. Veuillez patienter quelques secondes.');
-          return;
-        }
-        
-        if (!response.ok) {
-          setError(`Erreur serveur: ${response.status}`);
-          return;
-        }
-        
-        const result = await response.json();
+      };
+      fetchSaved();
+      return () => {
+        cancelled = true;
+      };
+    }
 
-        console.log('Workload API response:', result);
+    if (isSharedReportLoading) {
+      setIsLoading(true);
+      setError(null);
+      return;
+    }
 
-        if (result.success) {
-          let userData: UserWorkloadData[] = [];
-          
-          // Handle different response formats
-          if (Array.isArray(result.data)) {
-            userData = result.data.map((user: { accountId?: string; displayName?: string; timeSpentHours?: number; totalHours?: number; worklogCount?: number }) => ({
-              accountId: user.accountId || user.displayName,
-              displayName: user.displayName || 'Unknown',
-              totalHours: user.timeSpentHours || user.totalHours || 0,
-              worklogCount: user.worklogCount || 0
-            }));
-          } else if (result.data && typeof result.data === 'object') {
-            userData = Object.entries(result.data).map(([displayName, hours]) => ({
-              accountId: displayName,
-              displayName,
-              totalHours: (typeof hours === 'number' ? hours : 0),
-              worklogCount: 0
-            }));
-          }
-          
-          userData.sort((a, b) => b.totalHours - a.totalHours);
-          setData(userData);
-          setSummary(result.summary || null);
-        } else {
-          setError(result.message || 'Erreur lors du chargement');
+    if (sharedReportPayload != null) {
+      const parsed = parseWorkloadFromReportResult(
+        sharedReportPayload as {
+          success?: boolean;
+          data?: unknown;
+          summary?: WorkloadSummary | null;
+          message?: string;
         }
-      } catch (err) {
-        console.error('Failed to fetch workload data:', err);
-        setError('Impossible de charger les données WorklogPro');
-      } finally {
-        setIsLoading(false);
-      }
-    };
+      );
+      setData(parsed.userData);
+      setSummary(parsed.summary);
+      setError(parsed.error);
+      setIsLoading(false);
+      return;
+    }
 
-    fetchData();
-  }, [dateRange, selectedProjects, selectedReportId, useActiveSprint]);
+    setIsLoading(false);
+    setData([]);
+    setSummary(null);
+    setError(null);
+  }, [
+    selectedReportId,
+    sharedReportPayload,
+    isSharedReportLoading,
+    dateRange,
+    selectedProjects,
+    useActiveSprint
+  ]);
 
   const maxHours = Math.max(...data.map(d => d.totalHours), 1);
   const selectedReport = savedReports.find(r => r.id === selectedReportId);

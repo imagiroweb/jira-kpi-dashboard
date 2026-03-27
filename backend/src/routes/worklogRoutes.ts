@@ -9,6 +9,42 @@ import { emitKPIUpdate, emitSyncProgress, emitAlert } from '../websocket/socketH
 
 const router = Router();
 
+/** Parse `projectKeys` / `projectKeys` répété (Express peut renvoyer string | string[]). */
+function parseProjectKeysFromQuery(req: Request): string[] {
+  const raw = req.query.projectKeys;
+  if (raw === undefined || raw === null) return [];
+  if (Array.isArray(raw)) {
+    return raw
+      .flatMap((r) => String(r).split(','))
+      .map((k) => k.trim())
+      .filter(Boolean);
+  }
+  return String(raw)
+    .split(',')
+    .map((k) => k.trim())
+    .filter(Boolean);
+}
+
+/**
+ * projectKeys (CSV) > projectKey > projets configurés (.env).
+ * Toujours `projectKeys: [...]` quand le client envoie ?projectKeys= — évite les ambiguïtés (1 clé vs .env).
+ */
+async function resolveWorklogProjectFilter(
+  req: Request
+): Promise<{ projectKey?: string; projectKeys?: string[] }> {
+  const keys = parseProjectKeysFromQuery(req);
+  if (keys.length > 0) {
+    return { projectKeys: [...new Set(keys)] };
+  }
+  const pk = typeof req.query.projectKey === 'string' ? req.query.projectKey.trim() : '';
+  if (pk) return { projectKey: pk };
+
+  const configured = await worklogAppService.getConfiguredProjects();
+  if (configured.length === 1) return { projectKey: configured[0] };
+  if (configured.length > 1) return { projectKeys: [...configured] };
+  return {};
+}
+
 // Helper to get Socket.io instance from request
 const getIO = (req: Request): Server | null => {
   return req.app.get('io') as Server | null;
@@ -113,34 +149,57 @@ router.get('/user/:accountId', async (req: Request, res: Response) => {
  */
 router.get('/search', async (req: Request, res: Response) => {
   try {
-    const { from, to, projectKey, issueKey, accountId, teamName, openSprints } = req.query;
+    const { from, to, issueKey, accountId, teamName, openSprints, activeSprint } = req.query;
+    const useActiveSprint = activeSprint === 'true';
     const useOpenSprints = openSprints === 'true';
 
     let fromFinal: string | undefined = from as string;
     let toFinal: string | undefined = to as string;
-    if (useOpenSprints && (!fromFinal || !toFinal)) {
+
+    if (useActiveSprint) {
+      const range = await worklogAppService.getActiveSprintDateRange();
+      if (range) {
+        fromFinal = range.from;
+        toFinal = range.to;
+      }
+    } else if (useOpenSprints && (!fromFinal || !toFinal)) {
       const range = await worklogAppService.getActiveSprintDateRange();
       if (range) {
         fromFinal = range.from;
         toFinal = range.to;
       }
     }
-    
+
+    const projectFilter = await resolveWorklogProjectFilter(req);
+    // Période worklog uniquement (comme /report avec activeSprint) : pas de Sprint in openSprints()
+    const openSprintsFlag =
+      !useActiveSprint && useOpenSprints && !!(fromFinal && toFinal);
+
     const worklogs = await worklogAppService.searchWorklogs({
       from: fromFinal,
       to: toFinal,
-      projectKey: projectKey as string,
+      ...projectFilter,
       issueKey: issueKey as string,
       accountId: accountId as string,
       teamName: teamName as string,
-      openSprints: useOpenSprints && (!fromFinal || !toFinal) ? false : useOpenSprints
+      openSprints: openSprintsFlag
     });
     
     const metrics = worklogAppService.calculateMetrics(worklogs);
     
     res.json({
       success: true,
-      filters: { from: fromFinal, to: toFinal, projectKey, issueKey, accountId, teamName, openSprints },
+      filters: {
+        from: fromFinal,
+        to: toFinal,
+        projectKey: req.query.projectKey,
+        projectKeys: req.query.projectKeys,
+        issueKey,
+        accountId,
+        teamName,
+        openSprints: openSprintsFlag,
+        activeSprint: useActiveSprint
+      },
       count: worklogs.length,
       worklogs: worklogs.map(w => w.toJSON()),
       metrics
@@ -204,7 +263,7 @@ router.get('/project/:projectKey', async (req: Request, res: Response) => {
  */
 router.get('/report', async (req: Request, res: Response) => {
   try {
-    const { from, to, projectKey, groupBy = 'day', activeSprint } = req.query;
+    const { from, to, groupBy = 'day', activeSprint } = req.query;
     const useActiveSprint = activeSprint === 'true';
     
     // Si activeSprint est true, on résout la plage de dates du sprint puis on cherche par worklogDate
@@ -225,11 +284,13 @@ router.get('/report', async (req: Request, res: Response) => {
         message: 'Missing required parameters: from and to dates (YYYY-MM-DD) or activeSprint=true (avec un sprint actif ou dernier fermé)'
       });
     }
+
+    const projectFilter = await resolveWorklogProjectFilter(req);
     
     const worklogs = await worklogAppService.searchWorklogs({
       from: fromFinal,
       to: toFinal,
-      projectKey: projectKey as string,
+      ...projectFilter,
       openSprints: false
     });
     

@@ -138,73 +138,62 @@ export class JiraClient {
   }
 
   /**
-   * Search issues using JQL with automatic pagination
-   * Uses parallel requests for better performance on large result sets
+   * GET /rest/api/3/search/jql — pagination par nextPageToken (CHANGE-2046 : /search supprimé → 410).
+   */
+  private async fetchSearchJqlPage(
+    jql: string,
+    fields: string,
+    maxResults: number,
+    nextPageToken?: string
+  ): Promise<{ issues: JiraIssue[]; nextPageToken?: string }> {
+    const params: Record<string, string | number> = { jql, fields, maxResults };
+    if (nextPageToken) {
+      params.nextPageToken = nextPageToken;
+    }
+    const response = await this.client.get<JiraSearchJqlResponse>('/rest/api/3/search/jql', { params });
+    const data = response.data;
+    const token = data.nextPageToken?.trim();
+    return {
+      issues: data.issues ?? [],
+      nextPageToken: token ? token : undefined
+    };
+  }
+
+  /**
+   * Search issues using JQL with automatic pagination.
+   * Obligatoire : GET /rest/api/3/search/jql + nextPageToken (l’ancien /search renvoie 410).
    */
   async searchIssuesWithPagination(
     jql: string,
     fields: string = 'key,summary,status,issuetype',
     pageSize: number = 100
   ): Promise<JiraSearchResponse> {
-    // First request to get total count
-    const firstResponse = await this.client.get<JiraSearchResponse>('/rest/api/3/search/jql', {
-      params: { jql, fields, maxResults: pageSize, startAt: 0 }
-    });
+    const allIssues: JiraIssue[] = [];
+    let nextPageToken: string | undefined;
+    const maxPages = 2000;
 
-    const total = firstResponse.data.total || 0;
-    const firstPageIssues = firstResponse.data.issues || [];
-    
-    // If all results fit in first page, return immediately
-    if (firstPageIssues.length >= total || firstPageIssues.length < pageSize) {
-      logger.info(`Fetched ${firstPageIssues.length}/${total} issues (single page) with JQL: ${jql.substring(0, 80)}...`);
-      return {
-        startAt: 0,
-        maxResults: firstPageIssues.length,
-        total,
-        issues: firstPageIssues
-      };
+    for (let p = 0; p < maxPages; p++) {
+      const { issues: page, nextPageToken: next } = await this.fetchSearchJqlPage(
+        jql,
+        fields,
+        pageSize,
+        nextPageToken
+      );
+      if (page.length === 0) break;
+      allIssues.push(...page);
+      if (!next) break;
+      nextPageToken = next;
+      await this.delay(50);
     }
 
-    // Build parallel requests for remaining pages
-    const remainingPages = Math.ceil((total - pageSize) / pageSize);
-    const parallelBatchSize = 3; // Limit concurrent requests to avoid rate limiting
-    const allIssues: JiraIssue[] = [...firstPageIssues];
-
-    for (let batch = 0; batch < Math.ceil(remainingPages / parallelBatchSize); batch++) {
-      const batchPromises: Promise<JiraSearchResponse>[] = [];
-      
-      for (let i = 0; i < parallelBatchSize; i++) {
-        const pageIndex = batch * parallelBatchSize + i;
-        const startAt = (pageIndex + 1) * pageSize;
-        
-        if (startAt >= total) break;
-        
-        batchPromises.push(
-          this.client.get<JiraSearchResponse>('/rest/api/3/search/jql', {
-            params: { jql, fields, maxResults: pageSize, startAt }
-          }).then(r => r.data)
-        );
-      }
-
-      if (batchPromises.length === 0) break;
-
-      const batchResults = await Promise.all(batchPromises);
-      for (const result of batchResults) {
-        allIssues.push(...(result.issues || []));
-      }
-
-      // Small delay between batches to respect rate limits
-      if (batch < Math.ceil(remainingPages / parallelBatchSize) - 1) {
-        await this.delay(50);
-      }
-    }
-
-    logger.info(`Fetched ${allIssues.length}/${total} issues (parallel) with JQL: ${jql.substring(0, 80)}...`);
+    logger.info(
+      `Fetched ${allIssues.length} issues (search/jql nextPageToken) with JQL: ${jql.substring(0, 80)}...`
+    );
 
     return {
       startAt: 0,
       maxResults: allIssues.length,
-      total,
+      total: allIssues.length,
       issues: allIssues
     };
   }
@@ -220,19 +209,22 @@ export class JiraClient {
     const orderedJql = `${baseJql} order by id ASC`;
     const allIssues: JiraIssue[] = [];
     let lastId: string | null = null;
+    const maxIdPages = 5000;
 
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
+    for (let page = 0; page < maxIdPages; page++) {
       const jqlWithCursor: string = lastId ? `${baseJql} AND id > ${lastId} order by id ASC` : orderedJql;
-      const response: AxiosResponse<JiraSearchResponse> = await this.client.get<JiraSearchResponse>('/rest/api/3/search/jql', {
-        params: { jql: jqlWithCursor, fields, maxResults: pageSize, startAt: 0 }
-      });
+      const response: AxiosResponse<JiraSearchJqlResponse> = await this.client.get<JiraSearchJqlResponse>(
+        '/rest/api/3/search/jql',
+        {
+          params: { jql: jqlWithCursor, fields, maxResults: pageSize }
+        }
+      );
       const issues: JiraIssue[] = response.data.issues ?? [];
-      allIssues.push(...issues);
       if (issues.length === 0) break;
+      allIssues.push(...issues);
       const last: JiraIssue = issues[issues.length - 1];
       lastId = typeof last.id === 'string' ? last.id : String(last.id);
-      if (issues.length < pageSize) break;
+      // Ne pas arrêter si issues.length < pageSize : Jira peut plafonner une page à ~100 même si maxResults=1000.
       await this.delay(100);
     }
 
@@ -249,19 +241,18 @@ export class JiraClient {
     fields: string = 'key,summary,status,issuetype',
     maxResults: number = 100
   ): Promise<JiraSearchResponse> {
-    const response = await this.client.get<JiraSearchResponse>('/rest/api/3/search/jql', {
+    const response = await this.client.get<JiraSearchJqlResponse>('/rest/api/3/search/jql', {
       params: {
         jql,
         fields,
-        maxResults,
-        startAt: 0
+        maxResults
       }
     });
 
     const issues = response.data.issues || [];
-    const total = response.data.total || issues.length;
-    
-    logger.info(`Fetched ${issues.length}/${total} issues (limited) with JQL: ${jql.substring(0, 100)}...`);
+    const total = issues.length;
+
+    logger.info(`Fetched ${issues.length} issues (limited) with JQL: ${jql.substring(0, 100)}...`);
 
     return {
       startAt: 0,
@@ -272,8 +263,7 @@ export class JiraClient {
   }
 
   /**
-   * Fetch a single page of issues (for pagination). One request, no automatic follow-up.
-   * Note: /rest/api/3/search/jql does NOT return "total"; use searchApproximateCount() for total.
+   * Une page avec offset startAt : /search supprimé (410) — défilement nextPageToken jusqu’à ignorer startAt issues.
    */
   async searchIssuesPage(
     jql: string,
@@ -281,17 +271,51 @@ export class JiraClient {
     maxResults: number = 20,
     startAt: number = 0
   ): Promise<JiraSearchResponse> {
-    const response = await this.client.get<JiraSearchResponse>('/rest/api/3/search/jql', {
-      params: { jql, fields, maxResults, startAt }
-    });
-    const data = response.data;
-    const issues = data.issues || [];
-    logger.info(`Fetched page startAt=${startAt} size=${issues.length} with JQL: ${jql.substring(0, 60)}...`);
+    const pageFetchSize = Math.min(100, Math.max(maxResults, 20));
+    const out: JiraIssue[] = [];
+    let skipped = 0;
+    let nextPageToken: string | undefined;
+    const maxTokenPages = 500;
+
+    for (let p = 0; p < maxTokenPages; p++) {
+      const { issues: page, nextPageToken: next } = await this.fetchSearchJqlPage(
+        jql,
+        fields,
+        pageFetchSize,
+        nextPageToken
+      );
+      if (page.length === 0) break;
+
+      for (const issue of page) {
+        if (skipped < startAt) {
+          skipped++;
+          continue;
+        }
+        out.push(issue);
+        if (out.length >= maxResults) {
+          logger.info(
+            `Fetched page startAt=${startAt} size=${out.length} with JQL: ${jql.substring(0, 60)}...`
+          );
+          return {
+            startAt,
+            maxResults: out.length,
+            total: 0,
+            issues: out
+          };
+        }
+      }
+
+      if (!next) break;
+      nextPageToken = next;
+      await this.delay(30);
+    }
+
+    logger.info(`Fetched page startAt=${startAt} size=${out.length} with JQL: ${jql.substring(0, 60)}...`);
     return {
-      startAt: data.startAt ?? startAt,
-      maxResults: data.maxResults ?? issues.length,
+      startAt,
+      maxResults: out.length,
       total: 0,
-      issues
+      issues: out
     };
   }
 
@@ -334,6 +358,46 @@ export class JiraClient {
     } while (allWorklogs.length < total);
 
     return allWorklogs;
+  }
+
+  /**
+   * Récupère les worklogs pour plusieurs tickets en parallèle (lots bornés).
+   * Évite N appels séquentiels (cause principale des timeouts sur gros volumes).
+   */
+  async getIssueWorklogsForMany(
+    issueKeys: string[],
+    concurrency?: number
+  ): Promise<Map<string, JiraWorklog[]>> {
+    const fromEnv = parseInt(process.env.JIRA_WORKLOG_FETCH_CONCURRENCY || '10', 10);
+    const conc = Math.max(1, Math.min(concurrency ?? fromEnv, 30));
+    const uniqueKeys = [...new Set(issueKeys)];
+    const map = new Map<string, JiraWorklog[]>();
+
+    logger.info(
+      `Worklogs: fetching for ${uniqueKeys.length} issues (concurrency=${conc})`
+    );
+
+    for (let i = 0; i < uniqueKeys.length; i += conc) {
+      const chunk = uniqueKeys.slice(i, i + conc);
+      const settled = await Promise.allSettled(
+        chunk.map((key) => this.getIssueWorklogs(key))
+      );
+      for (let j = 0; j < chunk.length; j++) {
+        const key = chunk[j];
+        const r = settled[j];
+        if (r.status === 'fulfilled') {
+          map.set(key, r.value);
+        } else {
+          logger.debug(`getIssueWorklogs failed for ${key}: ${r.reason}`);
+          map.set(key, []);
+        }
+      }
+      if (i + conc < uniqueKeys.length) {
+        await this.delay(40);
+      }
+    }
+
+    return map;
   }
 
   /**
@@ -438,6 +502,12 @@ export class JiraClient {
 }
 
 // Jira API Types
+/** Réponse GET /rest/api/3/search/jql (pagination nextPageToken) */
+export interface JiraSearchJqlResponse {
+  issues?: JiraIssue[];
+  nextPageToken?: string;
+}
+
 export interface JiraSearchResponse {
   startAt: number;
   maxResults: number;

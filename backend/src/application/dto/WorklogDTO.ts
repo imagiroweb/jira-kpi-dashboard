@@ -31,6 +31,7 @@ export interface WorklogSearchResponseDTO {
     from?: string;
     to?: string;
     projectKey?: string;
+    projectKeys?: string[];
     issueKey?: string;
     accountId?: string;
     teamName?: string;

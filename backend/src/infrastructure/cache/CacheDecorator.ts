@@ -116,13 +116,8 @@ export class CachedWorklogRepository implements IWorklogRepository {
   }
 
   async search(params: WorklogSearchParams): Promise<Worklog[]> {
-    const key = `worklog:search:${JSON.stringify(params)}`;
-    const cached = cache.get<Worklog[]>(key);
-    if (cached) return cached;
-
-    const result = await this.inner.search(params);
-    cache.set(key, result, 5);
-    return result;
+    // Pas de cache : agrégats multi-utilisateurs / filtres variés → risque de totaux faux ou périmés.
+    return this.inner.search(params);
   }
 }
 

@@ -18,6 +18,7 @@ export class WorklogApplicationService {
     from?: string;
     to?: string;
     projectKey?: string;
+    projectKeys?: string[];
     issueKey?: string;
     accountId?: string;
     teamName?: string;
@@ -162,30 +163,57 @@ export class WorklogApplicationService {
     const rangeYtd = DateRange.create(ytdFrom, ytdTo);
 
     try {
-      // Active sprint: JQL project = "X" AND Sprint in openSprints() → toutes les issues du sprint ouvert → pour chaque issue, tous les worklogs (paginés)
+      // Sprint actif : même sémantique que WorklogPro / rapport utilisateurs — worklogDate dans la période
+      // du sprint (getActiveSprintDateRange), pas JQL Sprint in openSprints() (exclut backlog et fausse les heures).
+      const sprintRange = await this.getActiveSprintDateRange();
+      if (!sprintRange) {
+        logger.warn('getSupportBuildRatio: getActiveSprintDateRange returned null — ratios sprint actif à 0');
+      }
+
       const hoursByProjectSprint = new Map<string, number>();
-      for (const projectKey of allProjectKeys) {
-        const worklogs = await repo.findByOpenSprints(projectKey);
-        const issueCount = new Set(worklogs.map((w) => w.issueKey)).size;
-        const hours = worklogs.reduce((sum, w) => sum + w.timeSpent.toHours, 0);
-        hoursByProjectSprint.set(projectKey, hours);
-        const jqlSprint = `project = "${projectKey}" AND Sprint in openSprints()`;
+      const sprintRows = await Promise.all(
+        allProjectKeys.map(async (projectKey) => {
+          let worklogs: Worklog[];
+          let jqlSprint: string;
+          if (sprintRange) {
+            worklogs = await repo.search({
+              from: sprintRange.from,
+              to: sprintRange.to,
+              projectKey,
+              openSprints: false
+            });
+            jqlSprint = `project = "${projectKey}" AND worklogDate >= "${sprintRange.from}" AND worklogDate <= "${sprintRange.to}"`;
+          } else {
+            worklogs = [];
+            jqlSprint = '(aucun sprint actif — plage de dates non disponible)';
+          }
+          const issueCount = new Set(worklogs.map((w) => w.issueKey)).size;
+          const hours = worklogs.reduce((sum, w) => sum + w.timeSpent.toHours, 0);
+          hoursByProjectSprint.set(projectKey, hours);
+          return {
+            projectKey,
+            sprint: {
+              jql: jqlSprint,
+              issueCount,
+              worklogCount: worklogs.length,
+              totalHours: Math.round(hours * 10) / 10,
+            },
+            ytdPlaceholder: {
+              jql: `project = "${projectKey}" AND worklogDate >= "${ytdFrom}" AND worklogDate <= "${ytdTo}"`,
+              issueCount: 0,
+              worklogCount: 0,
+              totalHours: 0,
+              from: ytdFrom,
+              to: ytdTo,
+            },
+          };
+        })
+      );
+      for (const row of sprintRows) {
         retrievalDetail.push({
-          projectKey,
-          sprint: {
-            jql: jqlSprint,
-            issueCount,
-            worklogCount: worklogs.length,
-            totalHours: Math.round(hours * 10) / 10,
-          },
-          ytd: {
-            jql: `project = "${projectKey}" AND worklogDate >= "${ytdFrom}" AND worklogDate <= "${ytdTo}"`,
-            issueCount: 0,
-            worklogCount: 0,
-            totalHours: 0,
-            from: ytdFrom,
-            to: ytdTo,
-          },
+          projectKey: row.projectKey,
+          sprint: row.sprint,
+          ytd: row.ytdPlaceholder,
         });
       }
 
@@ -203,20 +231,31 @@ export class WorklogApplicationService {
         }
       }
 
-      // Year to date: JQL project = "X" AND worklogDate >= "YYYY-01-01" AND worklogDate <= "today" → issues avec au moins un worklog dans la plage → pour chaque issue, worklogs filtrés par date
+      // Year to date: parallel per project
       const hoursByProjectYtd = new Map<string, number>();
-      for (let i = 0; i < allProjectKeys.length; i++) {
-        const projectKey = allProjectKeys[i];
-        const worklogs = await repo.findByProject(projectKey, rangeYtd);
-        const issueCount = new Set(worklogs.map((w) => w.issueKey)).size;
-        const hours = worklogs.reduce((sum, w) => sum + w.timeSpent.toHours, 0);
-        hoursByProjectYtd.set(projectKey, hours);
+      const ytdRows = await Promise.all(
+        allProjectKeys.map(async (projectKey) => {
+          const worklogs = await repo.findByProject(projectKey, rangeYtd);
+          const issueCount = new Set(worklogs.map((w) => w.issueKey)).size;
+          const hours = worklogs.reduce((sum, w) => sum + w.timeSpent.toHours, 0);
+          hoursByProjectYtd.set(projectKey, hours);
+          return {
+            projectKey,
+            issueCount,
+            worklogCount: worklogs.length,
+            hours,
+          };
+        })
+      );
+      for (let i = 0; i < ytdRows.length; i++) {
+        const row = ytdRows[i];
+        const projectKey = row.projectKey;
         if (retrievalDetail[i]) {
           retrievalDetail[i].ytd = {
             jql: `project = "${projectKey}" AND worklogDate >= "${ytdFrom}" AND worklogDate <= "${ytdTo}"`,
-            issueCount,
-            worklogCount: worklogs.length,
-            totalHours: Math.round(hours * 10) / 10,
+            issueCount: row.issueCount,
+            worklogCount: row.worklogCount,
+            totalHours: Math.round(row.hours * 10) / 10,
             from: ytdFrom,
             to: ytdTo,
           };
@@ -275,15 +314,19 @@ export class WorklogApplicationService {
     
     logger.info(`Fetching ${supportProjectKey} issues with JQL: ${jql}`);
     
-    const response = await jiraClient.searchIssuesWithPagination(jql, fields);
-    const issues = response.issues;
-    
-    logger.info(`Found ${issues.length} ${supportProjectKey} issues`);
-    
-    // Also fetch backlog issues (outside of sprints)
     const backlogJql = `project = "${supportProjectKey}" AND Sprint is EMPTY AND statusCategory != Done ORDER BY created DESC`;
-    const backlogResponse = await jiraClient.searchIssuesWithPagination(backlogJql, fields);
+
+    // Main issues + backlog + support/build ratio in parallel (ratio was the main sequential bottleneck)
+    const [response, backlogResponse, supportBuildRatio] = await Promise.all([
+      jiraClient.searchIssuesWithPagination(jql, fields),
+      jiraClient.searchIssuesWithPagination(backlogJql, fields),
+      this.getSupportBuildRatio()
+    ]);
+
+    const issues = response.issues;
     const backlogIssues = backlogResponse.issues;
+    
+    logger.info(`Found ${issues.length} ${supportProjectKey} issues (+ backlog ${backlogIssues.length})`);
     
     // Transform issues to SupportIssue format
     const supportIssues: SupportIssue[] = issues.map(issue => {
@@ -532,8 +575,6 @@ export class WorklogApplicationService {
         return sum + ((fields[ponderationField] as number) || 0);
       }, 0)
     };
-    
-    const supportBuildRatio = await this.getSupportBuildRatio();
 
     return {
       issues: supportIssues,
@@ -1244,6 +1285,53 @@ export class WorklogApplicationService {
   }
 
   /**
+   * Sprint dashboard: all configured boards in one HTTP round-trip (Jira calls run in parallel on the server).
+   */
+  async getSprintIssuesForAllConfiguredBoards(
+    from?: string,
+    to?: string
+  ): Promise<
+    Array<{
+      boardId: number;
+      name: string;
+      projectKey: string | null;
+      success: boolean;
+      sprint?: SprintIssuesResult;
+      error?: string;
+    }>
+  > {
+    const configured = await this.getConfiguredBoards();
+    if (configured.length === 0) {
+      return [];
+    }
+    const settled = await Promise.allSettled(
+      configured.map((b) => this.getSprintIssuesForBoard(b.id, from, to))
+    );
+    return settled.map((result, i) => {
+      const b = configured[i];
+      if (result.status === 'fulfilled') {
+        return {
+          boardId: b.id,
+          name: b.name,
+          projectKey: b.projectKey,
+          success: true,
+          sprint: result.value
+        };
+      }
+      const err = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      logger.warn(`[Batch sprint] Board ${b.id} failed: ${err}`);
+      return {
+        boardId: b.id,
+        name: b.name,
+        projectKey: b.projectKey,
+        success: false,
+        error: err,
+        sprint: this.emptySprintIssuesResult()
+      };
+    });
+  }
+
+  /**
    * Get issues for a board in a custom date range (période personnalisée).
    * N'utilise pas le sprint : uniquement le projet du board + plage de dates (updated).
    * Toutes les issues du projet mises à jour entre from et to sont incluses, quel que soit le sprint.
@@ -1631,7 +1719,11 @@ export class WorklogApplicationService {
     logger.info(`Found ${epics.length} epics (total=${total}, startAt=${startAt})`);
 
     const results: EpicProgressItem[] = [];
-    const batchSize = 3;
+    /** Parallel Jira calls per batch (was 3 — larger batches = faster epic list load) */
+    const batchSize = Math.min(
+      12,
+      Math.max(3, parseInt(process.env.JIRA_EPIC_PROGRESS_BATCH_SIZE || '8', 10) || 8)
+    );
 
     for (let i = 0; i < epics.length; i += batchSize) {
       const batch = epics.slice(i, i + batchSize);
