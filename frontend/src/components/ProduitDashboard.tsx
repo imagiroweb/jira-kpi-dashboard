@@ -11,7 +11,7 @@ import {
   MapPin,
   Target,
   Building2,
-  Smile,
+  Store,
   Folder,
   Globe,
   Clock,
@@ -61,14 +61,21 @@ const PAYS_COLUMN_KEYS = ['pays', 'country', 'country code', 'nationalité', 'na
 const SITES_ACTIFS_KEYS = ['sites actifs', 'sites_actifs', 'active sites', 'nb sites', 'nombre de sites'];
 const TARGET_KEYS = ['target', 'objectif', 'cible', 'goal'];
 const CDC_KEYS = ['cdc déployé', 'cdc', 'cdc deployé', 'cdc deploye', 'cdc déploye'];
-const SATISFACTION_KEYS = [
-  'degré satisfaction client (engagement CP)',
-  'degre satisfaction client',
-  'satisfaction client (engagement',
-  'engagement CP)',
-  'satisfaction',
-  'taux satisfaction',
-  'satisfaction global',
+/** Colonne « KPI adoria - Nombre de commandes générées via le CdC » (board Suivi). */
+const COMMANDES_VIA_CDC_KEYS = [
+  'kpi adoria - nombre de commandes générées via le cdc',
+  'kpi adoria -nombre de commandes générées via le cdc',
+  'nombre de commandes générées via le cdc',
+  'commandes générées via le cdc',
+  'commandes generees via le cdc',
+];
+/** Colonne « Système de caisse actif » (board Suivi) — nuage de mots par fréquence. */
+const SYSTEME_CAISSE_ACTIF_KEYS = [
+  'système de caisse actif',
+  'systeme de caisse actif',
+  'système de caisse',
+  'systeme de caisse',
+  'caisse actif',
 ];
 const DATE_MISE_EN_PROD_KEYS = ['date mise en production', 'mise en production', 'go live', 'lancement production', 'date de lancement en production', 'date lancement production', 'production', 'date prod'];
 const PROJECT_START_DATE_KEYS = ['project start date', 'date début projet', 'start date', 'date de début', 'début projet', 'date start', 'date début', 'début'];
@@ -119,6 +126,23 @@ function findColumn(columns: MondayColumn[], keywords: string[]): MondayColumn |
   return columns.find((c) => keywords.some((k) => normalize(c.title).includes(normalize(k)))) ?? null;
 }
 
+/** Même principe que findColumn, mais essaie les mots-clés du plus long au plus court pour éviter qu’un terme trop court (ex. « satisfaction ») ne pointe vers la mauvaise colonne. */
+function findColumnPreferSpecific(columns: MondayColumn[], keywords: string[]): MondayColumn | null {
+  const normalize = (s: string) =>
+    s
+      .toLowerCase()
+      .trim()
+      .replace(/\u2019/g, "'")
+      .replace(/\u2018/g, "'");
+  const sorted = [...keywords].sort((a, b) => b.length - a.length);
+  for (const k of sorted) {
+    const nk = normalize(k);
+    const found = columns.find((c) => normalize(c.title).includes(nk));
+    if (found) return found;
+  }
+  return null;
+}
+
 function getItemValue(item: MondayItem, columnId: string): string {
   const cv = item.column_values?.find((c) => String(c.id) === String(columnId));
   return (cv?.text ?? cv?.value ?? '').toString().trim();
@@ -151,8 +175,8 @@ function getItemNumericValue(item: MondayItem, columnId: string): number {
   return 0;
 }
 
-/** Binary satisfaction column: returns 'satisfait' | 'pas satisfait' | null (empty). Uses text or JSON label. */
-function getSatisfactionStatus(item: MondayItem, columnId: string): 'satisfait' | 'pas satisfait' | null {
+/** Libellé affiché pour une colonne Monday (texte, statut, liste, etc.). */
+function getItemColumnLabelText(item: MondayItem, columnId: string): string {
   const cv = item.column_values?.find((c) => String(c.id) === String(columnId));
   let text = (cv?.text ?? '').toString().trim();
   const rawValue = (cv?.value ?? '').toString().trim();
@@ -160,7 +184,10 @@ function getSatisfactionStatus(item: MondayItem, columnId: string): 'satisfait' 
     if (rawValue.startsWith('{')) {
       try {
         const o = JSON.parse(rawValue) as Record<string, unknown>;
-        text = String(o.label ?? o.text ?? o.value ?? '').trim();
+        const v = o.label ?? o.text ?? o.name ?? o.value;
+        if (v !== undefined && v !== null && typeof v !== 'object') {
+          text = String(v).trim();
+        }
       } catch {
         text = rawValue;
       }
@@ -168,11 +195,38 @@ function getSatisfactionStatus(item: MondayItem, columnId: string): 'satisfait' 
       text = rawValue;
     }
   }
-  const lower = text.toLowerCase();
-  if (!lower) return null;
-  if (lower.includes('pas satisfait') || lower.includes('non satisfait') || lower === 'non' || lower === 'non satisfait') return 'pas satisfait';
-  if (lower.includes('satisfait')) return 'satisfait';
-  return 'pas satisfait';
+  return text;
+}
+
+/** Exclut les cellules « vides » / non renseignées pour l’agrégat système de caisse. */
+function isDefinedCaisseLabel(label: string): boolean {
+  const s = label.trim();
+  if (!s) return false;
+  const lower = s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const compact = lower.replace(/\s+/g, ' ');
+  const placeholders = new Set([
+    '-',
+    '—',
+    '–',
+    '…',
+    '?',
+    'n/a',
+    'na',
+    '#n/a',
+    'n.a.',
+    'n.a',
+    'null',
+    'undefined',
+    'vide',
+    'empty',
+    'non defini',
+    'non renseigne',
+    'nr',
+    'inconnu',
+  ]);
+  if (placeholders.has(compact)) return false;
+  if (compact.length <= 1 && /^[-–—.?]$/.test(s)) return false;
+  return true;
 }
 
 /** Monday date: value can be JSON {"date":"YYYY-MM-DD"} or "YYYY-MM-DD", text can be "DD/MM/YYYY" or "DD-MM-YYYY". */
@@ -217,8 +271,10 @@ function computeSuiviKpis(
   sitesActifs: number;
   target: number;
   cdcDeploye: number;
-  satisfactionMoy: number;
-  satisfactionByClient: { clientName: string; status: 'satisfait' | 'pas satisfait' }[];
+  /** Somme « KPI adoria - Nombre de commandes générées via le CdC ». */
+  totalCommandesViaCdc: number;
+  /** Libellés « Système de caisse actif » agrégés (fréquence par valeur distincte). */
+  systemeCaisseWordCloud: { label: string; count: number }[];
   projetsAnneeEnCours: number;
   projectsByYear: { year: number; count: number; dureeMoyenneJours: number }[];
   dureeMoyenneMiseEnProdJours: number;
@@ -239,7 +295,8 @@ function computeSuiviKpis(
   const colSitesActifs = findColumn(columns, SITES_ACTIFS_KEYS);
   const colTarget = findColumn(columns, TARGET_KEYS);
   const colCdc = columns.find((c) => String(c.id) === SUIVI_CDC_DEPLOYE_COLUMN_ID) ?? findColumn(columns, CDC_KEYS);
-  const colSatisfaction = findColumn(columns, SATISFACTION_KEYS);
+  const colCommandesViaCdc = findColumn(columns, COMMANDES_VIA_CDC_KEYS);
+  const colSystemeCaisse = findColumnPreferSpecific(columns, SYSTEME_CAISSE_ACTIF_KEYS);
   const colDateProd = findColumn(columns, DATE_MISE_EN_PROD_KEYS);
   const colStartDate = findColumn(columns, PROJECT_START_DATE_KEYS);
   const colTotalProjets = findColumn(columns, TOTAL_PROJETS_KEYS);
@@ -256,6 +313,7 @@ function computeSuiviKpis(
   let sitesActifs = 0;
   let target = 0;
   let cdcDeploye = 0;
+  let totalCommandesViaCdc = 0;
   let totalUtilisateursActifs = 0;
   let totalUtilisateursBruts = 0;
   let totalReferencesMercurial = 0;
@@ -264,8 +322,7 @@ function computeSuiviKpis(
   let totalProduitsGeneriquesBrut = 0;
   let totalProduitsGeneriquesActifs = 0;
   let totalUtilisationMobile = 0;
-  let satisfactionSatisfaitCount = 0;
-  const satisfactionByClient: { clientName: string; status: 'satisfait' | 'pas satisfait' }[] = [];
+  const caisseByLabel = new Map<string, number>();
   let totalProjets = 0;
   const paysCount = new Map<string, number>();
   const countByYear = new Map<number, number>();
@@ -277,12 +334,14 @@ function computeSuiviKpis(
   for (const item of items) {
     if (colSitesActifs) sitesActifs += getItemNumericValue(item, colSitesActifs.id) || parseNum(getItemValue(item, colSitesActifs.id));
     if (colTarget) target += getItemNumericValue(item, colTarget.id) || parseNum(getItemValue(item, colTarget.id));
-    if (colCdc) cdcDeploye += getItemNumericValue(item, colCdc.id) || parseNum(getItemValue(item, colCdc.id)) || (getItemValue(item, colCdc.id) ? 1 : 0);
-    if (colSatisfaction) {
-      const status = getSatisfactionStatus(item, colSatisfaction.id);
-      if (status) {
-        if (status === 'satisfait') satisfactionSatisfaitCount += 1;
-        satisfactionByClient.push({ clientName: item.name || 'Sans nom', status });
+    if (colCdc) cdcDeploye += getItemNumericValue(item, colCdc.id) || parseNum(getItemValue(item, colCdc.id));
+    if (colCommandesViaCdc)
+      totalCommandesViaCdc +=
+        getItemNumericValue(item, colCommandesViaCdc.id) || parseNum(getItemValue(item, colCommandesViaCdc.id));
+    if (colSystemeCaisse) {
+      const label = getItemColumnLabelText(item, colSystemeCaisse.id);
+      if (label && isDefinedCaisseLabel(label)) {
+        caisseByLabel.set(label, (caisseByLabel.get(label) ?? 0) + 1);
       }
     }
     if (colTotalProjets) totalProjets += getItemNumericValue(item, colTotalProjets.id) || parseNum(getItemValue(item, colTotalProjets.id));
@@ -321,8 +380,9 @@ function computeSuiviKpis(
   const byPays = Array.from(paysCount.entries())
     .map(([name, value]) => ({ name, value }))
     .sort((a, b) => b.value - a.value);
-  const satisfactionMoy =
-    satisfactionByClient.length > 0 ? (satisfactionSatisfaitCount / satisfactionByClient.length) * 100 : 0;
+  const systemeCaisseWordCloud = Array.from(caisseByLabel.entries())
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count);
   const projectsByYear = Array.from(countByYear.entries())
     .map(([year, count]) => {
       const joursArr = dureesByYear.get(year) ?? [];
@@ -337,14 +397,12 @@ function computeSuiviKpis(
   const dureeMaxMiseEnProdJours = dureesJours.length > 0 ? Math.max(...dureesJours) : 0;
   delaiByClient.sort((a, b) => a.dureeJours - b.dureeJours);
 
-  satisfactionByClient.sort((a, b) => (a.status === 'satisfait' && b.status !== 'satisfait' ? -1 : a.status !== 'satisfait' && b.status === 'satisfait' ? 1 : 0));
-
   return {
     sitesActifs,
     target,
     cdcDeploye,
-    satisfactionMoy,
-    satisfactionByClient,
+    totalCommandesViaCdc,
+    systemeCaisseWordCloud,
     projetsAnneeEnCours,
     projectsByYear,
     dureeMoyenneMiseEnProdJours,
@@ -364,8 +422,53 @@ function computeSuiviKpis(
   };
 }
 
-
 const DONUT_COLORS = ['#f59e0b', '#06b6d4', '#22c55e', '#8b5cf6', '#ec4899', '#6366f1', '#14b8a6', '#f97316'];
+
+/** Courbe > 1 : les libellés les plus fréquents grossissent nettement plus que les rares. */
+const WORDCLOUD_SIZE_EXPONENT = 1.45;
+
+function SystemeCaisseWordCloud({
+  entries,
+  className = '',
+  minPx = 9,
+  maxPx = 36,
+}: {
+  entries: { label: string; count: number }[];
+  className?: string;
+  minPx?: number;
+  maxPx?: number;
+}) {
+  if (entries.length === 0) {
+    return <span className="text-surface-500 text-sm">—</span>;
+  }
+  const counts = entries.map((e) => e.count);
+  const maxC = Math.max(...counts);
+  const minC = Math.min(...counts);
+  const span = maxC - minC || 1;
+  const sizeRange = maxPx - minPx;
+  return (
+    <div className={`flex flex-wrap items-end justify-center gap-x-2 gap-y-1 content-end ${className}`}>
+      {entries.map((e, i) => {
+        const tLinear = Math.min(1, Math.max(0, (e.count - minC) / span));
+        const tAccent = Math.pow(tLinear, WORDCLOUD_SIZE_EXPONENT);
+        const fontSize = minPx + tAccent * sizeRange;
+        return (
+          <span
+            key={`${e.label}-${i}`}
+            className="font-semibold leading-tight max-w-[min(100%,12rem)] break-words text-center"
+            style={{
+              fontSize: `${fontSize}px`,
+              color: DONUT_COLORS[i % DONUT_COLORS.length],
+            }}
+            title={`${e.label} : ${e.count}`}
+          >
+            {e.label}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
 
 export function ProduitDashboard() {
   const [configured, setConfigured] = useState<boolean | null>(null);
@@ -377,7 +480,7 @@ export function ProduitDashboard() {
   const [suiviBoardId, setSuiviBoardId] = useState<string>('');
   const [suiviData, setSuiviData] = useState<{ columns: MondayColumn[]; items: MondayItem[] } | null>(null);
   const [suiviLoading, setSuiviLoading] = useState(false);
-  const [showSatisfactionModal, setShowSatisfactionModal] = useState(false);
+  const [showSystemeCaisseModal, setShowSystemeCaisseModal] = useState(false);
   const [showDelaiModal, setShowDelaiModal] = useState(false);
   const [roadmapBoardId, setRoadmapBoardId] = useState<string>('');
   const [roadmapData, setRoadmapData] = useState<{ columns: MondayColumn[]; items: MondayItem[] } | null>(null);
@@ -529,9 +632,20 @@ export function ProduitDashboard() {
       }
       case 'cdcDeploye': {
         const col = getColById(SUIVI_CDC_DEPLOYE_COLUMN_ID) ?? getCol(CDC_KEYS);
+        const colCommandes = getCol(COMMANDES_VIA_CDC_KEYS);
         if (!col) return null;
-        const rows = items.map((item) => ({ name: item.name || '—', value: getVal(item, col) || (getItemValue(item, col.id) ? 1 : 0) }));
-        return { title: 'CDC déployé', rows: rows.sort((a, b) => b.value - a.value) };
+        const dataRows = items.map((item) => ({
+          name: item.name || '—',
+          value1: getVal(item, col),
+          value2: colCommandes ? getVal(item, colCommandes) : 0,
+        }));
+        const sorted = dataRows.sort((a, b) => Math.max(b.value1, b.value2) - Math.max(a.value1, a.value2));
+        const totalCdc = sorted.reduce((s, r) => s + r.value1, 0);
+        const totalCommandes = sorted.reduce((s, r) => s + r.value2, 0);
+        return {
+          title: 'CDC déployé / commandes via CdC',
+          rows: [...sorted, { name: 'Total', value1: totalCdc, value2: totalCommandes }],
+        };
       }
       case 'totalProjets': {
         const col = getCol(TOTAL_PROJETS_KEYS);
@@ -1324,7 +1438,7 @@ export function ProduitDashboard() {
                 </span>
                 {suiviData?.items?.length !== undefined && suiviData.items.length > 0 && suiviKpis.sitesActifs === 0 && suiviKpis.target === 0 && suiviKpis.cdcDeploye === 0 && suiviKpis.totalUtilisateursActifs === 0 && (
                   <span className="text-amber-200/90 text-sm">
-                    Données chargées mais colonnes non reconnues. Vérifiez que les intitulés des colonnes du board Monday contiennent par ex. « Sites actifs », « Target », « CDC déployé », « Satisfaction », « Date mise en production », « Total projets ».
+                    Données chargées mais colonnes non reconnues. Vérifiez que les intitulés des colonnes du board Monday contiennent par ex. « Sites actifs », « Target », « CDC déployé », « Système de caisse actif », « Date mise en production », « Total projets ».
                   </span>
                 )}
               </div>
@@ -1348,19 +1462,28 @@ export function ProduitDashboard() {
                     <CheckCircle className="w-4 h-4 text-green-400" />
                     <span className="text-xs font-medium text-surface-500">CDC déployé</span>
                   </div>
-                  <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.cdcDeploye}</div>
+                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                    <span className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.cdcDeploye}</span>
+                    <span className="text-surface-600 text-lg leading-none" aria-hidden>
+                      ·
+                    </span>
+                    <div>
+                      <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.totalCommandesViaCdc}</div>
+                      <div className="text-[10px] text-surface-500 leading-tight">cmd. via CdC</div>
+                    </div>
+                  </div>
                 </button>
                 <button
                   type="button"
-                  onClick={() => setShowSatisfactionModal(true)}
-                  className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left w-full cursor-pointer hover:border-accent-500/40 hover:bg-surface-800/80 transition-colors"
+                  onClick={() => setShowSystemeCaisseModal(true)}
+                  className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-3 text-left w-full cursor-pointer hover:border-accent-500/40 hover:bg-surface-800/80 transition-colors sm:col-span-2 min-h-[7.5rem] flex flex-col"
                 >
-                  <div className="flex items-center gap-2 mb-1">
-                    <Smile className="w-4 h-4 text-accent-400" />
-                    <span className="text-xs font-medium text-surface-500">Satisfaction</span>
+                  <div className="flex items-center gap-2 mb-2 shrink-0">
+                    <Store className="w-4 h-4 text-accent-400" />
+                    <span className="text-xs font-medium text-surface-500">Système de caisse actif</span>
                   </div>
-                  <div className="text-xl font-bold text-surface-100 tabular-nums">
-                    {suiviKpis.satisfactionMoy > 0 ? `${suiviKpis.satisfactionMoy.toFixed(1)}%` : '—'}
+                  <div className="flex-1 flex items-center justify-center min-h-[4rem]">
+                    <SystemeCaisseWordCloud entries={suiviKpis.systemeCaisseWordCloud} minPx={7} maxPx={34} />
                   </div>
                 </button>
                 <button
@@ -1879,59 +2002,62 @@ export function ProduitDashboard() {
         </div>
       )}
 
-      {/* Modal Satisfaction par client */}
-      {showSatisfactionModal && suiviKpis && (
+      {/* Modal Système de caisse actif — nuage + détail des effectifs */}
+      {showSystemeCaisseModal && suiviKpis && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
-          onClick={() => setShowSatisfactionModal(false)}
+          onClick={() => setShowSystemeCaisseModal(false)}
         >
           <div
-            className="bg-surface-900 border border-surface-700 rounded-2xl shadow-xl max-w-lg w-full max-h-[85vh] flex flex-col"
+            className="bg-surface-900 border border-surface-700 rounded-2xl shadow-xl max-w-2xl w-full max-h-[85vh] flex flex-col"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between p-4 border-b border-surface-700">
               <div className="flex items-center gap-2">
-                <Smile className="w-5 h-5 text-accent-400" />
-                <h3 className="text-lg font-semibold text-surface-100">Satisfaction par client</h3>
+                <Store className="w-5 h-5 text-accent-400" />
+                <h3 className="text-lg font-semibold text-surface-100">Système de caisse actif</h3>
               </div>
               <button
                 type="button"
-                onClick={() => setShowSatisfactionModal(false)}
+                onClick={() => setShowSystemeCaisseModal(false)}
                 className="p-2 rounded-lg hover:bg-surface-800 text-surface-400 hover:text-surface-200"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
-            <div className="p-4 overflow-y-auto flex-1">
-              {suiviKpis.satisfactionByClient.length === 0 ? (
+            <div className="p-4 overflow-y-auto flex-1 space-y-6">
+              {suiviKpis.systemeCaisseWordCloud.length === 0 ? (
                 <div className="text-surface-500 text-sm space-y-2">
-                  <p>Aucune donnée de satisfaction renseignée.</p>
+                  <p>Aucune valeur renseignée pour les systèmes de caisse.</p>
                   <p className="text-surface-600 text-xs">
-                    Vérifiez que le board « Suivi clients par cp » contient une colonne nommée « Degré satisfaction client (engagement CP) » et que des valeurs sont renseignées.
+                    Vérifiez que le board « Suivi clients par cp » contient une colonne « Système de caisse actif » et que des libellés sont renseignés par ligne.
                   </p>
                 </div>
               ) : (
-                <ul className="space-y-2">
-                  {suiviKpis.satisfactionByClient.map((row, i) => (
-                    <li
-                      key={`${row.clientName}-${i}`}
-                      className="flex items-center justify-between rounded-lg bg-surface-800/50 border border-surface-700/50 px-3 py-2"
-                    >
-                      <span className="text-surface-200 truncate flex-1 mr-2">{row.clientName}</span>
-                      {row.status === 'satisfait' ? (
-                        <span className="shrink-0 flex items-center gap-1.5 text-green-500 font-medium" title="Satisfait">
-                          <span className="text-xl" aria-hidden>😊</span>
-                          <span>Satisfait</span>
-                        </span>
-                      ) : (
-                        <span className="shrink-0 flex items-center gap-1.5 text-red-500 font-medium" title="Pas satisfait">
-                          <span className="text-xl" aria-hidden>🙁</span>
-                          <span>Pas satisfait</span>
-                        </span>
-                      )}
-                    </li>
-                  ))}
-                </ul>
+                <>
+                  <div className="rounded-xl bg-surface-800/40 border border-surface-700/50 p-6 min-h-[12rem] flex items-center justify-center">
+                    <SystemeCaisseWordCloud entries={suiviKpis.systemeCaisseWordCloud} minPx={11} maxPx={58} />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-medium text-surface-400 mb-2">Effectif par système</h4>
+                    <ul className="space-y-2">
+                      {suiviKpis.systemeCaisseWordCloud.map((row, i) => (
+                        <li
+                          key={`${row.label}-${i}`}
+                          className="flex items-center justify-between rounded-lg bg-surface-800/50 border border-surface-700/50 px-3 py-2 text-sm"
+                        >
+                          <span className="text-surface-200 mr-2 break-words">{row.label}</span>
+                          <span
+                            className="shrink-0 font-semibold tabular-nums"
+                            style={{ color: DONUT_COLORS[i % DONUT_COLORS.length] }}
+                          >
+                            {row.count}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </>
               )}
             </div>
           </div>
