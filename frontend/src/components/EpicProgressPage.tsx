@@ -22,15 +22,6 @@ function formatHoursOnly(seconds: number): string {
 export const TICKET_PREFIXES = ['INT', 'FAC', 'CLI', 'OPT', 'NIM'] as const;
 export type TicketPrefixFilter = (typeof TICKET_PREFIXES)[number] | 'all';
 
-function getKeyPrefix(key: string): string {
-  return key.split('-')[0]?.toUpperCase() || '';
-}
-
-function filterChildrenByPrefix(children: EpicChildIssue[], prefix: TicketPrefixFilter): EpicChildIssue[] {
-  if (!prefix || prefix === 'all') return children;
-  return children.filter((c) => getKeyPrefix(c.issueKey) === prefix);
-}
-
 function getStatusLabel(statusCategoryKey: string | null): string {
   switch (statusCategoryKey) {
     case 'done':
@@ -75,7 +66,7 @@ function calculateSubtotals(items: EpicChildIssue[]): { estimate: number; spent:
 }
 
 // Composant pour afficher un enfant et ses sous-enfants
-function ChildIssueRow({ child, level = 0, prefixFilter = 'all' }: { child: EpicChildIssue; level?: number; prefixFilter?: TicketPrefixFilter }) {
+function ChildIssueRow({ child, level = 0 }: { child: EpicChildIssue; level?: number }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const hasChildren = child.children && child.children.length > 0;
   const indent = level * 24;
@@ -165,23 +156,17 @@ function ChildIssueRow({ child, level = 0, prefixFilter = 'all' }: { child: Epic
           </div>
         </td>
       </tr>
-      {isExpanded && hasChildren && filterChildrenByPrefix(child.children!, prefixFilter).map(subChild => (
-        <ChildIssueRow key={subChild.issueKey} child={subChild} level={level + 1} prefixFilter={prefixFilter} />
-      ))}
+      {isExpanded &&
+        hasChildren &&
+        (child.children ?? []).map((subChild) => (
+          <ChildIssueRow key={subChild.issueKey} child={subChild} level={level + 1} />
+        ))}
     </>
   );
 }
 
 // Modal de détail d'un Epic/Legend
-function EpicDetailModal({ 
-  epicKey, 
-  onClose,
-  prefixFilter = 'all',
-}: { 
-  epicKey: string; 
-  onClose: () => void;
-  prefixFilter?: TicketPrefixFilter;
-}) {
+function EpicDetailModal({ epicKey, onClose }: { epicKey: string; onClose: () => void }) {
   const [details, setDetails] = useState<EpicDetailsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -346,9 +331,9 @@ function EpicDetailModal({
                         </td>
                       </tr>
                     ) : (
-                      filterChildrenByPrefix(details.children ?? [], prefixFilter).map((child) => (
+                      (details.children ?? []).map((child) => (
                         <Fragment key={child.issueKey}>
-                          <ChildIssueRow child={child} level={0} prefixFilter={prefixFilter} />
+                          <ChildIssueRow child={child} level={0} />
                         </Fragment>
                       ))
                     )}
@@ -868,11 +853,7 @@ export function EpicProgressPage() {
 
       {/* Detail modal */}
       {selectedEpicKey && (
-        <EpicDetailModal 
-          epicKey={selectedEpicKey} 
-          onClose={() => setSelectedEpicKey(null)}
-          prefixFilter={prefixFilter}
-        />
+        <EpicDetailModal epicKey={selectedEpicKey} onClose={() => setSelectedEpicKey(null)} />
       )}
     </div>
   );
