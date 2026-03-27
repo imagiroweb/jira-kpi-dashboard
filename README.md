@@ -355,6 +355,13 @@ MICROSOFT_REDIRECT_URI=http://localhost:3000/auth/microsoft/callback
 - `GET /api/auth/me` - Infos utilisateur connecté
 - `GET /api/auth/verify` - Vérifier validité du token
 
+## 📦 Produit & Roadmap Adoria (Monday)
+
+La page **Produit** affiche les KPI Monday (Suivi clients, Roadmap Adoria 2026). La logique métier de la roadmap (filtres trimestre, PM, statuts, kanban) est documentée et testée séparément :
+
+- **[Documentation Roadmap Adoria / Produit](docs/produit-roadmap-adoria.md)**
+- Tests : `cd frontend && yarn test src/domain/roadmapAdoriaKpi.test.ts`
+
 ## 📈 Roadmap
 
 - [x] Authentification JWT
