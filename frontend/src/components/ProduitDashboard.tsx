@@ -20,6 +20,9 @@ import {
   ChevronDown,
   Info,
   Smartphone,
+  FileText,
+  Calculator,
+  Hourglass,
 } from 'lucide-react';
 import {
   PieChart,
@@ -39,16 +42,35 @@ import {
 } from 'recharts';
 import { mondayApi, MondayUser, MondayBoard, MondayColumn, MondayItem, MondayWorkspace } from '../services/api';
 import {
+  getMondayProduitCache,
+  setMondayProduitCache,
+  invalidateMondayProduitCache,
+  mondayProduitCacheKeys,
+  MONDAY_CACHE_TTL_BOOTSTRAP_MS,
+  getCachedBoardsList,
+  setCachedBoardsList,
+  getCachedBoardPayload,
+  setCachedBoardPayload,
+  type MondayBootstrapCachePayload,
+} from '../services/mondayProduitCache';
+import {
+  CP_REFERENT_KEYS,
   EMPTY_ROADMAP_KPIS,
+  SOLUTION_DOC_KEYS,
   STATUS_KEYS,
   calendarDaysInclusiveFromTodayToQuarterEnd,
   calendarQuarterFromDate,
   classifyRoadmapKanbanBucket,
   computeRoadmapKpis,
+  findColumnPreferSpecific,
   findRoadmapDateColumn,
+  getMondayItemNumericValue,
   getQuarterEndDate,
+  isRoadmapNumericKpiValueMissing,
+  resolveRoadmapMacroEstimationColumns,
   getRoadmapDateColumnRaw,
   getRoadmapItemStatusLabel,
+  isRoadmapSolutionDocValueMissing,
   isRoadmapStatusDone,
   parseRoadmapDateColumnEndDate,
   parseRoadmapDateColumnRange,
@@ -116,6 +138,22 @@ const SUIVI_UTILISATEURS_ACTIFS_COLUMN_ID = 'numeric_mkxpq040';
 /** ID de la colonne CDC déployé sur le board Suivi (Monday). */
 const SUIVI_CDC_DEPLOYE_COLUMN_ID = 'numeric_mkwxdthf';
 
+/** Écart relatif symétrique (%) entre deux valeurs Monday ; 0 si les deux sont nuls. */
+function mondayMacroEstimateDiffPct(a: number, b: number): number {
+  const m = Math.max(0, a);
+  const e = Math.max(0, b);
+  const denom = Math.max(m, e);
+  if (denom <= 0) return 0;
+  return (100 * Math.abs(m - e)) / denom;
+}
+
+const ROADMAP_MACRO_ESTIMATE_CHART_COLORS = {
+  okMacro: '#818cf8',
+  okEstimate: '#94a3b8',
+  warnMacro: '#f59e0b',
+  warnEstimate: '#ef4444',
+} as const;
+
 function findColumn(columns: MondayColumn[], keywords: string[]): MondayColumn | null {
   const normalize = (s: string) =>
     s
@@ -126,54 +164,13 @@ function findColumn(columns: MondayColumn[], keywords: string[]): MondayColumn |
   return columns.find((c) => keywords.some((k) => normalize(c.title).includes(normalize(k)))) ?? null;
 }
 
-/** Même principe que findColumn, mais essaie les mots-clés du plus long au plus court pour éviter qu’un terme trop court (ex. « satisfaction ») ne pointe vers la mauvaise colonne. */
-function findColumnPreferSpecific(columns: MondayColumn[], keywords: string[]): MondayColumn | null {
-  const normalize = (s: string) =>
-    s
-      .toLowerCase()
-      .trim()
-      .replace(/\u2019/g, "'")
-      .replace(/\u2018/g, "'");
-  const sorted = [...keywords].sort((a, b) => b.length - a.length);
-  for (const k of sorted) {
-    const nk = normalize(k);
-    const found = columns.find((c) => normalize(c.title).includes(nk));
-    if (found) return found;
-  }
-  return null;
-}
-
 function getItemValue(item: MondayItem, columnId: string): string {
   const cv = item.column_values?.find((c) => String(c.id) === String(columnId));
   return (cv?.text ?? cv?.value ?? '').toString().trim();
 }
 
-/** Extract numeric value from a Monday column (handles "numbers" type with value as JSON e.g. {"number": "5"}). */
-function getItemNumericValue(item: MondayItem, columnId: string): number {
-  const cv = item.column_values?.find((c) => String(c.id) === String(columnId));
-  if (!cv) return 0;
-  const text = (cv.text ?? '').toString().trim();
-  const rawValue = (cv.value ?? '').toString().trim();
-  // Monday API can sometimes return value as number at runtime
-  const rawVal = (cv as { value?: unknown }).value;
-  if (typeof rawVal === 'number' && Number.isFinite(rawVal)) return rawVal;
-  // Monday "numbers" column often returns value as JSON {"number": "5"} or similar
-  if (rawValue.startsWith('{')) {
-    try {
-      const o = JSON.parse(rawValue) as Record<string, unknown>;
-      const num = o.number ?? o.value ?? o.num;
-      if (num !== undefined && num !== null) {
-        const n = typeof num === 'number' ? num : parseNum(String(num));
-        return Number.isFinite(n) ? n : 0;
-      }
-    } catch {
-      // ignore
-    }
-  }
-  const fromText = parseNum(text || rawValue);
-  if (Number.isFinite(fromText)) return fromText;
-  return 0;
-}
+/** Extract numeric value from a Monday column (délègue au domaine Roadmap / Monday). */
+const getItemNumericValue = getMondayItemNumericValue;
 
 /** Libellé affiché pour une colonne Monday (texte, statut, liste, etc.). */
 function getItemColumnLabelText(item: MondayItem, columnId: string): string {
@@ -470,36 +467,124 @@ function SystemeCaisseWordCloud({
   );
 }
 
+function readInitialMondayBootstrap(): MondayBootstrapCachePayload | null {
+  if (typeof window === 'undefined') return null;
+  return getMondayProduitCache<MondayBootstrapCachePayload>(mondayProduitCacheKeys.bootstrap  );
+}
+
+/** Libellés axe Y du diagramme macro/estimation Roadmap : zoom au survol pour lire le nom complet. */
+function MacroEstimateYAxisTick({
+  x,
+  y,
+  payload,
+  chartRows,
+}: {
+  x: number;
+  y: number;
+  payload: { value?: string };
+  chartRows: { name: string; summary: string }[];
+}) {
+  const [hover, setHover] = useState(false);
+  const short = String(payload?.value ?? '');
+  const row = chartRows.find((r) => r.name === short);
+  const fullText = (row?.summary || short).trim() || short;
+  const labelW = 272;
+  return (
+    <foreignObject
+      x={x - labelW}
+      y={y - 20}
+      width={labelW}
+      height={44}
+      className="overflow-visible"
+      style={{ pointerEvents: 'all' }}
+    >
+      <div
+        className={`flex min-h-[20px] items-center justify-end text-right text-slate-400 pr-0.5 origin-right transition-transform duration-200 ease-out will-change-transform ${
+          hover ? 'scale-[1.22] text-[13px] leading-snug' : 'text-[10px] leading-tight'
+        }`}
+        onMouseEnter={() => setHover(true)}
+        onMouseLeave={() => setHover(false)}
+        title={fullText}
+      >
+        <span className="break-words max-w-full">{hover ? fullText : short}</span>
+      </div>
+    </foreignObject>
+  );
+}
+
 export function ProduitDashboard() {
-  const [configured, setConfigured] = useState<boolean | null>(null);
-  const [me, setMe] = useState<MondayUser | null>(null);
-  const [workspaces, setWorkspaces] = useState<MondayWorkspace[]>([]);
-  const [boards, setBoards] = useState<MondayBoard[]>([]);
-  const [loading, setLoading] = useState(true);
+  const initialBootstrap = readInitialMondayBootstrap();
+  const initialRoadmapWorkspace =
+    initialBootstrap?.workspaces?.find((w) => isRoadmapAdoria2026Workspace(w.name)) ?? null;
+  const [configured, setConfigured] = useState<boolean | null>(() =>
+    initialBootstrap !== null ? initialBootstrap.configured : null
+  );
+  const [me, setMe] = useState<MondayUser | null>(() => initialBootstrap?.me ?? null);
+  const [workspaces, setWorkspaces] = useState<MondayWorkspace[]>(() => initialBootstrap?.workspaces ?? []);
+  const [boards, setBoards] = useState<MondayBoard[]>(() =>
+    initialBootstrap?.configured ? getCachedBoardsList(undefined) ?? [] : []
+  );
+  const [loading, setLoading] = useState(() => initialBootstrap === null);
   const [error, setError] = useState<string | null>(null);
-  const [suiviBoardId, setSuiviBoardId] = useState<string>('');
-  const [suiviData, setSuiviData] = useState<{ columns: MondayColumn[]; items: MondayItem[] } | null>(null);
+  const [suiviBoardId, setSuiviBoardId] = useState(() =>
+    initialBootstrap?.configured && SUIVI_CLIENT_CP_BOARD_ID ? SUIVI_CLIENT_CP_BOARD_ID : ''
+  );
+  const [suiviData, setSuiviData] = useState<{ columns: MondayColumn[]; items: MondayItem[] } | null>(() => {
+    if (!initialBootstrap?.configured || !SUIVI_CLIENT_CP_BOARD_ID) return null;
+    return getCachedBoardPayload(SUIVI_CLIENT_CP_BOARD_ID, 500);
+  });
   const [suiviLoading, setSuiviLoading] = useState(false);
   const [showSystemeCaisseModal, setShowSystemeCaisseModal] = useState(false);
   const [showDelaiModal, setShowDelaiModal] = useState(false);
-  const [roadmapBoardId, setRoadmapBoardId] = useState<string>('');
-  const [roadmapData, setRoadmapData] = useState<{ columns: MondayColumn[]; items: MondayItem[] } | null>(null);
+  const [roadmapBoardId, setRoadmapBoardId] = useState(() =>
+    initialBootstrap?.configured ? ROADMAP_ADORIA_2026_BOARD_ID : ''
+  );
+  const [roadmapData, setRoadmapData] = useState<{ columns: MondayColumn[]; items: MondayItem[] } | null>(() => {
+    if (!initialBootstrap?.configured) return null;
+    return getCachedBoardPayload(ROADMAP_ADORIA_2026_BOARD_ID, 500);
+  });
   const [roadmapLoading, setRoadmapLoading] = useState(false);
-  const [roadmapBoards, setRoadmapBoards] = useState<MondayBoard[]>([]);
+  const [roadmapBoards, setRoadmapBoards] = useState<MondayBoard[]>(() =>
+    initialBootstrap?.configured && initialRoadmapWorkspace
+      ? getCachedBoardsList([initialRoadmapWorkspace.id]) ?? []
+      : []
+  );
   const [roadmapSectionOpen, setRoadmapSectionOpen] = useState(true);
+  /** Bloc « Projets par colonne » : replié par défaut, détail au clic. */
+  const [projetsParColonneOpen, setProjetsParColonneOpen] = useState(false);
+  /** Diagramme macro chiffrage vs estimation : replié par défaut. */
+  const [macroEstimateChartOpen, setMacroEstimateChartOpen] = useState(false);
+  /** Modale détail : lignes liées aux encarts CP / solution doc / RAF. */
+  const [roadmapIndicatorModal, setRoadmapIndicatorModal] = useState<
+    'cp' | 'solutionDoc' | 'macroChiffrage' | 'estimation' | 'raf' | null
+  >(null);
   const [suiviSectionOpen, setSuiviSectionOpen] = useState(true);
   const [detailBoard, setDetailBoard] = useState<'roadmap' | 'suivi' | null>(null);
   const [detailKpi, setDetailKpi] = useState<string | null>(null);
   const [roadmapQuarterFilter, setRoadmapQuarterFilter] = useState<'all' | 'Q1' | 'Q2' | 'Q3' | 'Q4'>('all');
   /** Statuts cochés ; vide = pas de filtre sur le statut (tous). */
   const [roadmapStatusSelected, setRoadmapStatusSelected] = useState<string[]>([]);
+  /** Incrémenté au rafraîchissement manuel pour forcer le rechargement des boards malgré le cache. */
+  const [reloadToken, setReloadToken] = useState(0);
 
   const roadmapWorkspace = useMemo(
     () => workspaces.find((w) => isRoadmapAdoria2026Workspace(w.name)) ?? null,
     [workspaces]
   );
 
-  const fetchStatusAndMe = useCallback(async () => {
+  const fetchStatusAndMe = useCallback(async (options?: { force?: boolean }) => {
+    const force = options?.force === true;
+    if (!force) {
+      const cached = getMondayProduitCache<MondayBootstrapCachePayload>(mondayProduitCacheKeys.bootstrap);
+      if (cached) {
+        setConfigured(cached.configured);
+        setMe(cached.me);
+        setWorkspaces(cached.workspaces);
+        setLoading(false);
+        setError(null);
+        return;
+      }
+    }
     setLoading(true);
     setError(null);
     try {
@@ -508,26 +593,46 @@ export function ProduitDashboard() {
         mondayApi.getMe(),
       ]);
       setConfigured(statusRes.configured);
+      let nextMe: MondayUser | null = null;
       if (meRes.success && meRes.me) {
         setMe(meRes.me);
+        nextMe = meRes.me;
       } else {
         setMe(null);
       }
+      let nextWorkspaces: MondayWorkspace[] = [];
       if (statusRes.configured) {
         const workspacesRes = await mondayApi.getWorkspaces();
         if (workspacesRes.success && workspacesRes.workspaces) {
           setWorkspaces(workspacesRes.workspaces);
+          nextWorkspaces = workspacesRes.workspaces;
         }
       }
+      setMondayProduitCache(
+        mondayProduitCacheKeys.bootstrap,
+        {
+          configured: statusRes.configured,
+          me: nextMe,
+          workspaces: nextWorkspaces,
+        } satisfies MondayBootstrapCachePayload,
+        MONDAY_CACHE_TTL_BOOTSTRAP_MS
+      );
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Erreur de connexion à l’API');
       setConfigured(false);
       setMe(null);
       setBoards([]);
+      invalidateMondayProduitCache();
     } finally {
       setLoading(false);
     }
   }, []);
+
+  const handleRefreshProduit = useCallback(() => {
+    invalidateMondayProduitCache();
+    setReloadToken((n) => n + 1);
+    void fetchStatusAndMe({ force: true });
+  }, [fetchStatusAndMe]);
 
   useEffect(() => {
     fetchStatusAndMe();
@@ -535,22 +640,33 @@ export function ProduitDashboard() {
 
   useEffect(() => {
     if (!configured) return;
+    const cached = getCachedBoardsList(undefined);
+    if (cached) {
+      setBoards(cached);
+      return;
+    }
     const load = async () => {
       try {
         const boardsRes = await mondayApi.getBoards(100, undefined);
         if (boardsRes.success && boardsRes.boards) {
           setBoards(boardsRes.boards);
+          setCachedBoardsList(undefined, boardsRes.boards);
         }
       } catch {
         setBoards([]);
       }
     };
-    load();
-  }, [configured]);
+    void load();
+  }, [configured, reloadToken]);
 
   useEffect(() => {
     if (!configured || !roadmapWorkspace) {
       setRoadmapBoards([]);
+      return;
+    }
+    const cached = getCachedBoardsList([roadmapWorkspace.id]);
+    if (cached) {
+      setRoadmapBoards(cached);
       return;
     }
     const load = async () => {
@@ -558,6 +674,7 @@ export function ProduitDashboard() {
         const boardsRes = await mondayApi.getBoards(100, [roadmapWorkspace.id]);
         if (boardsRes.success && boardsRes.boards) {
           setRoadmapBoards(boardsRes.boards);
+          setCachedBoardsList([roadmapWorkspace.id], boardsRes.boards);
         } else {
           setRoadmapBoards([]);
         }
@@ -565,12 +682,18 @@ export function ProduitDashboard() {
         setRoadmapBoards([]);
       }
     };
-    load();
-  }, [configured, roadmapWorkspace]);
+    void load();
+  }, [configured, roadmapWorkspace, reloadToken]);
 
   useEffect(() => {
     if (!suiviBoardId || !configured) {
       setSuiviData(null);
+      return;
+    }
+    const cached = getCachedBoardPayload(suiviBoardId, 500);
+    if (cached) {
+      setSuiviData(cached);
+      setSuiviLoading(false);
       return;
     }
     setSuiviLoading(true);
@@ -579,16 +702,24 @@ export function ProduitDashboard() {
       .getBoard(suiviBoardId, 500)
       .then((res) => {
         if (res.success && res.columns) {
-          setSuiviData({ columns: res.columns, items: Array.isArray(res.items) ? res.items : [] });
+          const data = { columns: res.columns, items: Array.isArray(res.items) ? res.items : [] };
+          setSuiviData(data);
+          setCachedBoardPayload(suiviBoardId, 500, data);
         }
       })
       .catch(() => setSuiviData(null))
       .finally(() => setSuiviLoading(false));
-  }, [suiviBoardId, configured]);
+  }, [suiviBoardId, configured, reloadToken]);
 
   useEffect(() => {
     if (!roadmapBoardId || !configured) {
       setRoadmapData(null);
+      return;
+    }
+    const cached = getCachedBoardPayload(roadmapBoardId, 500);
+    if (cached) {
+      setRoadmapData(cached);
+      setRoadmapLoading(false);
       return;
     }
     setRoadmapLoading(true);
@@ -597,11 +728,13 @@ export function ProduitDashboard() {
       .getBoard(roadmapBoardId, 500)
       .then((res) => {
         if (res.success && res.columns && res.items) {
-          setRoadmapData({ columns: res.columns, items: res.items });
+          const data = { columns: res.columns, items: res.items };
+          setRoadmapData(data);
+          setCachedBoardPayload(roadmapBoardId, 500, data);
         }
       })
       .finally(() => setRoadmapLoading(false));
-  }, [roadmapBoardId, configured]);
+  }, [roadmapBoardId, configured, reloadToken]);
 
   const suiviKpis = useMemo(() => {
     if (!suiviData) return null;
@@ -799,6 +932,61 @@ export function ProduitDashboard() {
     };
   }, [roadmapItemsForKpis, roadmapDateColumn, roadmapStatusColumn, roadmapQuarterFilter]);
 
+  /** Lignes filtrées (KPI) sans CP référent valide — pour modale. */
+  const roadmapItemsMissingCpDetail = useMemo(() => {
+    if (!roadmapData?.columns?.length || !roadmapItemsForKpis.length) return [];
+    const colCp = findColumn(roadmapData.columns, CP_REFERENT_KEYS);
+    if (!colCp) return [];
+    return roadmapItemsForKpis
+      .filter((item) => {
+        const cpVal = getItemValue(item, colCp.id);
+        const hasCp = !!cpVal && cpVal.toLowerCase() !== 'sans nom' && cpVal !== '-';
+        return !hasCp;
+      })
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'fr'));
+  }, [roadmapData?.columns, roadmapItemsForKpis]);
+
+  /** Lignes filtrées sans solution doc — pour modale. */
+  const roadmapItemsMissingSolDocDetail = useMemo(() => {
+    if (!roadmapData?.columns?.length || !roadmapItemsForKpis.length) return [];
+    const colSol = findColumn(roadmapData.columns, SOLUTION_DOC_KEYS);
+    if (!colSol) return [];
+    return roadmapItemsForKpis
+      .filter((item) => isRoadmapSolutionDocValueMissing(getItemValue(item, colSol.id)))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'fr'));
+  }, [roadmapData?.columns, roadmapItemsForKpis]);
+
+  /** Projets comptés dans le RAF (trimestre courant = filtre) — pour modale. */
+  const roadmapItemsRafDetail = useMemo(() => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const currentQ = calendarQuarterFromDate(now);
+    if (roadmapQuarterFilter === 'all' || !roadmapDateColumn || !roadmapStatusColumn) return [];
+    const selectedQ: CalendarQuarter =
+      roadmapQuarterFilter === 'Q1' ? 1 : roadmapQuarterFilter === 'Q2' ? 2 : roadmapQuarterFilter === 'Q3' ? 3 : 4;
+    if (currentQ !== selectedQ) return [];
+    const raf: MondayItem[] = [];
+    for (const item of roadmapItemsForKpis) {
+      const raw = getRoadmapDateColumnRaw(item, roadmapDateColumn.id);
+      const { end: endDate } = parseRoadmapDateColumnRange(raw);
+      if (!endDate) continue;
+      if (endDate.getFullYear() !== year || calendarQuarterFromDate(endDate) !== selectedQ) continue;
+      if (isRoadmapStatusDone(getRoadmapItemStatusLabel(item, roadmapStatusColumn))) continue;
+      raf.push(item);
+    }
+    raf.sort((a, b) => (a.name || '').localeCompare(b.name || '', 'fr'));
+    return raf;
+  }, [roadmapItemsForKpis, roadmapDateColumn, roadmapStatusColumn, roadmapQuarterFilter]);
+
+  const roadmapColCpForModal = useMemo(
+    () => (roadmapData?.columns ? findColumn(roadmapData.columns, CP_REFERENT_KEYS) : null),
+    [roadmapData?.columns]
+  );
+  const roadmapColSolForModal = useMemo(
+    () => (roadmapData?.columns ? findColumn(roadmapData.columns, SOLUTION_DOC_KEYS) : null),
+    [roadmapData?.columns]
+  );
+
   const roadmapKanbanBuckets = useMemo(() => {
     const now = new Date();
     const buckets: Record<RoadmapKanbanBucket, MondayItem[]> = {
@@ -819,6 +1007,72 @@ export function ProduitDashboard() {
     buckets.retard.sort(sortByName);
     return buckets;
   }, [roadmapItemsForKpis, roadmapStatusColumn, roadmapDateColumn]);
+
+  /** Colonnes Monday détectées pour le diagramme (valeurs = lignes filtrées comme les KPI Roadmap). */
+  const roadmapMacroEstColumns = useMemo(() => {
+    if (!roadmapData?.columns?.length) {
+      return { macro: null as MondayColumn | null, est: null as MondayColumn | null };
+    }
+    return resolveRoadmapMacroEstimationColumns(roadmapData.columns);
+  }, [roadmapData?.columns]);
+
+  /** Lignes sans macro chiffrage numérique valide (> 0) — modale. */
+  const roadmapItemsMissingMacroDetail = useMemo(() => {
+    if (!roadmapItemsForKpis.length) return [];
+    const col = roadmapMacroEstColumns.macro;
+    if (!col) return [];
+    return roadmapItemsForKpis
+      .filter((item) => isRoadmapNumericKpiValueMissing(item, col))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'fr'));
+  }, [roadmapItemsForKpis, roadmapMacroEstColumns.macro]);
+
+  /** Lignes sans estimation numérique valide (> 0) — modale. */
+  const roadmapItemsMissingEstimationDetail = useMemo(() => {
+    if (!roadmapItemsForKpis.length) return [];
+    const col = roadmapMacroEstColumns.est;
+    if (!col) return [];
+    return roadmapItemsForKpis
+      .filter((item) => isRoadmapNumericKpiValueMissing(item, col))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'fr'));
+  }, [roadmapItemsForKpis, roadmapMacroEstColumns.est]);
+
+  const roadmapMacroEstimateChartData = useMemo(() => {
+    const { macro, est } = roadmapMacroEstColumns;
+    if (!macro || !est) return [];
+    const out: {
+      name: string;
+      macroVal: number;
+      estimateVal: number;
+      diffPct: number;
+      diffOver10: boolean;
+      itemId: string;
+      summary: string;
+    }[] = [];
+    for (const item of roadmapItemsForKpis) {
+      const macroV = getItemNumericValue(item, macro.id);
+      const estV = getItemNumericValue(item, est.id);
+      if (macroV <= 0 && estV <= 0) continue;
+      const diffPct = mondayMacroEstimateDiffPct(macroV, estV);
+      const rawName = item.name?.trim() || 'Sans nom';
+      const name =
+        rawName.length > 28 ? `${rawName.slice(0, 26)}…` : rawName;
+      out.push({
+        name,
+        macroVal: Math.round(macroV * 10) / 10,
+        estimateVal: Math.round(estV * 10) / 10,
+        diffPct,
+        diffOver10: diffPct > 10,
+        itemId: item.id,
+        summary: item.name || '',
+      });
+    }
+    return out;
+  }, [roadmapItemsForKpis, roadmapMacroEstColumns]);
+
+  const roadmapMacroEstimateChartHeight = useMemo(() => {
+    const n = roadmapMacroEstimateChartData.length;
+    return Math.min(640, Math.max(220, 48 + n * 36));
+  }, [roadmapMacroEstimateChartData.length]);
 
   useEffect(() => {
     setRoadmapQuarterFilter('all');
@@ -866,7 +1120,7 @@ export function ProduitDashboard() {
             {error || 'Ajoutez MONDAY_API_KEY dans le fichier .env du backend pour connecter la page Produit à Monday.com.'}
           </p>
           <button
-            onClick={fetchStatusAndMe}
+            onClick={handleRefreshProduit}
             className="px-4 py-2 rounded-xl bg-primary-500/20 text-primary-300 border border-primary-500/40 hover:bg-primary-500/30 transition-colors inline-flex items-center gap-2"
           >
             <RefreshCw className="w-4 h-4" />
@@ -903,9 +1157,9 @@ export function ProduitDashboard() {
             </div>
           )}
           <button
-            onClick={fetchStatusAndMe}
+            onClick={handleRefreshProduit}
             className="p-2 rounded-xl bg-surface-800/80 border border-surface-700/50 hover:bg-surface-700/50 text-surface-400 hover:text-surface-200 transition-colors"
-            title="Rafraîchir"
+            title="Rafraîchir les données (ignore le cache)"
           >
             <RefreshCw className="w-4 h-4" />
           </button>
@@ -971,7 +1225,7 @@ export function ProduitDashboard() {
           {!roadmapLoading && roadmapKpis && (
             <div className="p-6 space-y-6">
               {(roadmapDateColumn || roadmapStatusColumn) && (
-                <div className="flex flex-wrap items-end gap-x-8 gap-y-3 pb-1 border-b border-surface-700/40">
+                <div className="flex flex-wrap items-start gap-x-8 gap-y-3 pb-1 border-b border-surface-700/40">
                   {roadmapDateColumn && (
                     <div className="flex flex-wrap items-center gap-3 min-w-0">
                       <span className="text-xs font-medium text-surface-500 uppercase tracking-wide shrink-0">
@@ -997,10 +1251,6 @@ export function ProduitDashboard() {
                           </button>
                         ))}
                       </div>
-                      <span className="text-xs text-surface-500 hidden lg:inline max-w-[34rem]">
-                        Filtre Q1–Q4 : année civile en cours uniquement ; 1ʳᵉ et 2ᵉ date dans le même trimestre (plages sur
-                        années passées exclues).
-                      </span>
                     </div>
                   )}
                   {roadmapStatusColumn && roadmapStatusOptions.length > 0 && (
@@ -1062,154 +1312,566 @@ export function ProduitDashboard() {
                     et/ou statut).
                   </div>
                 )}
-              {/* Vue projets : 4 colonnes (filtres actifs) */}
+              {/* Vue projets : 4 colonnes (filtres actifs) — replié par défaut */}
               {roadmapItemsForKpis.length > 0 && (
-                <div className="rounded-xl border border-surface-700/50 bg-surface-900/20 p-4">
-                  <h3 className="text-sm font-semibold text-surface-200 mb-1 flex items-center gap-2">
-                    <List className="w-4 h-4 text-amber-400" />
-                    Projets par colonne
-                  </h3>
-                  <p className="text-xs text-surface-500 mb-4">
-                    Vue des lignes visibles avec les filtres actifs — pas un tableau.
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
-                    {(
-                      [
-                        {
-                          key: 'done' as const,
-                          title: 'Done',
-                          subtitle: 'Statuts terminés',
-                          className:
-                            'border-emerald-500/35 bg-emerald-950/20',
-                          titleClass: 'text-emerald-200',
-                        },
-                        {
-                          key: 'todo' as const,
-                          title: 'To do',
-                          subtitle: 'À faire, backlog…',
-                          className: 'border-slate-500/35 bg-slate-900/40',
-                          titleClass: 'text-slate-200',
-                        },
-                        {
-                          key: 'encours' as const,
-                          title: 'En cours',
-                          subtitle: 'Tous les autres statuts',
-                          className: 'border-amber-500/35 bg-amber-950/15',
-                          titleClass: 'text-amber-200/95',
-                        },
-                        {
-                          key: 'retard' as const,
-                          title: 'En retard',
-                          subtitle: '2ᵉ date avant aujourd’hui (hors done)',
-                          className: 'border-red-500/40 bg-red-950/25',
-                          titleClass: 'text-red-200/95',
-                        },
-                      ] as const
-                    ).map((col) => {
-                      const items = roadmapKanbanBuckets[col.key];
-                      return (
-                        <div
-                          key={col.key}
-                          className={`flex flex-col rounded-xl border p-3 min-h-[8rem] max-h-[min(70vh,28rem)] ${col.className}`}
-                        >
-                          <div className="shrink-0 pb-2 border-b border-white/5 mb-2">
-                            <div className={`text-sm font-semibold ${col.titleClass}`}>{col.title}</div>
-                            <div className="text-[11px] text-surface-500 mt-0.5 leading-snug">{col.subtitle}</div>
-                            <div className="text-xs text-surface-400 tabular-nums mt-1">{items.length} projet(s)</div>
-                          </div>
-                          <ul className="space-y-2 overflow-y-auto flex-1 pr-1 text-sm">
-                            {items.map((item) => {
-                              const st = roadmapStatusColumn
-                                ? getRoadmapItemStatusLabel(item, roadmapStatusColumn)
-                                : null;
-                              const rawD = roadmapDateColumn
-                                ? getRoadmapDateColumnRaw(item, roadmapDateColumn.id)
-                                : '';
-                              const endD = rawD ? parseRoadmapDateColumnEndDate(rawD) : null;
-                              return (
-                                <li
-                                  key={item.id}
-                                  className="rounded-lg bg-surface-950/50 border border-surface-800/60 px-2.5 py-2"
-                                >
-                                  <div className="text-surface-100 font-medium leading-snug break-words">
-                                    {item.name || '—'}
-                                  </div>
-                                  {col.key === 'retard' && endD && (
-                                    <div className="text-[11px] text-red-300/90 tabular-nums mt-1">
-                                      Échéance {endD.toLocaleDateString('fr-FR')}
-                                    </div>
-                                  )}
-                                  {col.key === 'encours' && st && (
-                                    <div className="text-[11px] text-surface-500 mt-1 truncate" title={st}>
-                                      {st}
-                                    </div>
-                                  )}
-                                  {(col.key === 'todo' || col.key === 'done') && st && (
-                                    <div className="text-[11px] text-surface-500 mt-1 truncate" title={st}>
-                                      {st}
-                                    </div>
-                                  )}
-                                </li>
-                              );
-                            })}
-                          </ul>
-                        </div>
-                      );
-                    })}
-                  </div>
+                <div className="rounded-xl border border-surface-700/50 bg-surface-900/20 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setProjetsParColonneOpen((o) => !o)}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface-800/35 transition-colors"
+                    aria-expanded={projetsParColonneOpen}
+                  >
+                    <ChevronDown
+                      className={`w-5 h-5 text-surface-400 shrink-0 transition-transform ${projetsParColonneOpen ? '' : '-rotate-90'}`}
+                      aria-hidden
+                    />
+                    <List className="w-4 h-4 text-amber-400 shrink-0" />
+                    <h3 className="text-sm font-semibold text-surface-200">Projets par colonne</h3>
+                  </button>
+                  {projetsParColonneOpen && (
+                    <div className="px-4 pb-4 border-t border-surface-700/40">
+                      <p className="text-xs text-surface-500 mb-4 mt-3">
+                        Vue des lignes visibles avec les filtres actifs — pas un tableau.
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+                        {(
+                          [
+                            {
+                              key: 'done' as const,
+                              title: 'Done',
+                              subtitle: 'Statuts terminés',
+                              className:
+                                'border-emerald-500/35 bg-emerald-950/20',
+                              titleClass: 'text-emerald-200',
+                            },
+                            {
+                              key: 'todo' as const,
+                              title: 'To do',
+                              subtitle: 'À faire, backlog…',
+                              className: 'border-slate-500/35 bg-slate-900/40',
+                              titleClass: 'text-slate-200',
+                            },
+                            {
+                              key: 'encours' as const,
+                              title: 'En cours',
+                              subtitle: 'Tous les autres statuts',
+                              className: 'border-amber-500/35 bg-amber-950/15',
+                              titleClass: 'text-amber-200/95',
+                            },
+                            {
+                              key: 'retard' as const,
+                              title: 'En retard',
+                              subtitle: '2ᵉ date avant aujourd’hui (hors done)',
+                              className: 'border-red-500/40 bg-red-950/25',
+                              titleClass: 'text-red-200/95',
+                            },
+                          ] as const
+                        ).map((col) => {
+                          const items = roadmapKanbanBuckets[col.key];
+                          return (
+                            <div
+                              key={col.key}
+                              className={`flex flex-col rounded-xl border p-3 min-h-[8rem] max-h-[min(70vh,28rem)] ${col.className}`}
+                            >
+                              <div className="shrink-0 pb-2 border-b border-white/5 mb-2">
+                                <div className={`text-sm font-semibold ${col.titleClass}`}>{col.title}</div>
+                                <div className="text-[11px] text-surface-500 mt-0.5 leading-snug">{col.subtitle}</div>
+                                <div className="text-xs text-surface-400 tabular-nums mt-1">{items.length} projet(s)</div>
+                              </div>
+                              <ul className="space-y-2 overflow-y-auto flex-1 pr-1 text-sm">
+                                {items.map((item) => {
+                                  const st = roadmapStatusColumn
+                                    ? getRoadmapItemStatusLabel(item, roadmapStatusColumn)
+                                    : null;
+                                  const rawD = roadmapDateColumn
+                                    ? getRoadmapDateColumnRaw(item, roadmapDateColumn.id)
+                                    : '';
+                                  const endD = rawD ? parseRoadmapDateColumnEndDate(rawD) : null;
+                                  return (
+                                    <li
+                                      key={item.id}
+                                      className="rounded-lg bg-surface-950/50 border border-surface-800/60 px-2.5 py-2"
+                                    >
+                                      <div className="text-surface-100 font-medium leading-snug break-words">
+                                        {item.name || '—'}
+                                      </div>
+                                      {col.key === 'retard' && endD && (
+                                        <div className="text-[11px] text-red-300/90 tabular-nums mt-1">
+                                          Échéance {endD.toLocaleDateString('fr-FR')}
+                                        </div>
+                                      )}
+                                      {col.key === 'encours' && st && (
+                                        <div className="text-[11px] text-surface-500 mt-1 truncate" title={st}>
+                                          {st}
+                                        </div>
+                                      )}
+                                      {(col.key === 'todo' || col.key === 'done') && st && (
+                                        <div className="text-[11px] text-surface-500 mt-1 truncate" title={st}>
+                                          {st}
+                                        </div>
+                                      )}
+                                    </li>
+                                  );
+                                })}
+                              </ul>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
-              {/* 1. Ratio CP référent / features + nombre manquant */}
-              <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 space-y-4">
-                <h3 className="text-sm font-semibold text-surface-200 flex items-center gap-2">
-                  <User className="w-4 h-4 text-amber-400" />
-                  Ratio CP référent / features
-                </h3>
-                <div className="flex flex-wrap items-end gap-6">
-                  <div>
-                    <div className="text-2xl font-bold text-surface-100 tabular-nums">
+              {/* Ratio global + encarts indicateurs (CP, Solution doc, Macro, Estimation, RAF) */}
+              <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 sm:p-6 space-y-6">
+                <div className="flex flex-wrap items-end gap-4 justify-between">
+                  <h3 className="text-sm font-semibold text-surface-200 flex items-center gap-2">
+                    <User className="w-4 h-4 text-amber-400 shrink-0" />
+                    KPI roadmap
+                  </h3>
+                  <div className="text-right">
+                    <div className="text-2xl sm:text-3xl font-bold text-surface-100 tabular-nums leading-none">
                       {roadmapKpis.withCpReferent} / {roadmapKpis.totalFeatures}
                     </div>
-                    <div className="text-sm text-surface-500 mt-0.5">
+                    <div className="text-xs sm:text-sm text-surface-500 mt-1">
                       {roadmapKpis.ratioCpReferentPct.toFixed(1)} % des lignes ont un CP référent
                     </div>
                   </div>
-                  <div
-                    className={`px-4 py-2 rounded-xl border ${
-                      roadmapKpis.missingCpReferent > 0
-                        ? 'bg-amber-500/10 border-amber-500/40 text-amber-200'
-                        : 'bg-green-500/10 border-green-500/40 text-green-200'
-                    }`}
-                  >
-                    <span className="text-sm font-medium">
-                      {roadmapKpis.missingCpReferent > 0
-                        ? `Il manque ${roadmapKpis.missingCpReferent} nom(s) dans la colonne CP RÉFÉRENT`
-                        : 'Toutes les lignes ont un CP référent'}
-                    </span>
-                  </div>
                 </div>
 
-                {roadmapCpEncartIndicators.showRaf && roadmapCpEncartIndicators.rafNotDoneCount > 0 && (
-                  <div className="flex gap-3 rounded-xl border border-amber-500/45 bg-amber-500/10 px-4 py-3 text-amber-100/95">
-                    <AlertTriangle className="w-5 h-5 shrink-0 text-amber-400 mt-0.5" aria-hidden />
-                    <div className="text-sm leading-relaxed">
-                      <p className="font-medium text-amber-100">RAF sur le trimestre en cours</p>
-                      <p className="mt-1 text-amber-100/90">
-                        Il reste{' '}
-                        <strong className="text-amber-50 tabular-nums">
-                          {roadmapCpEncartIndicators.rafNotDoneCount}
-                        </strong>{' '}
-                        projet(s) non terminé(s) (hors statuts considérés comme faits) à boucler avant la fin du{' '}
-                        {roadmapQuarterFilter} {new Date().getFullYear()} (
-                        {roadmapCpEncartIndicators.quarterEndLabel}) — soit{' '}
-                        <strong className="tabular-nums">{roadmapCpEncartIndicators.daysLeftInQuarter}</strong> jour(s)
-                        calendaire(s) restant(s) à compter d’aujourd’hui.
-                      </p>
+                <div
+                  className={`grid gap-3 justify-items-center sm:justify-items-stretch ${
+                    roadmapCpEncartIndicators.showRaf
+                      ? 'grid-cols-2 sm:grid-cols-3 xl:grid-cols-5'
+                      : 'grid-cols-2 lg:grid-cols-4'
+                  }`}
+                >
+                  {/* Encarts compacts : CP / Solution doc / Macro / Estimation / RAF */}
+                  {/* CP référent manquants */}
+                  <button
+                    type="button"
+                    onClick={() => setRoadmapIndicatorModal('cp')}
+                    className={`rounded-lg border flex flex-col w-[7.5rem] h-[7.5rem] sm:w-[8.25rem] sm:h-[8.25rem] mx-auto sm:mx-0 p-[9px] justify-between gap-1 text-left font-inherit cursor-pointer transition-transform hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-amber-500/50 ${
+                      roadmapKpis.missingCpReferent > 0
+                        ? 'bg-amber-500/10 border-amber-500/45'
+                        : 'bg-green-500/10 border-green-500/45'
+                    }`}
+                  >
+                    <div className="flex items-start gap-1.5 min-h-0">
+                      <User
+                        className={`w-[18px] h-[18px] shrink-0 mt-0.5 ${
+                          roadmapKpis.missingCpReferent > 0 ? 'text-amber-400' : 'text-green-400'
+                        }`}
+                        aria-hidden
+                      />
+                      <h4
+                        className={`text-[11px] font-semibold uppercase tracking-wide leading-tight ${
+                          roadmapKpis.missingCpReferent > 0 ? 'text-amber-100/95' : 'text-green-100/95'
+                        }`}
+                      >
+                        CP référent manquants
+                      </h4>
                     </div>
-                  </div>
-                )}
+                    <div className="flex flex-1 items-center justify-center min-h-0">
+                      <span
+                        className={`text-3xl font-bold tabular-nums leading-none ${
+                          roadmapKpis.missingCpReferent > 0 ? 'text-amber-50' : 'text-green-50'
+                        }`}
+                      >
+                        {roadmapKpis.missingCpReferent}
+                      </span>
+                    </div>
+                    <p
+                      className={`text-[9px] text-center leading-tight line-clamp-2 ${
+                        roadmapKpis.missingCpReferent > 0 ? 'text-amber-200/85' : 'text-green-200/85'
+                      }`}
+                    >
+                      {roadmapKpis.missingCpReferent === 0
+                        ? 'Toutes les lignes ont un CP référent.'
+                        : `Sur ${roadmapKpis.totalFeatures} ligne(s) (filtre).`}
+                    </p>
+                  </button>
 
+                  {/* Solution doc manquant */}
+                  <button
+                    type="button"
+                    onClick={() => setRoadmapIndicatorModal('solutionDoc')}
+                    className={`rounded-lg border flex flex-col w-[7.5rem] h-[7.5rem] sm:w-[8.25rem] sm:h-[8.25rem] mx-auto sm:mx-0 p-[9px] justify-between gap-1 text-left font-inherit cursor-pointer transition-transform hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-amber-500/50 ${
+                      !roadmapKpis.hasSolutionDocColumn
+                        ? 'bg-surface-800/80 border-surface-600/60'
+                        : roadmapKpis.missingSolutionDoc > 0
+                          ? 'bg-amber-500/10 border-amber-500/45'
+                          : 'bg-green-500/10 border-green-500/45'
+                    }`}
+                  >
+                    <div className="flex items-start gap-1.5 min-h-0">
+                      <FileText
+                        className={`w-[18px] h-[18px] shrink-0 mt-0.5 ${
+                          !roadmapKpis.hasSolutionDocColumn
+                            ? 'text-surface-500'
+                            : roadmapKpis.missingSolutionDoc > 0
+                              ? 'text-amber-400'
+                              : 'text-green-400'
+                        }`}
+                        aria-hidden
+                      />
+                      <h4
+                        className={`text-[11px] font-semibold uppercase tracking-wide leading-tight ${
+                          !roadmapKpis.hasSolutionDocColumn
+                            ? 'text-surface-400'
+                            : roadmapKpis.missingSolutionDoc > 0
+                              ? 'text-amber-100/95'
+                              : 'text-green-100/95'
+                        }`}
+                      >
+                        Solution doc manquant
+                      </h4>
+                    </div>
+                    <div className="flex flex-1 items-center justify-center min-h-0">
+                      <span
+                        className={`text-3xl font-bold tabular-nums leading-none ${
+                          !roadmapKpis.hasSolutionDocColumn
+                            ? 'text-surface-500'
+                            : roadmapKpis.missingSolutionDoc > 0
+                              ? 'text-amber-50'
+                              : 'text-green-50'
+                        }`}
+                      >
+                        {!roadmapKpis.hasSolutionDocColumn ? '—' : roadmapKpis.missingSolutionDoc}
+                      </span>
+                    </div>
+                    <p
+                      className={`text-[9px] text-center leading-tight line-clamp-2 ${
+                        !roadmapKpis.hasSolutionDocColumn
+                          ? 'text-surface-500'
+                          : roadmapKpis.missingSolutionDoc > 0
+                            ? 'text-amber-200/85'
+                            : 'text-green-200/85'
+                      }`}
+                    >
+                      {!roadmapKpis.hasSolutionDocColumn
+                        ? 'Colonne absente.'
+                        : roadmapKpis.missingSolutionDoc === 0
+                          ? 'Toutes les lignes renseignées.'
+                          : 'Vide ou « - ».'}
+                    </p>
+                  </button>
+
+                  {/* Macro chiffrage manquant */}
+                  <button
+                    type="button"
+                    onClick={() => setRoadmapIndicatorModal('macroChiffrage')}
+                    className={`rounded-lg border flex flex-col w-[7.5rem] h-[7.5rem] sm:w-[8.25rem] sm:h-[8.25rem] mx-auto sm:mx-0 p-[9px] justify-between gap-1 text-left font-inherit cursor-pointer transition-transform hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-amber-500/50 ${
+                      !roadmapKpis.hasMacroChiffrageColumn
+                        ? 'bg-surface-800/80 border-surface-600/60'
+                        : roadmapKpis.missingMacroChiffrage > 0
+                          ? 'bg-amber-500/10 border-amber-500/45'
+                          : 'bg-green-500/10 border-green-500/45'
+                    }`}
+                  >
+                    <div className="flex items-start gap-1.5 min-h-0">
+                      <Calculator
+                        className={`w-[18px] h-[18px] shrink-0 mt-0.5 ${
+                          !roadmapKpis.hasMacroChiffrageColumn
+                            ? 'text-surface-500'
+                            : roadmapKpis.missingMacroChiffrage > 0
+                              ? 'text-amber-400'
+                              : 'text-green-400'
+                        }`}
+                        aria-hidden
+                      />
+                      <h4
+                        className={`text-[10px] font-semibold uppercase tracking-wide leading-tight line-clamp-2 ${
+                          !roadmapKpis.hasMacroChiffrageColumn
+                            ? 'text-surface-400'
+                            : roadmapKpis.missingMacroChiffrage > 0
+                              ? 'text-amber-100/95'
+                              : 'text-green-100/95'
+                        }`}
+                      >
+                        Macro chiffrage manquant
+                      </h4>
+                    </div>
+                    <div className="flex flex-1 items-center justify-center min-h-0">
+                      <span
+                        className={`text-3xl font-bold tabular-nums leading-none ${
+                          !roadmapKpis.hasMacroChiffrageColumn
+                            ? 'text-surface-500'
+                            : roadmapKpis.missingMacroChiffrage > 0
+                              ? 'text-amber-50'
+                              : 'text-green-50'
+                        }`}
+                      >
+                        {!roadmapKpis.hasMacroChiffrageColumn ? '—' : roadmapKpis.missingMacroChiffrage}
+                      </span>
+                    </div>
+                    <p
+                      className={`text-[9px] text-center leading-tight line-clamp-2 ${
+                        !roadmapKpis.hasMacroChiffrageColumn
+                          ? 'text-surface-500'
+                          : roadmapKpis.missingMacroChiffrage > 0
+                            ? 'text-amber-200/85'
+                            : 'text-green-200/85'
+                      }`}
+                    >
+                      {!roadmapKpis.hasMacroChiffrageColumn
+                        ? 'Colonne absente.'
+                        : roadmapKpis.missingMacroChiffrage === 0
+                          ? 'Toutes les lignes renseignées.'
+                          : 'Vide, « - » ou ≤ 0.'}
+                    </p>
+                  </button>
+
+                  {/* Estimation manquante */}
+                  <button
+                    type="button"
+                    onClick={() => setRoadmapIndicatorModal('estimation')}
+                    className={`rounded-lg border flex flex-col w-[7.5rem] h-[7.5rem] sm:w-[8.25rem] sm:h-[8.25rem] mx-auto sm:mx-0 p-[9px] justify-between gap-1 text-left font-inherit cursor-pointer transition-transform hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-amber-500/50 ${
+                      !roadmapKpis.hasEstimationColumn
+                        ? 'bg-surface-800/80 border-surface-600/60'
+                        : roadmapKpis.missingEstimation > 0
+                          ? 'bg-amber-500/10 border-amber-500/45'
+                          : 'bg-green-500/10 border-green-500/45'
+                    }`}
+                  >
+                    <div className="flex items-start gap-1.5 min-h-0">
+                      <Hourglass
+                        className={`w-[18px] h-[18px] shrink-0 mt-0.5 ${
+                          !roadmapKpis.hasEstimationColumn
+                            ? 'text-surface-500'
+                            : roadmapKpis.missingEstimation > 0
+                              ? 'text-amber-400'
+                              : 'text-green-400'
+                        }`}
+                        aria-hidden
+                      />
+                      <h4
+                        className={`text-[10px] font-semibold uppercase tracking-wide leading-tight line-clamp-2 ${
+                          !roadmapKpis.hasEstimationColumn
+                            ? 'text-surface-400'
+                            : roadmapKpis.missingEstimation > 0
+                              ? 'text-amber-100/95'
+                              : 'text-green-100/95'
+                        }`}
+                      >
+                        Estimation manquante
+                      </h4>
+                    </div>
+                    <div className="flex flex-1 items-center justify-center min-h-0">
+                      <span
+                        className={`text-3xl font-bold tabular-nums leading-none ${
+                          !roadmapKpis.hasEstimationColumn
+                            ? 'text-surface-500'
+                            : roadmapKpis.missingEstimation > 0
+                              ? 'text-amber-50'
+                              : 'text-green-50'
+                        }`}
+                      >
+                        {!roadmapKpis.hasEstimationColumn ? '—' : roadmapKpis.missingEstimation}
+                      </span>
+                    </div>
+                    <p
+                      className={`text-[9px] text-center leading-tight line-clamp-2 ${
+                        !roadmapKpis.hasEstimationColumn
+                          ? 'text-surface-500'
+                          : roadmapKpis.missingEstimation > 0
+                            ? 'text-amber-200/85'
+                            : 'text-green-200/85'
+                      }`}
+                    >
+                      {!roadmapKpis.hasEstimationColumn
+                        ? 'Colonne absente.'
+                        : roadmapKpis.missingEstimation === 0
+                          ? 'Toutes les lignes renseignées.'
+                          : 'Vide, « - » ou ≤ 0.'}
+                    </p>
+                  </button>
+
+                  {/* RAF sur le trimestre en cours */}
+                  {roadmapCpEncartIndicators.showRaf && (
+                    <button
+                      type="button"
+                      onClick={() => setRoadmapIndicatorModal('raf')}
+                      className={`rounded-lg border flex flex-col w-[7.5rem] h-[7.5rem] sm:w-[8.25rem] sm:h-[8.25rem] mx-auto sm:mx-0 p-[9px] justify-between gap-1 text-left font-inherit cursor-pointer transition-transform hover:scale-[1.02] focus:outline-none focus:ring-2 focus:ring-amber-500/50 ${
+                        roadmapCpEncartIndicators.rafNotDoneCount > 0
+                          ? 'bg-amber-500/10 border-amber-500/45'
+                          : 'bg-green-500/10 border-green-500/45'
+                      }`}
+                    >
+                      <div className="flex items-start gap-1.5 min-h-0">
+                        <AlertTriangle
+                          className={`w-[18px] h-[18px] shrink-0 mt-0.5 ${
+                            roadmapCpEncartIndicators.rafNotDoneCount > 0 ? 'text-amber-400' : 'text-green-400'
+                          }`}
+                          aria-hidden
+                        />
+                        <h4
+                          className={`text-[9px] font-semibold uppercase tracking-wide leading-tight line-clamp-2 ${
+                            roadmapCpEncartIndicators.rafNotDoneCount > 0
+                              ? 'text-amber-100/95'
+                              : 'text-green-100/95'
+                          }`}
+                        >
+                          RAF sur le trimestre en cours
+                        </h4>
+                      </div>
+                      <div className="flex flex-1 items-center justify-center min-h-0">
+                        <span
+                          className={`text-3xl font-bold tabular-nums leading-none ${
+                            roadmapCpEncartIndicators.rafNotDoneCount > 0 ? 'text-amber-50' : 'text-green-50'
+                          }`}
+                        >
+                          {roadmapCpEncartIndicators.rafNotDoneCount}
+                        </span>
+                      </div>
+                      <p
+                        className={`text-[9px] text-center leading-tight line-clamp-3 ${
+                          roadmapCpEncartIndicators.rafNotDoneCount > 0 ? 'text-amber-200/85' : 'text-green-200/85'
+                        }`}
+                        title={`${roadmapQuarterFilter} ${new Date().getFullYear()} · fin ${roadmapCpEncartIndicators.quarterEndLabel}`}
+                      >
+                        {roadmapQuarterFilter} {new Date().getFullYear()} ·{' '}
+                        <span className="tabular-nums font-medium text-surface-200">
+                          {roadmapCpEncartIndicators.daysLeftInQuarter}
+                        </span>
+                        j. rest. · fin {roadmapCpEncartIndicators.quarterEndLabel}
+                      </p>
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {/* Macro chiffrage vs estimation — replié par défaut (comme « Projets par colonne ») */}
+              {roadmapData && (
+                <div className="rounded-xl border border-surface-700/50 bg-surface-900/20 overflow-hidden">
+                  <button
+                    type="button"
+                    onClick={() => setMacroEstimateChartOpen((o) => !o)}
+                    className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-surface-800/35 transition-colors"
+                    aria-expanded={macroEstimateChartOpen}
+                  >
+                    <ChevronDown
+                      className={`w-5 h-5 text-surface-400 shrink-0 transition-transform ${macroEstimateChartOpen ? '' : '-rotate-90'}`}
+                      aria-hidden
+                    />
+                    <BarChart3 className="w-4 h-4 text-amber-400 shrink-0" />
+                    <h3 className="text-sm font-semibold text-surface-200">
+                      Macro chiffrage vs estimation (Roadmap Adoria 2026)
+                    </h3>
+                  </button>
+                  {macroEstimateChartOpen && (
+                    <div className="px-4 pb-4 sm:px-5 sm:pb-5 border-t border-surface-700/40">
+                      <p className="text-xs text-surface-500 mb-3 mt-3">
+                        Valeurs numériques sur les lignes filtrées (trimestre Q1–Q4 / année en cours + statuts), comme les KPI
+                        Roadmap au-dessus — pas le détail board brut.
+                        {roadmapMacroEstColumns.macro && roadmapMacroEstColumns.est && (
+                          <>
+                            {' '}
+                            Colonnes : « {roadmapMacroEstColumns.macro.title} » · « {roadmapMacroEstColumns.est.title} ».
+                          </>
+                        )}{' '}
+                        Écart relatif &gt; 10 % : barres{' '}
+                        <span className="text-amber-400">ambre</span> / <span className="text-red-400">rouge</span> ; sinon{' '}
+                        <span className="text-indigo-400">indigo</span> / <span className="text-slate-400">gris</span>.
+                      </p>
+                      {!roadmapMacroEstColumns.macro || !roadmapMacroEstColumns.est ? (
+                        <p className="text-sm text-surface-500">
+                          Colonnes introuvables : ajoutez sur Monday une colonne dont le titre contient « macro chiffrage » et
+                          une contenant « estimation » (ou « estimate », « chiffrage initial »…).
+                        </p>
+                      ) : roadmapItemsForKpis.length === 0 && (roadmapData?.items?.length ?? 0) > 0 ? (
+                        <p className="text-sm text-amber-200/90">
+                          Aucune ligne ne correspond aux filtres trimestre / statut — le diagramme est vide.
+                        </p>
+                      ) : roadmapMacroEstimateChartData.length === 0 ? (
+                        <p className="text-sm text-surface-500">
+                          Aucune ligne filtrée avec au moins une valeur renseignée dans ces deux colonnes.
+                        </p>
+                      ) : (
+                        <div className="w-full overflow-visible" style={{ height: roadmapMacroEstimateChartHeight }}>
+                          <ResponsiveContainer width="100%" height="100%" className="[&_.recharts-surface]:overflow-visible">
+                            <BarChart
+                              layout="vertical"
+                              data={roadmapMacroEstimateChartData}
+                              margin={{ top: 8, right: 16, left: 8, bottom: 8 }}
+                              barCategoryGap="12%"
+                            >
+                              <CartesianGrid strokeDasharray="3 3" stroke="rgba(100,100,120,0.25)" horizontal={false} />
+                              <XAxis
+                                type="number"
+                                tick={{ fill: 'rgb(148, 163, 184)', fontSize: 11 }}
+                              />
+                              <YAxis
+                                type="category"
+                                dataKey="name"
+                                width={276}
+                                interval={0}
+                                tick={(tickProps: { x: number; y: number; payload: { value?: string } }) => (
+                                  <MacroEstimateYAxisTick
+                                    x={tickProps.x}
+                                    y={tickProps.y}
+                                    payload={tickProps.payload}
+                                    chartRows={roadmapMacroEstimateChartData.map((d) => ({
+                                      name: d.name,
+                                      summary: d.summary,
+                                    }))}
+                                  />
+                                )}
+                              />
+                              <Tooltip
+                                contentStyle={{
+                                  backgroundColor: 'rgba(30, 30, 40, 0.96)',
+                                  border: '1px solid rgba(100, 100, 120, 0.35)',
+                                  borderRadius: '8px',
+                                  fontSize: '12px',
+                                }}
+                                labelStyle={{ color: 'rgb(226, 232, 240)' }}
+                                formatter={(value: number, name: string) => [value, name]}
+                                labelFormatter={(_label, payload) => {
+                                  const p = payload?.[0]?.payload as
+                                    | { summary?: string; diffPct?: number }
+                                    | undefined;
+                                  const sum = p?.summary
+                                    ? `${p.summary.slice(0, 120)}${p.summary.length > 120 ? '…' : ''}`
+                                    : '';
+                                  return sum
+                                    ? `${sum} — écart ${(p?.diffPct ?? 0).toFixed(1)} %`
+                                    : `Écart ${(p?.diffPct ?? 0).toFixed(1)} %`;
+                                }}
+                              />
+                              <Legend wrapperStyle={{ fontSize: '12px', paddingTop: 8 }} />
+                              <Bar dataKey="macroVal" name="Macro chiffrage">
+                                {roadmapMacroEstimateChartData.map((entry, index) => (
+                                  <Cell
+                                    key={`rm-${entry.itemId}-${index}`}
+                                    fill={
+                                      entry.diffOver10
+                                        ? ROADMAP_MACRO_ESTIMATE_CHART_COLORS.warnMacro
+                                        : ROADMAP_MACRO_ESTIMATE_CHART_COLORS.okMacro
+                                    }
+                                  />
+                                ))}
+                              </Bar>
+                              <Bar dataKey="estimateVal" name="Estimation">
+                                {roadmapMacroEstimateChartData.map((entry, index) => (
+                                  <Cell
+                                    key={`re-${entry.itemId}-${index}`}
+                                    fill={
+                                      entry.diffOver10
+                                        ? ROADMAP_MACRO_ESTIMATE_CHART_COLORS.warnEstimate
+                                        : ROADMAP_MACRO_ESTIMATE_CHART_COLORS.okEstimate
+                                    }
+                                  />
+                                ))}
+                              </Bar>
+                            </BarChart>
+                          </ResponsiveContainer>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Répartitions CP / PM / Statut — grille responsive (côte à côte sur xl) */}
               {(roadmapKpis.byCpReferent.length > 0 ||
@@ -1379,7 +2041,7 @@ export function ProduitDashboard() {
           )}
           {!roadmapLoading && roadmapBoardId && (roadmapData?.items?.length ?? 0) > 0 && !roadmapKpis && (
             <div className="p-6 text-amber-200/90 text-sm">
-              Colonnes attendues : « CP RÉFÉRENT » (ou similaire) et « Status » / « Statut » pour les indicateurs.
+              Colonnes attendues : « CP RÉFÉRENT » (ou similaire), « SOLUTION DOC » (vide ou « - » = manquant), « Status » / « Statut ».
             </div>
           )}
             </>
@@ -1764,6 +2426,264 @@ export function ProduitDashboard() {
           </>
         )}
         </section>
+
+      {/* Modale — détail lignes encarts Roadmap (CP / solution doc / macro / estimation / RAF) */}
+      {roadmapIndicatorModal && roadmapData && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          onClick={() => setRoadmapIndicatorModal(null)}
+        >
+          <div
+            className="bg-surface-900 border border-surface-700 rounded-2xl shadow-xl w-full max-w-3xl max-h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-surface-700">
+              <h3 className="text-lg font-semibold text-surface-100 pr-4">
+                {roadmapIndicatorModal === 'cp' && 'CP référent manquant — détail des lignes'}
+                {roadmapIndicatorModal === 'solutionDoc' && 'Solution doc manquant — détail des lignes'}
+                {roadmapIndicatorModal === 'macroChiffrage' && 'Macro chiffrage manquant — détail des lignes'}
+                {roadmapIndicatorModal === 'estimation' && 'Estimation manquante — détail des lignes'}
+                {roadmapIndicatorModal === 'raf' && 'RAF (trimestre en cours) — projets non terminés'}
+              </h3>
+              <button
+                type="button"
+                onClick={() => setRoadmapIndicatorModal(null)}
+                className="p-2 rounded-lg hover:bg-surface-800 text-surface-400 hover:text-surface-200 shrink-0"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <p className="px-4 pt-3 text-xs text-surface-500">
+              Projets / lignes correspondant à l&apos;indicateur, avec les mêmes filtres KPI (trimestre / statut) que la
+              section Roadmap.
+            </p>
+            <div className="p-4 overflow-auto flex-1 min-h-0">
+              {roadmapIndicatorModal === 'cp' && !roadmapColCpForModal && (
+                <p className="text-sm text-surface-500">
+                  Colonne « CP RÉFÉRENT » (ou similaire) introuvable sur ce board.
+                </p>
+              )}
+              {roadmapIndicatorModal === 'solutionDoc' && !roadmapColSolForModal && (
+                <p className="text-sm text-surface-500">Colonne « SOLUTION DOC » introuvable sur ce board.</p>
+              )}
+              {roadmapIndicatorModal === 'macroChiffrage' && !roadmapMacroEstColumns.macro && (
+                <p className="text-sm text-surface-500">
+                  Colonne « macro chiffrage » (titre contenant ce libellé) introuvable sur ce board.
+                </p>
+              )}
+              {roadmapIndicatorModal === 'estimation' && !roadmapMacroEstColumns.est && (
+                <p className="text-sm text-surface-500">
+                  Colonne « estimation » (titre contenant estimation, estimate, chiffrage initial…) introuvable sur ce board.
+                </p>
+              )}
+              {roadmapIndicatorModal === 'cp' && roadmapColCpForModal && roadmapItemsMissingCpDetail.length === 0 && (
+                <p className="text-sm text-surface-500">Aucune ligne sans CP référent sur les filtres actuels.</p>
+              )}
+              {roadmapIndicatorModal === 'solutionDoc' && roadmapColSolForModal && roadmapItemsMissingSolDocDetail.length === 0 && (
+                <p className="text-sm text-surface-500">Toutes les lignes filtrées ont une solution doc renseignée.</p>
+              )}
+              {roadmapIndicatorModal === 'raf' && roadmapItemsRafDetail.length === 0 && (
+                <p className="text-sm text-surface-500">
+                  Aucun projet à boucler sur ce périmètre (filtre trimestre = trimestre calendaire en cours, échéance dans
+                  le trimestre, statut non terminé).
+                </p>
+              )}
+              {roadmapIndicatorModal === 'macroChiffrage' &&
+                roadmapMacroEstColumns.macro &&
+                roadmapItemsMissingMacroDetail.length === 0 && (
+                  <p className="text-sm text-surface-500">
+                    Toutes les lignes filtrées ont un macro chiffrage numérique &gt; 0.
+                  </p>
+                )}
+              {roadmapIndicatorModal === 'estimation' &&
+                roadmapMacroEstColumns.est &&
+                roadmapItemsMissingEstimationDetail.length === 0 && (
+                  <p className="text-sm text-surface-500">
+                    Toutes les lignes filtrées ont une estimation numérique &gt; 0.
+                  </p>
+                )}
+              {roadmapIndicatorModal === 'cp' && roadmapColCpForModal && roadmapItemsMissingCpDetail.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-surface-700/50">
+                        <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">Nom</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">CP référent</th>
+                        {roadmapStatusColumn && (
+                          <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">Statut</th>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {roadmapItemsMissingCpDetail.map((item) => (
+                        <tr key={item.id} className="border-b border-surface-700/30">
+                          <td className="py-2 px-3 text-surface-200 align-top">{item.name || '—'}</td>
+                          <td
+                            className="py-2 px-3 text-surface-400 align-top max-w-[16rem]"
+                            title={getItemValue(item, roadmapColCpForModal.id)}
+                          >
+                            {getItemValue(item, roadmapColCpForModal.id) || '—'}
+                          </td>
+                          {roadmapStatusColumn && (
+                            <td className="py-2 px-3 text-surface-400 align-top">
+                              {getRoadmapItemStatusLabel(item, roadmapStatusColumn)}
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {roadmapIndicatorModal === 'solutionDoc' && roadmapColSolForModal && roadmapItemsMissingSolDocDetail.length > 0 && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-surface-700/50">
+                        <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">Nom</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">Solution doc</th>
+                        {roadmapStatusColumn && (
+                          <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">Statut</th>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {roadmapItemsMissingSolDocDetail.map((item) => (
+                        <tr key={item.id} className="border-b border-surface-700/30">
+                          <td className="py-2 px-3 text-surface-200 align-top">{item.name || '—'}</td>
+                          <td
+                            className="py-2 px-3 text-surface-400 align-top max-w-[16rem]"
+                            title={getItemValue(item, roadmapColSolForModal.id)}
+                          >
+                            {getItemValue(item, roadmapColSolForModal.id) || '—'}
+                          </td>
+                          {roadmapStatusColumn && (
+                            <td className="py-2 px-3 text-surface-400 align-top">
+                              {getRoadmapItemStatusLabel(item, roadmapStatusColumn)}
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {roadmapIndicatorModal === 'macroChiffrage' &&
+                roadmapMacroEstColumns.macro &&
+                roadmapItemsMissingMacroDetail.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-surface-700/50">
+                          <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">Nom</th>
+                          <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">
+                            {roadmapMacroEstColumns.macro.title}
+                          </th>
+                          {roadmapStatusColumn && (
+                            <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">Statut</th>
+                          )}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {roadmapItemsMissingMacroDetail.map((item) => {
+                          const display = getItemColumnLabelText(item, roadmapMacroEstColumns.macro!.id);
+                          return (
+                            <tr key={item.id} className="border-b border-surface-700/30">
+                              <td className="py-2 px-3 text-surface-200 align-top">{item.name || '—'}</td>
+                              <td
+                                className="py-2 px-3 text-surface-400 align-top max-w-[16rem] tabular-nums"
+                                title={display || '—'}
+                              >
+                                {display || '—'}
+                              </td>
+                              {roadmapStatusColumn && (
+                                <td className="py-2 px-3 text-surface-400 align-top">
+                                  {getRoadmapItemStatusLabel(item, roadmapStatusColumn)}
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              {roadmapIndicatorModal === 'estimation' &&
+                roadmapMacroEstColumns.est &&
+                roadmapItemsMissingEstimationDetail.length > 0 && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-surface-700/50">
+                          <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">Nom</th>
+                          <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">
+                            {roadmapMacroEstColumns.est.title}
+                          </th>
+                          {roadmapStatusColumn && (
+                            <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">Statut</th>
+                          )}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {roadmapItemsMissingEstimationDetail.map((item) => {
+                          const display = getItemColumnLabelText(item, roadmapMacroEstColumns.est!.id);
+                          return (
+                            <tr key={item.id} className="border-b border-surface-700/30">
+                              <td className="py-2 px-3 text-surface-200 align-top">{item.name || '—'}</td>
+                              <td
+                                className="py-2 px-3 text-surface-400 align-top max-w-[16rem] tabular-nums"
+                                title={display || '—'}
+                              >
+                                {display || '—'}
+                              </td>
+                              {roadmapStatusColumn && (
+                                <td className="py-2 px-3 text-surface-400 align-top">
+                                  {getRoadmapItemStatusLabel(item, roadmapStatusColumn)}
+                                </td>
+                              )}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              {roadmapIndicatorModal === 'raf' && roadmapItemsRafDetail.length > 0 && roadmapDateColumn && roadmapStatusColumn && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-surface-700/50">
+                        <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">Nom</th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">
+                          Fin (colonne date)
+                        </th>
+                        <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">Statut</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {roadmapItemsRafDetail.map((item) => {
+                        const raw = getRoadmapDateColumnRaw(item, roadmapDateColumn.id);
+                        const endD = parseRoadmapDateColumnEndDate(raw);
+                        return (
+                          <tr key={item.id} className="border-b border-surface-700/30">
+                            <td className="py-2 px-3 text-surface-200 align-top">{item.name || '—'}</td>
+                            <td className="py-2 px-3 text-surface-400 tabular-nums align-top">
+                              {endD ? endD.toLocaleDateString('fr-FR') : '—'}
+                            </td>
+                            <td className="py-2 px-3 text-surface-400 align-top">
+                              {getRoadmapItemStatusLabel(item, roadmapStatusColumn)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Modal Détail KPI — répartition par ligne/site */}
       {detailKpi && kpiDetailData && (
