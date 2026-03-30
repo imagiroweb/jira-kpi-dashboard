@@ -1,21 +1,26 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MondayColumn, MondayItem } from '../services/api';
 import {
+  EMPTY_ROADMAP_KPIS,
   calendarDaysInclusiveFromTodayToQuarterEnd,
   calendarQuarterFromDate,
   classifyRoadmapKanbanBucket,
   computeRoadmapKpis,
   findColumnByKeywords,
+  findColumnPreferSpecific,
   findRoadmapDateColumn,
   findRoadmapPmColumn,
+  getMondayItemNumericValue,
   getQuarterEndDate,
   getRoadmapDateColumnRaw,
+  isRoadmapNumericKpiValueMissing,
   isRoadmapSolutionDocValueMissing,
   isRoadmapStatusDone,
   isRoadmapStatusTodo,
   parseMondayDateString,
   parseRoadmapDateColumnEndDate,
   parseRoadmapDateColumnRange,
+  resolveRoadmapMacroEstimationColumns,
   roadmapRangeFullyInQuarter,
   roadmapRangeFullyInQuarterCurrentYear,
 } from './roadmapAdoriaKpi';
@@ -268,6 +273,188 @@ describe('roadmapAdoriaKpi', () => {
 
     it('retourne null si aucun item', () => {
       expect(computeRoadmapKpis([], columns)).toBeNull();
+    });
+
+    it('sans colonnes macro / estimation : flags false et compteurs à 0', () => {
+      const colsMinimal: MondayColumn[] = [
+        { id: 'cp', title: 'CP RÉFÉRENT', type: 'text' },
+        { id: 'st', title: 'Statut', type: 'status' },
+      ];
+      const oneItem: MondayItem[] = [
+        {
+          id: '1',
+          name: 'Seul',
+          column_values: [
+            { id: 'cp', text: 'X', type: 'text' },
+            { id: 'st', text: 'Done', type: 'status' },
+          ],
+        },
+      ];
+      const k = computeRoadmapKpis(oneItem, colsMinimal);
+      expect(k).not.toBeNull();
+      expect(k!.hasMacroChiffrageColumn).toBe(false);
+      expect(k!.hasEstimationColumn).toBe(false);
+      expect(k!.missingMacroChiffrage).toBe(0);
+      expect(k!.missingEstimation).toBe(0);
+    });
+
+    it('macro / estimation JSON Monday numbers : 0 compte comme manquant', () => {
+      const cols: MondayColumn[] = [
+        { id: 'cp', title: 'CP RÉFÉRENT', type: 'text' },
+        { id: 'macro', title: 'Macro chiffrage', type: 'numbers' },
+        { id: 'est', title: 'Estimation', type: 'numbers' },
+        { id: 'st', title: 'Statut', type: 'status' },
+      ];
+      const items: MondayItem[] = [
+        {
+          id: '1',
+          name: 'Zéro',
+          column_values: [
+            { id: 'cp', text: 'A', type: 'text' },
+            {
+              id: 'macro',
+              text: '0',
+              value: '{"number":"0"}',
+              type: 'numbers',
+            },
+            {
+              id: 'est',
+              text: '2',
+              value: '{"number":"2"}',
+              type: 'numbers',
+            },
+            { id: 'st', text: 'To do', type: 'status' },
+          ],
+        },
+      ];
+      const k = computeRoadmapKpis(items, cols);
+      expect(k!.missingMacroChiffrage).toBe(1);
+      expect(k!.missingEstimation).toBe(0);
+    });
+  });
+
+  describe('findColumnPreferSpecific', () => {
+    it('essaie le mot-clé le plus long en premier (évite faux positifs courts)', () => {
+      const columns: MondayColumn[] = [
+        { id: 'wide', title: 'Chiffrage initial draft', type: 'numbers' },
+        { id: 'narrow', title: 'Estimation', type: 'numbers' },
+      ];
+      const col = findColumnPreferSpecific(columns, ['chiffrage initial', 'estimation']);
+      expect(col?.id).toBe('wide');
+    });
+  });
+
+  describe('getMondayItemNumericValue', () => {
+    const colId = 'num';
+
+    it('0 si colonne absente ou vide', () => {
+      const item: MondayItem = { id: '1', name: 'X', column_values: [] };
+      expect(getMondayItemNumericValue(item, colId)).toBe(0);
+    });
+
+    it('parse le texte (virgule décimale, pourcentage)', () => {
+      const item: MondayItem = {
+        id: '1',
+        name: 'X',
+        column_values: [{ id: colId, text: '12,5 %', type: 'numbers' }],
+      };
+      expect(getMondayItemNumericValue(item, colId)).toBe(12.5);
+    });
+
+    it('lit JSON value type Monday numbers', () => {
+      const item: MondayItem = {
+        id: '1',
+        name: 'X',
+        column_values: [
+          {
+            id: colId,
+            text: '',
+            value: '{"number":"7"}',
+            type: 'numbers',
+          },
+        ],
+      };
+      expect(getMondayItemNumericValue(item, colId)).toBe(7);
+    });
+
+    it('accepte value numérique brute si l’API la renvoie ainsi (runtime)', () => {
+      const item: MondayItem = {
+        id: '1',
+        name: 'X',
+        column_values: [{ id: colId, text: '', type: 'numbers' }],
+      };
+      (item.column_values![0] as { value?: unknown }).value = 4;
+      expect(getMondayItemNumericValue(item, colId)).toBe(4);
+    });
+  });
+
+  describe('resolveRoadmapMacroEstimationColumns', () => {
+    it('résout deux colonnes distinctes', () => {
+      const columns: MondayColumn[] = [
+        { id: 'm', title: 'Macro chiffrage', type: 'numbers' },
+        { id: 'e', title: 'Estimation', type: 'numbers' },
+      ];
+      const { macro, est } = resolveRoadmapMacroEstimationColumns(columns);
+      expect(macro?.id).toBe('m');
+      expect(est?.id).toBe('e');
+    });
+
+    it('n’utilise pas la même colonne pour les deux rôles', () => {
+      const columns: MondayColumn[] = [
+        { id: 'only', title: 'Macro chiffrage et estimation', type: 'numbers' },
+        { id: 'est2', title: 'Jours estimés', type: 'numbers' },
+      ];
+      const { macro, est } = resolveRoadmapMacroEstimationColumns(columns);
+      expect(macro?.id).toBe('only');
+      expect(est?.id).toBe('est2');
+    });
+  });
+
+  describe('isRoadmapNumericKpiValueMissing', () => {
+    const col: MondayColumn = { id: 'n', title: 'Macro chiffrage', type: 'numbers' };
+
+    it('false si pas de colonne (N/A encart)', () => {
+      const item: MondayItem = { id: '1', name: 'X', column_values: [] };
+      expect(isRoadmapNumericKpiValueMissing(item, null)).toBe(false);
+    });
+
+    it('true si vide, tiret, 0 ou non numérique', () => {
+      const empty: MondayItem = {
+        id: '1',
+        name: 'A',
+        column_values: [{ id: 'n', text: '', type: 'numbers' }],
+      };
+      const dash: MondayItem = {
+        id: '2',
+        name: 'B',
+        column_values: [{ id: 'n', text: '-', type: 'numbers' }],
+      };
+      const zero: MondayItem = {
+        id: '3',
+        name: 'C',
+        column_values: [{ id: 'n', text: '0', type: 'numbers' }],
+      };
+      expect(isRoadmapNumericKpiValueMissing(empty, col)).toBe(true);
+      expect(isRoadmapNumericKpiValueMissing(dash, col)).toBe(true);
+      expect(isRoadmapNumericKpiValueMissing(zero, col)).toBe(true);
+    });
+
+    it('false si valeur strictement positive', () => {
+      const item: MondayItem = {
+        id: '1',
+        name: 'OK',
+        column_values: [{ id: 'n', text: '3,5', type: 'numbers' }],
+      };
+      expect(isRoadmapNumericKpiValueMissing(item, col)).toBe(false);
+    });
+  });
+
+  describe('EMPTY_ROADMAP_KPIS', () => {
+    it('expose les champs macro / estimation pour l’UI (filtre vide)', () => {
+      expect(EMPTY_ROADMAP_KPIS.missingMacroChiffrage).toBe(0);
+      expect(EMPTY_ROADMAP_KPIS.missingEstimation).toBe(0);
+      expect(EMPTY_ROADMAP_KPIS.hasMacroChiffrageColumn).toBe(false);
+      expect(EMPTY_ROADMAP_KPIS.hasEstimationColumn).toBe(false);
     });
   });
 });

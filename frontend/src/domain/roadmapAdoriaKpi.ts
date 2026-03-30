@@ -1,5 +1,6 @@
 /**
- * Logique métier Roadmap Adoria (Monday) : dates, trimestres, statuts, KPI, kanban.
+ * Logique métier Roadmap Adoria (Monday) : dates, trimestres, statuts, KPI, kanban,
+ * macro chiffrage / estimation (détection colonnes, parsing numérique, « manquant » pour encarts).
  * Extraite de ProduitDashboard pour tests unitaires et réutilisation.
  */
 import type { MondayColumn, MondayItem } from '../services/api';
