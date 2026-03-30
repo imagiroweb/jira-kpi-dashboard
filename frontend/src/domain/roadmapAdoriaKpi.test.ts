@@ -10,6 +10,7 @@ import {
   findRoadmapPmColumn,
   getQuarterEndDate,
   getRoadmapDateColumnRaw,
+  isRoadmapSolutionDocValueMissing,
   isRoadmapStatusDone,
   isRoadmapStatusTodo,
   parseMondayDateString,
@@ -200,9 +201,21 @@ describe('roadmapAdoriaKpi', () => {
     });
   });
 
+  describe('isRoadmapSolutionDocValueMissing', () => {
+    it('vide ou tiret', () => {
+      expect(isRoadmapSolutionDocValueMissing('')).toBe(true);
+      expect(isRoadmapSolutionDocValueMissing('-')).toBe(true);
+      expect(isRoadmapSolutionDocValueMissing('  ')).toBe(true);
+      expect(isRoadmapSolutionDocValueMissing('Doc OK')).toBe(false);
+    });
+  });
+
   describe('computeRoadmapKpis', () => {
     const columns: MondayColumn[] = [
       { id: 'cp', title: 'CP RÉFÉRENT', type: 'text' },
+      { id: 'sol', title: 'SOLUTION DOC', type: 'text' },
+      { id: 'macro', title: 'Macro chiffrage', type: 'numbers' },
+      { id: 'est', title: 'Estimation', type: 'numbers' },
       { id: 'pm', title: 'PM', type: 'text' },
       { id: 'st', title: 'Statut', type: 'status' },
     ];
@@ -213,6 +226,9 @@ describe('roadmapAdoriaKpi', () => {
         name: 'A',
         column_values: [
           { id: 'cp', text: 'Alice', type: 'text' },
+          { id: 'sol', text: 'https://doc', type: 'text' },
+          { id: 'macro', text: '10', type: 'numbers' },
+          { id: 'est', text: '8', type: 'numbers' },
           { id: 'pm', text: 'Bob', type: 'text' },
           { id: 'st', text: 'Done', type: 'status' },
         ],
@@ -222,6 +238,9 @@ describe('roadmapAdoriaKpi', () => {
         name: 'B',
         column_values: [
           { id: 'cp', text: '', type: 'text' },
+          { id: 'sol', text: '-', type: 'text' },
+          { id: 'macro', text: '', type: 'numbers' },
+          { id: 'est', text: '-', type: 'numbers' },
           { id: 'pm', text: '', type: 'text' },
           { id: 'st', text: 'To do', type: 'status' },
         ],
@@ -234,6 +253,12 @@ describe('roadmapAdoriaKpi', () => {
       expect(k!.totalFeatures).toBe(2);
       expect(k!.withCpReferent).toBe(1);
       expect(k!.missingCpReferent).toBe(1);
+      expect(k!.hasSolutionDocColumn).toBe(true);
+      expect(k!.missingSolutionDoc).toBe(1);
+      expect(k!.hasMacroChiffrageColumn).toBe(true);
+      expect(k!.hasEstimationColumn).toBe(true);
+      expect(k!.missingMacroChiffrage).toBe(1);
+      expect(k!.missingEstimation).toBe(1);
       const pmBob = k!.byPm.find((x) => x.name === 'Bob');
       const pmNa = k!.byPm.find((x) => x.name === 'Non attribués');
       expect(pmBob?.count).toBe(1);

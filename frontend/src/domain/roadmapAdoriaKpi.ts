@@ -5,7 +5,33 @@
 import type { MondayColumn, MondayItem } from '../services/api';
 
 export const CP_REFERENT_KEYS = ['cp référent', 'cp referent', 'cp réf', 'référent', 'referent'];
+/** Colonne « SOLUTION DOC » (Monday) — manquant si valeur vide ou « - ». */
+export const SOLUTION_DOC_KEYS = ['solution doc', 'solutiondoc', 'doc solution'];
 export const STATUS_KEYS = ['status', 'statut', 'état', 'state'];
+
+/** Détection colonne « macro chiffrage » (même règles que le diagramme Roadmap). */
+export const ROADMAP_MACRO_CHIFFRAGE_KEYS = [
+  'macro chiffrage',
+  'macro-chiffrage',
+  'macrochiffrage',
+  'chiffrage macro',
+];
+/** Détection colonne « estimation » (même règles que le diagramme Roadmap). */
+export const ROADMAP_ESTIMATION_KEYS = [
+  'estimation',
+  'estimate',
+  'chiffrage initial',
+  'effort estimé',
+  'effort estime',
+  'jours estimés',
+  'jours estimes',
+];
+
+/** Valeur considérée comme absente pour Solution doc (vide ou tiret). */
+export function isRoadmapSolutionDocValueMissing(raw: string): boolean {
+  const v = raw.trim();
+  return v === '' || v === '-';
+}
 
 function normalizeTitle(s: string): string {
   return s
@@ -19,6 +45,69 @@ export function findColumnByKeywords(columns: MondayColumn[], keywords: string[]
   return (
     columns.find((c) => keywords.some((k) => normalizeTitle(c.title).includes(normalizeTitle(k)))) ?? null
   );
+}
+
+/** Comme findColumnByKeywords, mais essaie les mots-clés du plus long au plus court (évite faux positifs courts). */
+export function findColumnPreferSpecific(columns: MondayColumn[], keywords: string[]): MondayColumn | null {
+  const sorted = [...keywords].sort((a, b) => b.length - a.length);
+  for (const k of sorted) {
+    const nk = normalizeTitle(k);
+    const found = columns.find((c) => normalizeTitle(c.title).includes(nk));
+    if (found) return found;
+  }
+  return null;
+}
+
+function parseNumLike(value: string): number {
+  if (!value) return 0;
+  const cleaned = value.replace(/\s/g, '').replace(',', '.').replace(/%/g, '');
+  const n = parseFloat(cleaned);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/** Valeur numérique Monday (colonne numbers, JSON, texte). */
+export function getMondayItemNumericValue(item: MondayItem, columnId: string): number {
+  const cv = item.column_values?.find((c) => String(c.id) === String(columnId));
+  if (!cv) return 0;
+  const text = (cv.text ?? '').toString().trim();
+  const rawValue = (cv.value ?? '').toString().trim();
+  const rawVal = (cv as { value?: unknown }).value;
+  if (typeof rawVal === 'number' && Number.isFinite(rawVal)) return rawVal;
+  if (rawValue.startsWith('{')) {
+    try {
+      const o = JSON.parse(rawValue) as Record<string, unknown>;
+      const num = o.number ?? o.value ?? o.num;
+      if (num !== undefined && num !== null) {
+        const n = typeof num === 'number' ? num : parseNumLike(String(num));
+        return Number.isFinite(n) ? n : 0;
+      }
+    } catch {
+      // ignore
+    }
+  }
+  const fromText = parseNumLike(text || rawValue);
+  if (Number.isFinite(fromText)) return fromText;
+  return 0;
+}
+
+/** Colonnes macro chiffrage / estimation (deux colonnes distinctes si possible). */
+export function resolveRoadmapMacroEstimationColumns(columns: MondayColumn[]): {
+  macro: MondayColumn | null;
+  est: MondayColumn | null;
+} {
+  const macro = findColumnPreferSpecific(columns, ROADMAP_MACRO_CHIFFRAGE_KEYS);
+  const others = macro ? columns.filter((c) => c.id !== macro.id) : columns;
+  const est = findColumnPreferSpecific(others, ROADMAP_ESTIMATION_KEYS);
+  return { macro, est };
+}
+
+/** KPI encart : manquant si vide / « - » / non numérique / ≤ 0 (cohérent avec le diagramme qui ignore les paires nulles). */
+export function isRoadmapNumericKpiValueMissing(item: MondayItem, col: MondayColumn | null): boolean {
+  if (!col) return false;
+  const text = getItemValue(item, col.id);
+  if (isRoadmapSolutionDocValueMissing(text)) return true;
+  const n = getMondayItemNumericValue(item, col.id);
+  return !Number.isFinite(n) || n <= 0;
 }
 
 export function findRoadmapDateColumn(columns: MondayColumn[]): MondayColumn | null {
@@ -247,6 +336,12 @@ export const EMPTY_ROADMAP_KPIS = {
   totalFeatures: 0,
   withCpReferent: 0,
   missingCpReferent: 0,
+  missingSolutionDoc: 0,
+  hasSolutionDocColumn: false,
+  missingMacroChiffrage: 0,
+  missingEstimation: 0,
+  hasMacroChiffrageColumn: false,
+  hasEstimationColumn: false,
   ratioCpReferentPct: 0,
   byCpReferent: [] as { name: string; count: number }[],
   byPm: [] as { name: string; count: number }[],
@@ -260,18 +355,29 @@ export function computeRoadmapKpis(
   totalFeatures: number;
   withCpReferent: number;
   missingCpReferent: number;
+  missingSolutionDoc: number;
+  hasSolutionDocColumn: boolean;
+  missingMacroChiffrage: number;
+  missingEstimation: number;
+  hasMacroChiffrageColumn: boolean;
+  hasEstimationColumn: boolean;
   ratioCpReferentPct: number;
   byCpReferent: { name: string; count: number }[];
   byPm: { name: string; count: number }[];
   byStatus: { name: string; value: number }[];
 } | null {
   const colCpReferent = findColumnByKeywords(columns, CP_REFERENT_KEYS);
+  const colSolutionDoc = findColumnByKeywords(columns, SOLUTION_DOC_KEYS);
   const colPm = findRoadmapPmColumn(columns);
   const colStatus = findColumnByKeywords(columns, STATUS_KEYS);
+  const { macro: colMacro, est: colEst } = resolveRoadmapMacroEstimationColumns(columns);
   const totalFeatures = items.length;
   if (totalFeatures === 0) return null;
 
   let withCpReferent = 0;
+  let missingSolutionDoc = 0;
+  let missingMacroChiffrage = 0;
+  let missingEstimation = 0;
   const cpReferentCount = new Map<string, number>();
   const pmCount = new Map<string, number>();
   const statusCount = new Map<string, number>();
@@ -279,6 +385,12 @@ export function computeRoadmapKpis(
   for (const item of items) {
     const cpVal = colCpReferent ? getItemValue(item, colCpReferent.id) : '';
     const hasCp = !!cpVal && cpVal.toLowerCase() !== 'sans nom' && cpVal !== '-';
+    if (colSolutionDoc) {
+      const solVal = getItemValue(item, colSolutionDoc.id);
+      if (isRoadmapSolutionDocValueMissing(solVal)) missingSolutionDoc += 1;
+    }
+    if (colMacro && isRoadmapNumericKpiValueMissing(item, colMacro)) missingMacroChiffrage += 1;
+    if (colEst && isRoadmapNumericKpiValueMissing(item, colEst)) missingEstimation += 1;
     if (hasCp) {
       withCpReferent += 1;
       cpReferentCount.set(cpVal, (cpReferentCount.get(cpVal) ?? 0) + 1);
@@ -310,6 +422,12 @@ export function computeRoadmapKpis(
     totalFeatures,
     withCpReferent,
     missingCpReferent,
+    missingSolutionDoc,
+    hasSolutionDocColumn: !!colSolutionDoc,
+    missingMacroChiffrage,
+    missingEstimation,
+    hasMacroChiffrageColumn: !!colMacro,
+    hasEstimationColumn: !!colEst,
     ratioCpReferentPct,
     byCpReferent,
     byPm,
