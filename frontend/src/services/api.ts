@@ -84,6 +84,13 @@ export interface EpicProgressItem {
   isOverrun: boolean;
   /** Teams associées (epic/legend + descendants) */
   teams?: string[];
+  /** US enfants (ou agrégat Légende) par catégorie de statut Jira */
+  ticketsDone: number;
+  ticketsTodo: number;
+  ticketsInProgress: number;
+  storyPointsDone: number;
+  storyPointsTodo: number;
+  storyPointsInProgress: number;
 }
 
 export interface EpicProgressResponse {
