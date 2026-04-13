@@ -29,6 +29,11 @@ Un tableau de bord moderne et temps réel pour visualiser les KPI de vos projets
 - Validation automatique des fichiers
 - Mapping intelligent des colonnes
 
+### 📌 Suivi des épics
+- Progression par board, recherche, filtres (type, statut, préfixe de clé)
+- Détail épic avec arborescence, temps, story points et **détail SP par statut** (modale)
+- Documentation : [docs/SUIVI_EPICS.md](docs/SUIVI_EPICS.md)
+
 ## 🛠️ Stack Technique
 
 | Composant | Technologies |
@@ -166,10 +171,12 @@ jira-kpi-dashboard/
 ├── .github/workflows/        # CI/CD (ci.yml, cd.yml)
 ├── .husky/                   # Hooks Git (pre-commit = lint backend + frontend)
 ├── docs/
-│   └── DEPLOIEMENT.md        # Guide détaillé secrets + Portainer
+│   ├── DEPLOIEMENT.md        # Guide détaillé secrets + Portainer
+│   └── SUIVI_EPICS.md        # Suivi épics (UI, SP, tests)
 ├── frontend/                 # Application React
 │   ├── src/
 │   │   ├── components/      # Composants UI
+│   │   ├── domain/          # Logique métier (ex. epicProgress)
 │   │   ├── hooks/           # Custom hooks (WebSocket)
 │   │   ├── services/        # API calls
 │   │   ├── store/           # État global (Zustand)

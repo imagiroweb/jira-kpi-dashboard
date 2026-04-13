@@ -1769,6 +1769,8 @@ export class WorklogApplicationService {
     let totalStoryPoints = 0;
     let descendantTeams: string[] = [];
 
+    let ticketStatusCounts = { done: 0, todo: 0, inProgress: 0 };
+    let storyPointsByStatus = { done: 0, todo: 0, inProgress: 0 };
     if (isLegend) {
       // Legend: children are Epics, need to aggregate US from each Epic
       const result = await this.fetchLegendProgress(epic.key);
@@ -1777,6 +1779,8 @@ export class WorklogApplicationService {
       childCount = result.epicCount;
       totalStoryPoints = result.storyPoints;
       descendantTeams = result.teams;
+      ticketStatusCounts = result.ticketStatusCounts;
+      storyPointsByStatus = result.storyPointsByStatus;
     } else {
       // Epic: children are US, aggregate directly
       const result = await this.fetchEpicDirectProgress(epic.key);
@@ -1785,6 +1789,8 @@ export class WorklogApplicationService {
       childCount = result.usCount;
       totalStoryPoints = result.storyPoints;
       descendantTeams = result.teams;
+      ticketStatusCounts = result.ticketStatusCounts;
+      storyPointsByStatus = result.storyPointsByStatus;
     }
 
     const teams = [...new Set([epicTeam, ...descendantTeams].filter(Boolean))] as string[];
@@ -1824,7 +1830,13 @@ export class WorklogApplicationService {
       totalStoryPoints,
       progressPercent,
       isOverrun,
-      teams
+      teams,
+      ticketsDone: ticketStatusCounts.done,
+      ticketsTodo: ticketStatusCounts.todo,
+      ticketsInProgress: ticketStatusCounts.inProgress,
+      storyPointsDone: storyPointsByStatus.done,
+      storyPointsTodo: storyPointsByStatus.todo,
+      storyPointsInProgress: storyPointsByStatus.inProgress
     };
   }
 
@@ -1832,7 +1844,15 @@ export class WorklogApplicationService {
    * Fetch progress for a Legend (children are Epics)
    * Aggregates estimates from all Epics and their US/subtasks; collects teams from all descendants
    */
-  private async fetchLegendProgress(legendKey: string): Promise<{ estimate: number; spent: number; epicCount: number; storyPoints: number; teams: string[] }> {
+  private async fetchLegendProgress(legendKey: string): Promise<{
+    estimate: number;
+    spent: number;
+    epicCount: number;
+    storyPoints: number;
+    teams: string[];
+    ticketStatusCounts: { done: number; todo: number; inProgress: number };
+    storyPointsByStatus: { done: number; todo: number; inProgress: number };
+  }> {
     const jiraClient = container().jiraClient;
     
     // Find all Epics that are children of this Legend
@@ -1846,6 +1866,8 @@ export class WorklogApplicationService {
     let totalSpent = 0;
     let totalStoryPoints = 0;
     const allTeams = new Set<string>();
+    const ticketStatusCounts = { done: 0, todo: 0, inProgress: 0 };
+    const storyPointsByStatus = { done: 0, todo: 0, inProgress: 0 };
 
     // For each child Epic, get their US and aggregate (including teams)
     for (const childEpic of childEpics) {
@@ -1854,6 +1876,12 @@ export class WorklogApplicationService {
       totalSpent += result.spent;
       totalStoryPoints += result.storyPoints;
       result.teams.forEach((t) => allTeams.add(t));
+      ticketStatusCounts.done += result.ticketStatusCounts.done;
+      ticketStatusCounts.todo += result.ticketStatusCounts.todo;
+      ticketStatusCounts.inProgress += result.ticketStatusCounts.inProgress;
+      storyPointsByStatus.done += result.storyPointsByStatus.done;
+      storyPointsByStatus.todo += result.storyPointsByStatus.todo;
+      storyPointsByStatus.inProgress += result.storyPointsByStatus.inProgress;
     }
 
     return {
@@ -1861,7 +1889,9 @@ export class WorklogApplicationService {
       spent: totalSpent,
       epicCount: childEpics.length,
       storyPoints: totalStoryPoints,
-      teams: [...allTeams]
+      teams: [...allTeams],
+      ticketStatusCounts,
+      storyPointsByStatus
     };
   }
 
@@ -2195,7 +2225,15 @@ export class WorklogApplicationService {
     return children;
   }
 
-  private async fetchEpicDirectProgress(epicKey: string): Promise<{ estimate: number; spent: number; usCount: number; storyPoints: number; teams: string[] }> {
+  private async fetchEpicDirectProgress(epicKey: string): Promise<{
+    estimate: number;
+    spent: number;
+    usCount: number;
+    storyPoints: number;
+    teams: string[];
+    ticketStatusCounts: { done: number; todo: number; inProgress: number };
+    storyPointsByStatus: { done: number; todo: number; inProgress: number };
+  }> {
     const jiraClient = container().jiraClient;
     const storyPointsField = process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10127';
     const teamField = process.env.JIRA_TEAM_FIELD || 'customfield_10001';
@@ -2210,12 +2248,20 @@ export class WorklogApplicationService {
     let timeSpentSeconds = 0;
     let totalStoryPoints = 0;
     const teamsSet = new Set<string>();
+    const ticketStatusCounts = { done: 0, todo: 0, inProgress: 0 };
+    const storyPointsByStatus = { done: 0, todo: 0, inProgress: 0 };
 
     // Collect subtask keys from children
     const subtaskKeys: string[] = [];
     
     childIssues.forEach(issue => {
       const fields = issue.fields as Record<string, unknown>;
+      const stCat = fields?.status as { statusCategory?: { key?: string } } | undefined;
+      const catKey = stCat?.statusCategory?.key;
+      if (catKey === 'done') ticketStatusCounts.done += 1;
+      else if (catKey === 'new') ticketStatusCounts.todo += 1;
+      else ticketStatusCounts.inProgress += 1;
+
       const team = this.getTeamFromFields(fields);
       if (team) teamsSet.add(team);
       
@@ -2233,6 +2279,10 @@ export class WorklogApplicationService {
         || (fields.timespent as number) 
         || 0;
       const issueStoryPoints = (fields[storyPointsField] as number) || 0;
+
+      if (catKey === 'done') storyPointsByStatus.done += issueStoryPoints;
+      else if (catKey === 'new') storyPointsByStatus.todo += issueStoryPoints;
+      else storyPointsByStatus.inProgress += issueStoryPoints;
       
       originalEstimateSeconds += issueEstimate;
       timeSpentSeconds += issueSpent;
@@ -2249,15 +2299,23 @@ export class WorklogApplicationService {
       for (let i = 0; i < subtaskKeys.length; i += batchSize) {
         const batch = subtaskKeys.slice(i, i + batchSize);
         const subtaskJql = `key in (${batch.map(k => `"${k}"`).join(',')})`;
-        const subtaskResponse = await jiraClient.searchIssuesWithPagination(subtaskJql, `key,timeoriginalestimate,timespent,${storyPointsField},${teamField}`);
+        const subtaskResponse = await jiraClient.searchIssuesWithPagination(
+          subtaskJql,
+          `key,status,timeoriginalestimate,timespent,${storyPointsField},${teamField}`
+        );
         
         subtaskResponse.issues.forEach(st => {
           const stFields = st.fields as Record<string, unknown>;
+          const stCat = stFields?.status as { statusCategory?: { key?: string } } | undefined;
+          const stCatKey = stCat?.statusCategory?.key;
           const stTeam = this.getTeamFromFields(stFields);
           if (stTeam) teamsSet.add(stTeam);
           const stEstimate = (stFields.timeoriginalestimate as number) || 0;
           const stSpent = (stFields.timespent as number) || 0;
           const stStoryPoints = (stFields[storyPointsField] as number) || 0;
+          if (stCatKey === 'done') storyPointsByStatus.done += stStoryPoints;
+          else if (stCatKey === 'new') storyPointsByStatus.todo += stStoryPoints;
+          else storyPointsByStatus.inProgress += stStoryPoints;
           subtaskEstimateTotal += stEstimate;
           subtaskSpentTotal += stSpent;
           subtaskStoryPointsTotal += stStoryPoints;
@@ -2295,7 +2353,9 @@ export class WorklogApplicationService {
       spent: timeSpentSeconds,
       usCount: childIssues.length,
       storyPoints: totalStoryPoints,
-      teams: [...teamsSet]
+      teams: [...teamsSet],
+      ticketStatusCounts,
+      storyPointsByStatus
     };
   }
 }
@@ -2486,6 +2546,14 @@ export interface EpicProgressItem {
   isOverrun: boolean;
   /** Teams associées (epic/legend + tous les descendants) */
   teams: string[];
+  /** Tickets enfants (US liées à l’épique, ou agrégées pour une Légende) par catégorie Jira : Done / To Do / In Progress */
+  ticketsDone: number;
+  ticketsTodo: number;
+  ticketsInProgress: number;
+  /** Story points (US + sous-tickets) par catégorie de statut */
+  storyPointsDone: number;
+  storyPointsTodo: number;
+  storyPointsInProgress: number;
 }
 
 export interface EpicProgressResult {

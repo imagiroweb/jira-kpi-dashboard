@@ -9,6 +9,17 @@ import {
   jiraApi
 } from '../services/api';
 import { useStore } from '../store/useStore';
+import {
+  TICKET_PREFIXES,
+  type TicketPrefixFilter,
+  type StoryPointsDetailRow,
+  type TicketStatusBreakdown,
+  aggregateStoryPointsForNode,
+  aggregateStoryPointsFromRoots,
+  buildStoryPointsDetailRows,
+  countLeafTicketsByStatus,
+  ticketStatusPercents,
+} from '../domain/epicProgress';
 
 /** Affiche toujours en heures (et minutes si < 1h), sans jours */
 function formatHoursOnly(seconds: number): string {
@@ -18,9 +29,7 @@ function formatHoursOnly(seconds: number): string {
   return `${hours.toFixed(1)}h`;
 }
 
-/** Préfixes de tickets (ex. INT-123, FAC-456) pour le filtre */
-export const TICKET_PREFIXES = ['INT', 'FAC', 'CLI', 'OPT', 'NIM'] as const;
-export type TicketPrefixFilter = (typeof TICKET_PREFIXES)[number] | 'all';
+export { TICKET_PREFIXES, type TicketPrefixFilter, buildStoryPointsDetailRows, type StoryPointsDetailRow } from '../domain/epicProgress';
 
 function getStatusLabel(statusCategoryKey: string | null): string {
   switch (statusCategoryKey) {
@@ -44,6 +53,204 @@ function getStatusBadgeClass(statusCategoryKey: string | null): string {
     default:
       return 'bg-surface-600/30 text-surface-300 border-surface-600/40';
   }
+}
+
+function formatStoryPointsValue(n: number): string {
+  if (!Number.isFinite(n) || n === 0) return '0';
+  return Number.isInteger(n) ? String(n) : n.toFixed(1);
+}
+
+function StoryPointsDetailModal({
+  epicKey,
+  epicTitle,
+  roots,
+  onClose,
+}: {
+  epicKey: string;
+  epicTitle: string;
+  roots: EpicChildIssue[];
+  onClose: () => void;
+}) {
+  const { todo, inProgress, done } = useMemo(() => buildStoryPointsDetailRows(roots), [roots]);
+
+  const Section = ({
+    title,
+    rows,
+    accent,
+  }: {
+    title: string;
+    rows: StoryPointsDetailRow[];
+    accent: 'sky' | 'amber' | 'emerald';
+  }) => {
+    const border =
+      accent === 'sky'
+        ? 'border-sky-500/35'
+        : accent === 'amber'
+          ? 'border-amber-500/35'
+          : 'border-emerald-500/35';
+    const titleClass =
+      accent === 'sky'
+        ? 'text-sky-300'
+        : accent === 'amber'
+          ? 'text-amber-300'
+          : 'text-emerald-300';
+    const sum = rows.reduce((s, r) => s + r.storyPoints, 0);
+    return (
+      <div className={`rounded-xl border ${border} bg-surface-800/40 overflow-hidden`}>
+        <div className={`px-4 py-2.5 text-xs font-semibold uppercase tracking-wide ${titleClass} border-b border-surface-700/50 flex justify-between gap-2`}>
+          <span>{title}</span>
+          <span className="tabular-nums text-surface-400 font-normal">
+            Σ {formatStoryPointsValue(sum)} pts · {rows.length} ticket{rows.length > 1 ? 's' : ''}
+          </span>
+        </div>
+        {rows.length === 0 ? (
+          <p className="px-4 py-6 text-sm text-surface-500 text-center">Aucun ticket</p>
+        ) : (
+          <div className="overflow-x-auto max-h-[min(40vh,320px)]">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[10px] uppercase text-surface-500 border-b border-surface-700/40">
+                  <th className="px-3 py-2 font-medium">Clé</th>
+                  <th className="px-3 py-2 font-medium">Résumé</th>
+                  <th className="px-3 py-2 font-medium">Type</th>
+                  <th className="px-3 py-2 font-medium">Statut</th>
+                  <th className="px-3 py-2 font-medium text-right">Points</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => (
+                  <tr key={r.issueKey} className="border-b border-surface-800/50 hover:bg-surface-800/30">
+                    <td className="px-3 py-2 font-mono text-xs text-surface-400 whitespace-nowrap">{r.issueKey}</td>
+                    <td className="px-3 py-2 text-surface-200 max-w-md truncate" title={r.summary}>
+                      {r.summary}
+                    </td>
+                    <td className="px-3 py-2 text-surface-500 text-xs">{r.issueType}</td>
+                    <td className="px-3 py-2 text-surface-400 text-xs">{r.status}</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-primary-300">{formatStoryPointsValue(r.storyPoints)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4" onClick={onClose}>
+      <div className="absolute inset-0 bg-black/65 backdrop-blur-[2px]" />
+      <div
+        className="relative w-full max-w-4xl max-h-[90vh] bg-surface-900 border border-surface-600/80 rounded-2xl shadow-2xl flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-5 py-4 border-b border-surface-800 shrink-0">
+          <div>
+            <h3 className="text-lg font-semibold text-surface-100">Détail story points par ticket</h3>
+            <p className="text-xs text-surface-500 mt-0.5 font-mono">
+              {epicKey}
+              {epicTitle ? ` · ${epicTitle}` : ''}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-2 rounded-lg hover:bg-surface-800 text-surface-400 hover:text-surface-200 shrink-0"
+            aria-label="Fermer"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+        <div className="p-4 overflow-y-auto flex-1 min-h-0 space-y-5">
+          <p className="text-xs text-surface-500">
+            Ordre : reste à faire → en cours → terminé. Tri par points (décroissant) puis clé.
+          </p>
+          <Section title="Reste à faire" rows={todo} accent="sky" />
+          <Section title="En cours" rows={inProgress} accent="amber" />
+          <Section title="Terminé" rows={done} accent="emerald" />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TicketStatusStackedBar({
+  breakdown,
+  className = '',
+  showLegend = true,
+  variant = 'tickets',
+}: {
+  breakdown: TicketStatusBreakdown;
+  className?: string;
+  showLegend?: boolean;
+  /** `tickets` : % par nombre de tickets · `storyPoints` : pts + % du total pts */
+  variant?: 'tickets' | 'storyPoints';
+}) {
+  const p = ticketStatusPercents(breakdown);
+  const total = breakdown.done + breakdown.todo + breakdown.inProgress;
+  if (!Number.isFinite(total) || total <= 0) {
+    return <div className={`text-xs text-surface-500 ${className}`}>—</div>;
+  }
+  const unit = variant === 'storyPoints' ? 'pts' : '';
+  return (
+    <div className={className}>
+      <div className="flex h-2 rounded-full overflow-hidden bg-surface-800">
+        {p.done > 0 && (
+          <div
+            className="bg-emerald-500 h-full min-w-[2px]"
+            style={{ width: `${p.done}%` }}
+            title={
+              variant === 'storyPoints'
+                ? `${formatStoryPointsValue(breakdown.done)} pts terminés (${p.done}%)`
+                : `Terminé ${p.done}%`
+            }
+          />
+        )}
+        {p.todo > 0 && (
+          <div
+            className="bg-sky-500 h-full min-w-[2px]"
+            style={{ width: `${p.todo}%` }}
+            title={
+              variant === 'storyPoints'
+                ? `${formatStoryPointsValue(breakdown.todo)} pts à faire (${p.todo}%)`
+                : `À faire ${p.todo}%`
+            }
+          />
+        )}
+        {p.inProgress > 0 && (
+          <div
+            className="bg-amber-500 h-full min-w-[2px]"
+            style={{ width: `${p.inProgress}%` }}
+            title={
+              variant === 'storyPoints'
+                ? `${formatStoryPointsValue(breakdown.inProgress)} pts en cours (${p.inProgress}%)`
+                : `En cours ${p.inProgress}%`
+            }
+          />
+        )}
+      </div>
+      {showLegend && variant === 'tickets' && (
+        <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1 text-[10px] text-surface-500 tabular-nums">
+          <span className="text-emerald-400/95">{p.done}% terminé</span>
+          <span className="text-sky-400/95">{p.todo}% à faire</span>
+          <span className="text-amber-400/95">{p.inProgress}% en cours</span>
+        </div>
+      )}
+      {showLegend && variant === 'storyPoints' && (
+        <div className="flex flex-wrap gap-x-2 gap-y-0.5 mt-1 text-[10px] text-surface-500 tabular-nums">
+          <span className="text-emerald-400/95">
+            {formatStoryPointsValue(breakdown.done)} {unit} · {p.done}% terminé
+          </span>
+          <span className="text-sky-400/95">
+            {formatStoryPointsValue(breakdown.todo)} {unit} · {p.todo}% à faire
+          </span>
+          <span className="text-amber-400/95">
+            {formatStoryPointsValue(breakdown.inProgress)} {unit} · {p.inProgress}% en cours
+          </span>
+        </div>
+      )}
+    </div>
+  );
 }
 
 // Helper to calculate subtotals recursively
@@ -84,6 +291,21 @@ function ChildIssueRow({ child, level = 0 }: { child: EpicChildIssue; level?: nu
     ? Math.round((displaySpent / displayEstimate) * 100)
     : 0;
   const isOverrun = displayEstimate > 0 && displaySpent > displayEstimate;
+
+  const ticketBreakdown = useMemo((): TicketStatusBreakdown => {
+    if (hasChildren && child.children?.length) {
+      return countLeafTicketsByStatus(child.children);
+    }
+    const k = child.statusCategoryKey;
+    if (k === 'done') return { done: 1, todo: 0, inProgress: 0 };
+    if (k === 'new') return { done: 0, todo: 1, inProgress: 0 };
+    return { done: 0, todo: 0, inProgress: 1 };
+  }, [child, hasChildren]);
+
+  const storyPointsBreakdown = useMemo(
+    () => aggregateStoryPointsForNode(child),
+    [child]
+  );
 
   return (
     <>
@@ -155,6 +377,12 @@ function ChildIssueRow({ child, level = 0 }: { child: EpicChildIssue; level?: nu
             <span className="text-xs text-surface-400 w-8 text-right">{progressPercent}%</span>
           </div>
         </td>
+        <td className="px-3 py-2.5 min-w-[140px] max-w-[200px]">
+          <TicketStatusStackedBar breakdown={ticketBreakdown} showLegend={false} />
+        </td>
+        <td className="px-3 py-2.5 min-w-[140px] max-w-[200px]">
+          <TicketStatusStackedBar variant="storyPoints" breakdown={storyPointsBreakdown} showLegend={false} />
+        </td>
       </tr>
       {isExpanded &&
         hasChildren &&
@@ -170,6 +398,7 @@ function EpicDetailModal({ epicKey, onClose }: { epicKey: string; onClose: () =>
   const [details, setDetails] = useState<EpicDetailsResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [storyPointsDetailOpen, setStoryPointsDetailOpen] = useState(false);
 
   useEffect(() => {
     const loadDetails = async () => {
@@ -195,18 +424,24 @@ function EpicDetailModal({ epicKey, onClose }: { epicKey: string; onClose: () =>
     loadDetails();
   }, [epicKey]);
 
-  // Fermer avec Escape
+  // Fermer avec Escape (d’abord la modale story points si ouverte)
   useEffect(() => {
     const handleEscape = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key !== 'Escape') return;
+      if (storyPointsDetailOpen) {
+        setStoryPointsDetailOpen(false);
+      } else {
+        onClose();
+      }
     };
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [onClose]);
+  }, [onClose, storyPointsDetailOpen]);
 
   const progressColor = details?.isOverrun ? 'bg-danger-500' : 'bg-primary-500';
 
   return (
+    <>
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" onClick={onClose}>
       <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
       <div 
@@ -256,9 +491,9 @@ function EpicDetailModal({ epicKey, onClose }: { epicKey: string; onClose: () =>
 
           {!isLoading && details && (
             <div className="space-y-6">
-              {/* Progress summary */}
-              <div className="grid gap-4 sm:grid-cols-5 lg:grid-cols-6">
-                <div className="rounded-xl bg-surface-800/60 border border-surface-700/60 p-4">
+              {/* Ligne 1 : progression + tickets + story points (pleine largeur, 3 colonnes) */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 w-full">
+                <div className="rounded-xl bg-surface-800/60 border border-surface-700/60 p-4 min-w-0">
                   <div className="text-xs text-surface-500 uppercase tracking-wide">Progression</div>
                   <div className="mt-2">
                     <div className="flex items-center justify-between text-sm text-surface-300 mb-1.5">
@@ -270,6 +505,34 @@ function EpicDetailModal({ epicKey, onClose }: { epicKey: string; onClose: () =>
                     </div>
                   </div>
                 </div>
+                <div className="rounded-xl bg-surface-800/60 border border-surface-700/60 p-4 min-w-0">
+                  <div className="text-xs text-surface-500 uppercase tracking-wide">Tickets par statut</div>
+                  <p className="text-[10px] text-surface-500 mt-1 mb-2">
+                    Vert terminé · bleu à faire · orange en cours (feuilles de l&apos;arborescence)
+                  </p>
+                  <TicketStatusStackedBar breakdown={countLeafTicketsByStatus(details.children ?? [])} />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setStoryPointsDetailOpen(true)}
+                  className="rounded-xl bg-surface-800/60 border border-surface-700/60 p-4 min-w-0 text-left w-full font-inherit cursor-pointer transition-all hover:border-primary-500/40 hover:bg-surface-800/90 focus:outline-none focus:ring-2 focus:ring-primary-500/40"
+                >
+                  <div className="text-xs text-surface-500 uppercase tracking-wide flex items-center justify-between gap-2">
+                    <span>Story points par statut</span>
+                    <span className="text-[10px] text-primary-400/90 font-normal normal-case">Voir le détail</span>
+                  </div>
+                  <p className="text-[10px] text-surface-500 mt-1 mb-2">
+                    Points sur chaque ticket (US + sous-tickets), % du total des points — clic pour la liste par statut
+                  </p>
+                  <TicketStatusStackedBar
+                    variant="storyPoints"
+                    breakdown={aggregateStoryPointsFromRoots(details.children ?? [])}
+                  />
+                </button>
+              </div>
+
+              {/* Ligne 2 : autres indicateurs */}
+              <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 w-full">
                 <div className="rounded-xl bg-surface-800/60 border border-surface-700/60 p-4">
                   <div className="text-xs text-surface-500 uppercase tracking-wide">Estimation</div>
                   <div className="text-xl font-semibold text-surface-100 mt-1">
@@ -320,13 +583,15 @@ function EpicDetailModal({ epicKey, onClose }: { epicKey: string; onClose: () =>
                       <th className="px-3 py-3 text-right font-medium">Points</th>
                       <th className="px-3 py-3 text-right font-medium">Estimation</th>
                       <th className="px-3 py-3 text-right font-medium">Passé</th>
-                      <th className="px-3 py-3 text-left font-medium w-[100px]">Progression</th>
+                      <th className="px-3 py-3 text-left font-medium w-[100px]">Progression temps</th>
+                      <th className="px-3 py-3 text-left font-medium min-w-[140px]">Avancement tickets</th>
+                      <th className="px-3 py-3 text-left font-medium min-w-[140px]">Points (statut)</th>
                     </tr>
                   </thead>
                   <tbody>
                     {(details.children ?? []).length === 0 ? (
                       <tr>
-                        <td colSpan={7} className="px-3 py-8 text-center text-surface-500">
+                        <td colSpan={9} className="px-3 py-8 text-center text-surface-500">
                           Aucun ticket enfant trouvé
                         </td>
                       </tr>
@@ -345,6 +610,15 @@ function EpicDetailModal({ epicKey, onClose }: { epicKey: string; onClose: () =>
         </div>
       </div>
     </div>
+      {storyPointsDetailOpen && details && (
+        <StoryPointsDetailModal
+          epicKey={details.epicKey}
+          epicTitle={details.summary}
+          roots={details.children ?? []}
+          onClose={() => setStoryPointsDetailOpen(false)}
+        />
+      )}
+    </>
   );
 }
 
@@ -385,6 +659,31 @@ export function EpicProgressPage() {
   
   // Detail modal state
   const [selectedEpicKey, setSelectedEpicKey] = useState<string | null>(null);
+  const [storyPointsListDetail, setStoryPointsListDetail] = useState<{
+    epicKey: string;
+    summary: string;
+    roots: EpicChildIssue[];
+  } | null>(null);
+  const [storyPointsListLoading, setStoryPointsListLoading] = useState(false);
+
+  const openStoryPointsDetailFromList = useCallback(async (epicKey: string, summary: string) => {
+    setStoryPointsListLoading(true);
+    try {
+      const result = await epicApi.getDetails(epicKey);
+      if (result.success) {
+        const d = result as EpicDetailsResponse;
+        setStoryPointsListDetail({
+          epicKey,
+          summary: d.summary || summary,
+          roots: Array.isArray(d.children) ? d.children : [],
+        });
+      }
+    } catch (e) {
+      console.error('getDetails for story points:', e);
+    } finally {
+      setStoryPointsListLoading(false);
+    }
+  }, []);
 
   const filtersKey = useMemo(() => {
     if (!selectedBoardId) return '';
@@ -461,6 +760,15 @@ export function EpicProgressPage() {
     loadEpics(true);
   }, [kpiRefreshTrigger, loadEpics]);
 
+  useEffect(() => {
+    if (!storyPointsListDetail) return;
+    const handleEscape = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setStoryPointsListDetail(null);
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [storyPointsListDetail]);
+
   // Handle search
   const handleSearch = useCallback(async (query: string) => {
     if (!selectedBoardId || query.trim().length < 2) {
@@ -536,7 +844,7 @@ export function EpicProgressPage() {
           <div>
             <h1 className="text-2xl font-semibold text-surface-100">Suivi epics</h1>
             <p className="text-sm text-surface-500">
-              Progression basee sur l&apos;estimation originale des US enfants et le temps passe.
+              Progression temps (estimation / passé), tickets et story points par statut Jira (terminé, à faire, en cours).
             </p>
           </div>
         </div>
@@ -741,46 +1049,102 @@ export function EpicProgressPage() {
               ? 'bg-primary-500/15 text-primary-300'
               : 'bg-surface-600/30 text-surface-300';
           return (
-            <button
+            <div
               key={epic.epicKey}
-              onClick={() => setSelectedEpicKey(epic.epicKey)}
-              className="w-full text-left rounded-2xl border border-surface-800 bg-surface-900/40 p-5 space-y-4 hover:border-primary-500/40 hover:bg-surface-900/60 transition-all duration-200 cursor-pointer group"
+              className="rounded-2xl border border-surface-800 bg-surface-900/40 p-5 space-y-4 transition-all duration-200 hover:border-primary-500/40 hover:bg-surface-900/60 group"
             >
-              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2 text-sm text-surface-500">
-                    <span>{epic.issueType}</span>
-                    {epic.teams && epic.teams.length > 0 && (
-                      <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-surface-700/60 text-surface-300" title="Équipe(s)">
-                        <Users className="w-3.5 h-3.5 text-surface-400" />
-                        {epic.teams.join(', ')}
-                      </span>
-                    )}
+              <div
+                role="button"
+                tabIndex={0}
+                className="cursor-pointer text-left w-full font-inherit"
+                onClick={() => setSelectedEpicKey(epic.epicKey)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelectedEpicKey(epic.epicKey);
+                  }
+                }}
+              >
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-surface-500">
+                      <span>{epic.issueType}</span>
+                      {epic.teams && epic.teams.length > 0 && (
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-lg bg-surface-700/60 text-surface-300" title="Équipe(s)">
+                          <Users className="w-3.5 h-3.5 text-surface-400" />
+                          {epic.teams.join(', ')}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-lg font-semibold text-surface-100 group-hover:text-primary-300 transition-colors">
+                      {epic.epicKey} • {epic.summary}
+                    </div>
                   </div>
-                  <div className="text-lg font-semibold text-surface-100 group-hover:text-primary-300 transition-colors">
-                    {epic.epicKey} • {epic.summary}
+                  <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${statusBadgeClass}`}>
+                    {getStatusLabel(epic.statusCategoryKey)}
                   </div>
                 </div>
-                <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium ${statusBadgeClass}`}>
-                  {getStatusLabel(epic.statusCategoryKey)}
+
+                <div className="mt-4">
+                  <div className="flex items-center justify-between text-xs text-surface-400 mb-2">
+                    <span>Progression</span>
+                    <span>{epic.progressPercent}%</span>
+                  </div>
+                  <div className="h-2.5 rounded-full bg-surface-800 overflow-hidden">
+                    <div className={`h-full ${progressColor}`} style={{ width: `${Math.min(100, epic.progressPercent)}%` }} />
+                  </div>
+                  {epic.isOverrun && (
+                    <div className="text-xs text-danger-400 mt-2">
+                      Temps passé supérieur à l&apos;estimation originale.
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-4">
+                  <div className="flex items-center justify-between text-xs text-surface-400 mb-2">
+                    <span>Avancement tickets (US enfants)</span>
+                  </div>
+                  <TicketStatusStackedBar
+                    breakdown={{
+                      done: epic.ticketsDone ?? 0,
+                      todo: epic.ticketsTodo ?? 0,
+                      inProgress: epic.ticketsInProgress ?? 0,
+                    }}
+                  />
                 </div>
               </div>
 
-              <div>
-                <div className="flex items-center justify-between text-xs text-surface-400 mb-2">
-                  <span>Progression</span>
-                  <span>{epic.progressPercent}%</span>
+              <button
+                type="button"
+                onClick={() => openStoryPointsDetailFromList(epic.epicKey, epic.summary)}
+                className="w-full text-left rounded-xl border border-surface-700/50 bg-surface-800/30 p-3 font-inherit cursor-pointer transition-all hover:border-primary-500/40 hover:bg-surface-800/60 focus:outline-none focus:ring-2 focus:ring-primary-500/35"
+              >
+                <div className="flex items-center justify-between text-xs text-surface-400 mb-2 gap-2">
+                  <span>Story points par statut (US + sous-tickets)</span>
+                  <span className="text-[10px] text-primary-400 shrink-0">Détail</span>
                 </div>
-                <div className="h-2.5 rounded-full bg-surface-800 overflow-hidden">
-                  <div className={`h-full ${progressColor}`} style={{ width: `${Math.min(100, epic.progressPercent)}%` }} />
-                </div>
-                {epic.isOverrun && (
-                  <div className="text-xs text-danger-400 mt-2">
-                    Temps passé supérieur à l&apos;estimation originale.
-                  </div>
-                )}
-              </div>
+                <TicketStatusStackedBar
+                  variant="storyPoints"
+                  breakdown={{
+                    done: epic.storyPointsDone ?? 0,
+                    todo: epic.storyPointsTodo ?? 0,
+                    inProgress: epic.storyPointsInProgress ?? 0,
+                  }}
+                />
+              </button>
 
+              <div
+                role="button"
+                tabIndex={0}
+                className="cursor-pointer text-left w-full font-inherit"
+                onClick={() => setSelectedEpicKey(epic.epicKey)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    setSelectedEpicKey(epic.epicKey);
+                  }
+                }}
+              >
               <div className="grid gap-3 sm:grid-cols-4 lg:grid-cols-5 text-sm text-surface-300">
                 <div className="rounded-xl bg-surface-800/60 border border-surface-700/60 p-3">
                   <div className="text-xs text-surface-500">
@@ -814,7 +1178,8 @@ export function EpicProgressPage() {
                   <div className="font-semibold">{epic.childIssueCount}</div>
                 </div>
               </div>
-            </button>
+              </div>
+            </div>
           );
         })}
 
@@ -854,6 +1219,20 @@ export function EpicProgressPage() {
       {/* Detail modal */}
       {selectedEpicKey && (
         <EpicDetailModal epicKey={selectedEpicKey} onClose={() => setSelectedEpicKey(null)} />
+      )}
+
+      {storyPointsListLoading && (
+        <div className="fixed inset-0 z-[65] flex items-center justify-center bg-black/45">
+          <Loader2 className="w-10 h-10 text-primary-400 animate-spin" />
+        </div>
+      )}
+      {storyPointsListDetail && (
+        <StoryPointsDetailModal
+          epicKey={storyPointsListDetail.epicKey}
+          epicTitle={storyPointsListDetail.summary}
+          roots={storyPointsListDetail.roots}
+          onClose={() => setStoryPointsListDetail(null)}
+        />
       )}
     </div>
   );
