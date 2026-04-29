@@ -130,6 +130,15 @@ describe('authRoutes (core)', () => {
     expect(res.body.success).toBe(false);
   });
 
+  it('GET /api/auth/microsoft/config retourne 200 si configuré', async () => {
+    process.env.MICROSOFT_CLIENT_ID = 'client-id';
+    process.env.MICROSOFT_TENANT_ID = 'tenant-id';
+    const res = await request(app).get('/api/auth/microsoft/config');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.clientId).toBe('client-id');
+  });
+
   it('POST /api/auth/register retourne 400 sur payload invalide', async () => {
     const res = await request(app).post('/api/auth/register').send({ email: 'bad', password: '123' });
     expect(res.status).toBe(400);
@@ -146,10 +155,32 @@ describe('authRoutes (core)', () => {
     expect(mockAuthService.register).toHaveBeenCalledWith('user@test.com', 'ValidPass123!', 'A', 'B', undefined);
   });
 
+  it('POST /api/auth/register retourne 400 si le service refuse', async () => {
+    mockAuthService.register.mockResolvedValue({ success: false, error: 'Email déjà utilisé' });
+    const res = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'user@test.com', password: 'ValidPass123!', firstName: 'A', lastName: 'B' });
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+  });
+
   it('POST /api/auth/login retourne 401 si credentials invalides', async () => {
     mockAuthService.login.mockResolvedValue({ success: false, error: 'bad credentials' });
     const res = await request(app).post('/api/auth/login').send({ email: 'user@test.com', password: 'X' });
     expect(res.status).toBe(401);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('POST /api/auth/login retourne 400 sur payload invalide', async () => {
+    const res = await request(app).post('/api/auth/login').send({ email: 'bad-email' });
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('POST /api/auth/login retourne 500 si exception', async () => {
+    mockAuthService.login.mockRejectedValue(new Error('boom'));
+    const res = await request(app).post('/api/auth/login').send({ email: 'user@test.com', password: 'ValidPass123!' });
+    expect(res.status).toBe(500);
     expect(res.body.success).toBe(false);
   });
 
@@ -160,11 +191,37 @@ describe('authRoutes (core)', () => {
     expect(res.body.validation.score).toBe(80);
   });
 
+  it('POST /api/auth/validate-password retourne 400 si password manquant', async () => {
+    const res = await request(app).post('/api/auth/validate-password').send({});
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
+  });
+
   it('GET /api/auth/me retourne 404 si utilisateur introuvable', async () => {
     mockAuthService.getUserById.mockResolvedValue(null);
     const res = await request(app).get('/api/auth/me');
     expect(res.status).toBe(404);
     expect(res.body.success).toBe(false);
+  });
+
+  it('GET /api/auth/me retourne le profil utilisateur si trouvé', async () => {
+    const res = await request(app).get('/api/auth/me');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.user.email).toBe('user@test.com');
+  });
+
+  it('GET /api/auth/me retourne 500 si exception', async () => {
+    mockAuthService.buildUserWithPermissions.mockRejectedValue(new Error('boom'));
+    const res = await request(app).get('/api/auth/me');
+    expect(res.status).toBe(500);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('GET /api/auth/verify retourne token valide', async () => {
+    const res = await request(app).get('/api/auth/verify');
+    expect(res.status).toBe(200);
+    expect(res.body.valid).toBe(true);
   });
 
   it('GET /api/auth/roles/for-signup retourne la liste des rôles', async () => {
@@ -174,10 +231,26 @@ describe('authRoutes (core)', () => {
     expect(res.body.roles).toEqual([{ id: 'r1', name: 'Utilisateur' }]);
   });
 
+  it('GET /api/auth/roles/for-signup retourne 500 si exception', async () => {
+    mockRoleFind.mockImplementationOnce(() => {
+      throw new Error('db down');
+    });
+    const res = await request(app).get('/api/auth/roles/for-signup');
+    expect(res.status).toBe(500);
+    expect(res.body.success).toBe(false);
+  });
+
   it('PATCH /api/auth/me/role retourne 400 si roleId absent', async () => {
     const res = await request(app).patch('/api/auth/me/role').send({});
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
     expect(mockAuthService.setMyRole).not.toHaveBeenCalled();
+  });
+
+  it('PATCH /api/auth/me/role retourne 400 si service refuse le rôle', async () => {
+    mockAuthService.setMyRole.mockResolvedValue({ success: false, error: 'Rôle invalide' });
+    const res = await request(app).patch('/api/auth/me/role').send({ roleId: 'bad' });
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
   });
 });

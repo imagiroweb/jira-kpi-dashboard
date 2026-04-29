@@ -85,6 +85,20 @@ describe('jiraRoutes', () => {
     });
   });
 
+  it('GET /api/jira/configured-boards retourne la liste des boards', async () => {
+    const res = await request(app).get('/api/jira/configured-boards');
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ success: true, boards: [{ id: 12, name: 'Board A' }] });
+  });
+
+  it('GET /api/jira/projects retourne projets + configuredProjects', async () => {
+    mockWorklogAppService.getAllProjects.mockResolvedValue([{ key: 'ABC', name: 'P1' }]);
+    const res = await request(app).get('/api/jira/projects');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.configuredProjects).toEqual(['ABC']);
+  });
+
   it('GET /api/jira/board/:boardId/sprint-issues retourne 400 si boardId invalide', async () => {
     const res = await request(app).get('/api/jira/board/not-a-number/sprint-issues');
     expect(res.status).toBe(400);
@@ -112,6 +126,13 @@ describe('jiraRoutes', () => {
     expect(mockWorklogAppService.getResolvedByDay).toHaveBeenCalledWith('2026-04-01', '2026-04-15', 'points', true);
     expect(res.body.mode).toBe('points');
     expect(res.body.dateRange).toEqual({ from: '2026-04-01', to: '2026-04-15' });
+  });
+
+  it('GET /api/jira/resolved-by-day retourne 400 si activeSprint sans plage trouvée', async () => {
+    mockWorklogAppService.getActiveSprintDateRange.mockResolvedValue(null);
+    const res = await request(app).get('/api/jira/resolved-by-day').query({ activeSprint: 'true' });
+    expect(res.status).toBe(400);
+    expect(res.body.success).toBe(false);
   });
 
   it('GET /api/jira/epic-progress retourne 400 si boardId absent/invalide', async () => {
@@ -145,6 +166,19 @@ describe('jiraRoutes', () => {
     expect(res.body.epicKey).toBe('EPIC-42');
   });
 
+  it('GET /api/jira/time-config retourne la configuration de temps', async () => {
+    const res = await request(app).get('/api/jira/time-config');
+    expect(res.status).toBe(200);
+    expect(res.body.workingHoursPerDay).toBe(8);
+  });
+
+  it('GET /api/jira/test retourne succès de connexion', async () => {
+    mockWorklogAppService.testConnection.mockResolvedValue({ success: true });
+    const res = await request(app).get('/api/jira/test');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
   it('POST /api/jira/dashboard-snapshot retourne 400 si sprintName absent', async () => {
     const res = await request(app)
       .post('/api/jira/dashboard-snapshot')
@@ -174,5 +208,19 @@ describe('jiraRoutes', () => {
         projectsStats: [expect.objectContaining({ key: '123', boardId: 123 })]
       })
     );
+  });
+
+  it('GET /api/jira/dashboard-snapshot/:id retourne 404 si snapshot absent', async () => {
+    mockDashboardSnapshotModel.findById.mockResolvedValue(null);
+    const res = await request(app).get('/api/jira/dashboard-snapshot/unknown');
+    expect(res.status).toBe(404);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('DELETE /api/jira/dashboard-snapshot/:id retourne 404 si snapshot absent', async () => {
+    mockDashboardSnapshotModel.findByIdAndDelete.mockResolvedValue(null);
+    const res = await request(app).delete('/api/jira/dashboard-snapshot/unknown');
+    expect(res.status).toBe(404);
+    expect(res.body.success).toBe(false);
   });
 });
