@@ -17,12 +17,14 @@ interface CacheEntry<T> {
 class InMemoryCache {
   private cache = new Map<string, CacheEntry<unknown>>();
   private defaultTTL: number;
+  private cleanupTimer: ReturnType<typeof setInterval>;
 
   constructor(defaultTTLMinutes: number = 5) {
     this.defaultTTL = defaultTTLMinutes * 60 * 1000;
     
-    // Clean expired entries every minute
-    setInterval(() => this.cleanExpired(), 60 * 1000);
+    // Clean expired entries every minute without blocking process exit (tests/CLI).
+    this.cleanupTimer = setInterval(() => this.cleanExpired(), 60 * 1000);
+    this.cleanupTimer.unref?.();
   }
 
   get<T>(key: string): T | null {
@@ -55,6 +57,10 @@ class InMemoryCache {
 
   clear(): void {
     this.cache.clear();
+  }
+
+  stop(): void {
+    clearInterval(this.cleanupTimer);
   }
 
   private cleanExpired(): void {

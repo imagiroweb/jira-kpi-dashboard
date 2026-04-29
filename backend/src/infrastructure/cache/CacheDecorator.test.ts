@@ -98,4 +98,21 @@ describe('CacheDecorator', () => {
     jest.advanceTimersByTime(31_000);
     expect(globalCache.get('ttl:key')).toBeNull();
   });
+
+  it('détache le timer de nettoyage avec unref', () => {
+    const unref = jest.fn();
+    const setIntervalSpy = jest
+      .spyOn(global, 'setInterval')
+      .mockReturnValue({ unref } as unknown as ReturnType<typeof setInterval>);
+
+    jest.isolateModules(() => {
+      // Recharger le module pour exécuter de nouveau l'instanciation du cache global.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      require('./CacheDecorator');
+    });
+
+    expect(setIntervalSpy).toHaveBeenCalled();
+    expect(unref).toHaveBeenCalledTimes(1);
+    setIntervalSpy.mockRestore();
+  });
 });
