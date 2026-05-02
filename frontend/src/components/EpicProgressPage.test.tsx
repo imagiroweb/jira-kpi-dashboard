@@ -95,14 +95,16 @@ describe('EpicProgressPage', () => {
       expect(mockGetProgress).toHaveBeenCalledWith(12, 'all', 'all', 1, 20, undefined);
     });
 
-    // Attendre le re-render après résolution de getProgress (évite une course en CI).
-    const titleEpic1 = await screen.findByText(/EPIC-1 •/);
-    const titleEpic2 = await screen.findByText(/EPIC-2 •/);
-    const cardEpic1 = titleEpic1.closest('button');
-    const cardEpic2 = titleEpic2.closest('button');
+    // Cartes = <button> : le nom accessible agrège les libellés (clé + résumé) sans dépendre du caractère • ni de closest().
+    const cardEpic1 = await screen.findByRole('button', {
+      name: (n) => typeof n === 'string' && n.includes('EPIC-1') && n.includes('Premier epic')
+    });
+    const cardEpic2 = await screen.findByRole('button', {
+      name: (n) => typeof n === 'string' && n.includes('EPIC-2') && n.includes('Deuxieme epic')
+    });
     expect(cardEpic1).toBeInTheDocument();
     expect(cardEpic2).toBeInTheDocument();
-    expect(cardEpic2!.compareDocumentPosition(cardEpic1!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(cardEpic2.compareDocumentPosition(cardEpic1) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('recherche un epic puis ouvre la modale de detail', async () => {

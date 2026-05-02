@@ -78,12 +78,16 @@ import { WorklogApplicationService } from './WorklogApplicationService';
 describe('WorklogApplicationService (phase D — Jira orchestration)', () => {
   const service = new WorklogApplicationService();
   const initialResolvedProject = process.env.JIRA_RESOLVED_BY_DAY_PROJECT;
+  const initialResolvedGroupBy = process.env.JIRA_RESOLVED_BY_DAY_GROUP_BY;
+  const initialResolvedTypes = process.env.JIRA_RESOLVED_BY_DAY_TYPES;
   const initialResolutionName = process.env.JIRA_RESOLUTION_NAME;
   const initialResolutionId = process.env.JIRA_RESOLUTION_ID;
 
   beforeEach(() => {
     jest.clearAllMocks();
     delete process.env.JIRA_RESOLVED_BY_DAY_PROJECT;
+    delete process.env.JIRA_RESOLVED_BY_DAY_GROUP_BY;
+    delete process.env.JIRA_RESOLVED_BY_DAY_TYPES;
     delete process.env.JIRA_RESOLUTION_NAME;
     delete process.env.JIRA_RESOLUTION_ID;
 
@@ -123,6 +127,10 @@ describe('WorklogApplicationService (phase D — Jira orchestration)', () => {
   afterEach(() => {
     if (initialResolvedProject === undefined) delete process.env.JIRA_RESOLVED_BY_DAY_PROJECT;
     else process.env.JIRA_RESOLVED_BY_DAY_PROJECT = initialResolvedProject;
+    if (initialResolvedGroupBy === undefined) delete process.env.JIRA_RESOLVED_BY_DAY_GROUP_BY;
+    else process.env.JIRA_RESOLVED_BY_DAY_GROUP_BY = initialResolvedGroupBy;
+    if (initialResolvedTypes === undefined) delete process.env.JIRA_RESOLVED_BY_DAY_TYPES;
+    else process.env.JIRA_RESOLVED_BY_DAY_TYPES = initialResolvedTypes;
     if (initialResolutionName === undefined) delete process.env.JIRA_RESOLUTION_NAME;
     else process.env.JIRA_RESOLUTION_NAME = initialResolutionName;
     if (initialResolutionId === undefined) delete process.env.JIRA_RESOLUTION_ID;
@@ -193,6 +201,124 @@ describe('WorklogApplicationService (phase D — Jira orchestration)', () => {
     expect(res.boards).toEqual([]);
   });
 
+  it('getResolvedByDay (JIRA_RESOLVED_BY_DAY_PROJECT) agrège par type', async () => {
+    process.env.JIRA_RESOLVED_BY_DAY_PROJECT = 'ADOR';
+    process.env.JIRA_RESOLVED_BY_DAY_GROUP_BY = 'type';
+    process.env.JIRA_RESOLVED_BY_DAY_TYPES = 'US,Bug dev';
+
+    mockJiraClient.searchIssuesWithPagination.mockResolvedValue({
+      issues: [
+        {
+          key: 'ADOR-1',
+          fields: {
+            resolutiondate: '2026-04-10T10:00:00.000Z',
+            issuetype: { name: 'US' },
+            customfield_10127: 2
+          }
+        },
+        {
+          key: 'ADOR-2',
+          fields: {
+            resolutiondate: '2026-04-10T14:00:00.000Z',
+            issuetype: { name: 'Bug dev' },
+            customfield_10127: 5
+          }
+        }
+      ],
+      total: 2,
+      startAt: 0,
+      maxResults: 2
+    });
+
+    const res = await service.getResolvedByDay('2026-04-10', '2026-04-10', 'tickets', false);
+    expect(res.totalResolvedTickets).toBe(2);
+    expect(res.types?.map((t) => t.name)).toEqual(['US', 'Bug dev']);
+    const row = res.byDay.find((d) => d.date === '2026-04-10');
+    expect(row).toBeDefined();
+    expect(row!.US).toBe(1);
+    expect(row!['Bug dev']).toBe(1);
+    const [[jql, fields, pageSize]] = mockJiraClient.searchIssuesWithPagination.mock.calls;
+    expect(jql).toContain('project = "ADOR"');
+    expect(jql).toContain('resolution = Resolved');
+    expect(fields).toContain('resolutiondate');
+    expect(pageSize).toBe(500);
+  });
+
+  it('getResolvedByDay (JIRA_RESOLVED_BY_DAY_PROJECT) agrège par équipe (boards configurés)', async () => {
+    process.env.JIRA_RESOLVED_BY_DAY_PROJECT = 'ADOR';
+    process.env.JIRA_RESOLVED_BY_DAY_GROUP_BY = 'team';
+    process.env.JIRA_RESOLVED_BY_DAY_TYPES = 'US';
+
+    mockJiraClient.configuredBoardIds = [1];
+    mockJiraClient.getBoard.mockResolvedValue({
+      id: 1,
+      name: 'Squad Alpha',
+      location: { projectKey: 'ADOR' }
+    });
+
+    mockJiraClient.searchIssuesWithPagination.mockResolvedValue({
+      issues: [
+        {
+          key: 'ADOR-1',
+          fields: {
+            resolutiondate: '2026-04-11T10:00:00.000Z',
+            issuetype: { name: 'US' },
+            customfield_10001: { name: 'Squad Alpha' },
+            customfield_10127: 3
+          }
+        },
+        {
+          key: 'ADOR-9',
+          fields: {
+            resolutiondate: '2026-04-11T12:00:00.000Z',
+            issuetype: { name: 'US' },
+            customfield_10001: null,
+            customfield_10127: 1
+          }
+        }
+      ],
+      total: 2,
+      startAt: 0,
+      maxResults: 2
+    });
+
+    const res = await service.getResolvedByDay('2026-04-11', '2026-04-11', 'tickets', false);
+    expect(res.totalResolvedTickets).toBe(2);
+    const row = res.byDay.find((d) => d.date === '2026-04-11');
+    expect(row).toBeDefined();
+    expect(row!['Squad Alpha']).toBe(1);
+    expect(row!.Autres).toBe(1);
+  });
+
+  it('getResolvedByDay (projet ADOR) sans boards: équipe null puis agrégation par type', async () => {
+    process.env.JIRA_RESOLVED_BY_DAY_PROJECT = 'ADOR';
+    process.env.JIRA_RESOLVED_BY_DAY_GROUP_BY = 'team';
+    process.env.JIRA_RESOLVED_BY_DAY_TYPES = 'US';
+
+    mockJiraClient.configuredBoardIds = [];
+    mockJiraClient.searchIssuesWithPagination.mockResolvedValue({
+      issues: [
+        {
+          key: 'ADOR-1',
+          fields: {
+            resolutiondate: '2026-04-12T10:00:00.000Z',
+            issuetype: { name: 'US' },
+            customfield_10127: 2
+          }
+        }
+      ],
+      total: 1,
+      startAt: 0,
+      maxResults: 1
+    });
+
+    const res = await service.getResolvedByDay('2026-04-12', '2026-04-12', 'tickets', false);
+    expect(res.totalResolvedTickets).toBe(1);
+    expect(res.types?.some((t) => t.name === 'US')).toBe(true);
+    const row = res.byDay.find((d) => d.date === '2026-04-12');
+    expect(row?.US).toBe(1);
+  });
+
   it('getSprintIssuesForBoard avec plage appelle search par projet + updated', async () => {
     mockJiraClient.searchIssuesWithPagination.mockResolvedValue({
       issues: [
@@ -215,6 +341,36 @@ describe('WorklogApplicationService (phase D — Jira orchestration)', () => {
     expect(res.issues).toHaveLength(1);
     expect(res.issues[0].issueKey).toBe('PROJ-9');
     expect(mockJiraClient.searchIssuesWithPagination).toHaveBeenCalled();
+  });
+
+  it('getSprintIssuesForBoard avec plage: search Jira échoue retourne résultat vide', async () => {
+    mockJiraClient.searchIssuesWithPagination.mockRejectedValueOnce(new Error('JQL timeout'));
+    const res = await service.getSprintIssuesForBoard(5, '2026-04-01', '2026-04-15');
+    expect(res.issues).toEqual([]);
+    expect(res.statusCounts.total).toBe(0);
+  });
+
+  it('getSprintIssuesForBoard sans plage: board sprint vide puis fallback getSprintIssues', async () => {
+    mockJiraClient.getBoardSprintIssues
+      .mockResolvedValueOnce([])
+      .mockResolvedValue([]);
+    mockJiraClient.getSprintIssues.mockResolvedValueOnce([
+      {
+        key: 'PROJ-77',
+        fields: {
+          summary: 'From sprint API',
+          issuetype: { name: 'Story' },
+          status: { name: 'In Progress', statusCategory: { key: 'indeterminate', name: 'In Progress' } },
+          customfield_10127: 2,
+          timeoriginalestimate: 1800
+        }
+      }
+    ]);
+    mockSprintRepo.findBacklogIssues.mockResolvedValueOnce([]);
+    const res = await service.getSprintIssuesForBoard(1);
+    expect(res.issues).toHaveLength(1);
+    expect(res.issues[0].issueKey).toBe('PROJ-77');
+    expect(mockJiraClient.getSprintIssues).toHaveBeenCalledWith(50, expect.stringContaining('customfield_10127'));
   });
 
   it('getSprintIssuesForBoard sans plage utilise sprints actifs et backlog', async () => {
@@ -318,6 +474,75 @@ describe('WorklogApplicationService (phase D — Jira orchestration)', () => {
     expect(res.epics[0].epicKey).toBe('PROJ-100');
   });
 
+  it('getEpicProgressByBoard Legend agrège via fetchLegendProgress (enfants epics)', async () => {
+    mockJiraClient.getBoard.mockResolvedValue({ id: 1, name: 'B', location: { projectKey: 'PROJ' } });
+    mockJiraClient.searchIssuesPage.mockResolvedValue({
+      issues: [
+        {
+          key: 'LEG-1',
+          fields: {
+            summary: 'Legend root',
+            issuetype: { name: 'Legend' },
+            status: { name: 'Open', statusCategory: { key: 'new' } },
+            customfield_10992: null,
+            customfield_10001: { name: 'T1' }
+          }
+        }
+      ],
+      startAt: 0,
+      maxResults: 20,
+      total: 1
+    });
+    mockJiraClient.searchApproximateCount.mockResolvedValue(1);
+
+    mockJiraClient.searchIssuesWithPagination.mockImplementation(
+      async (jql: string, fields: string) => {
+        if (jql.includes('parent = "LEG-1"') && fields === 'key,summary,issuetype') {
+          return {
+            issues: [
+              {
+                key: 'E-10',
+                fields: { summary: 'Child epic', issuetype: { name: 'Epic' } }
+              }
+            ],
+            total: 1,
+            startAt: 0,
+            maxResults: 1
+          };
+        }
+        if (jql.includes('"Epic Link" = "E-10"') || jql.includes('parent = "E-10"')) {
+          return {
+            issues: [
+              {
+                key: 'US-1',
+                fields: {
+                  aggregatetimeoriginalestimate: 3600,
+                  aggregatetimespent: 1800,
+                  subtasks: [],
+                  customfield_10127: 2,
+                  customfield_10001: { name: 'Dev' }
+                }
+              }
+            ],
+            total: 1,
+            startAt: 0,
+            maxResults: 1
+          };
+        }
+        return { issues: [], total: 0, startAt: 0, maxResults: 0 };
+      }
+    );
+
+    const res = await service.getEpicProgressByBoard(1, 'legend', 'all', 1, 20);
+    expect(res.epics).toHaveLength(1);
+    expect(res.epics[0].epicKey).toBe('LEG-1');
+    expect(res.epics[0].childIssueCount).toBe(1);
+    expect(res.epics[0].originalEstimateSeconds).toBe(3600);
+    expect(res.epics[0].timeSpentSeconds).toBe(1800);
+    expect(res.epics[0].teams).toContain('T1');
+    expect(res.epics[0].teams).toContain('Dev');
+  });
+
   it('searchEpicsByTitle avec et sans query', async () => {
     mockJiraClient.getBoard.mockResolvedValue({ id: 1, name: 'B', location: { projectKey: 'PROJ' } });
     mockJiraClient.searchIssuesLimited.mockResolvedValue({
@@ -373,5 +598,82 @@ describe('WorklogApplicationService (phase D — Jira orchestration)', () => {
     const details = await service.getEpicDetails('PROJ-1');
     expect(details.epicKey).toBe('PROJ-1');
     expect(details.children).toEqual([]);
+  });
+
+  it('getEpicDetails retourne la hiérarchie pour une Legend (enfants epics + US)', async () => {
+    mockJiraClient.searchIssuesWithPagination.mockImplementation(async (jql: string) => {
+      if (jql.includes('key = "LEG-1"')) {
+        return {
+          issues: [
+            {
+              key: 'LEG-1',
+              fields: {
+                summary: 'Ma legend',
+                issuetype: { name: 'Legend' },
+                status: { name: 'Open', statusCategory: { key: 'new' } },
+                timeoriginalestimate: 0,
+                timespent: 0,
+                customfield_10992: null
+              }
+            }
+          ],
+          total: 1,
+          startAt: 0,
+          maxResults: 1
+        };
+      }
+      if (jql.includes('parent = "LEG-1"')) {
+        return {
+          issues: [
+            {
+              key: 'E-10',
+              fields: {
+                summary: 'Epic enfant',
+                issuetype: { name: 'Epic' },
+                status: { name: 'Open', statusCategory: { key: 'new' } },
+                timeoriginalestimate: 0,
+                timespent: 0,
+                customfield_10127: 1
+              }
+            }
+          ],
+          total: 1,
+          startAt: 0,
+          maxResults: 1
+        };
+      }
+      if (jql.includes('"Epic Link" = "E-10"') || jql.includes('parent = "E-10"')) {
+        return {
+          issues: [
+            {
+              key: 'US-99',
+              fields: {
+                summary: 'Story',
+                issuetype: { name: 'Story' },
+                status: { name: 'Done', statusCategory: { key: 'done' } },
+                timeoriginalestimate: 7200,
+                timespent: 3600,
+                aggregatetimeoriginalestimate: 7200,
+                aggregatetimespent: 3600,
+                subtasks: [],
+                customfield_10127: 5
+              }
+            }
+          ],
+          total: 1,
+          startAt: 0,
+          maxResults: 1
+        };
+      }
+      return { issues: [], total: 0, startAt: 0, maxResults: 0 };
+    });
+
+    const details = await service.getEpicDetails('LEG-1');
+    expect(details.epicKey).toBe('LEG-1');
+    expect(details.issueType).toMatch(/legend/i);
+    expect(details.children).toHaveLength(1);
+    expect(details.children[0].issueKey).toBe('E-10');
+    expect(details.children[0].children).toHaveLength(1);
+    expect(details.children[0].children![0].issueKey).toBe('US-99');
   });
 });
