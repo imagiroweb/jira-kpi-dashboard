@@ -84,6 +84,13 @@ export interface EpicProgressItem {
   isOverrun: boolean;
   /** Teams associées (epic/legend + descendants) */
   teams?: string[];
+  /** Agrégats US enfants (backend KPI) — optionnels pour rétrocompat API */
+  ticketsDone?: number;
+  ticketsTodo?: number;
+  ticketsInProgress?: number;
+  storyPointsDone?: number;
+  storyPointsTodo?: number;
+  storyPointsInProgress?: number;
 }
 
 export interface EpicProgressResponse {

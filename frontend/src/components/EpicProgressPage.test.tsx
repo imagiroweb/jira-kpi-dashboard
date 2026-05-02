@@ -69,7 +69,13 @@ describe('EpicProgressPage', () => {
           totalStoryPoints: 5,
           progressPercent: 50,
           isOverrun: false,
-          teams: []
+          teams: [],
+          ticketsDone: 0,
+          ticketsTodo: 2,
+          ticketsInProgress: 0,
+          storyPointsDone: 0,
+          storyPointsTodo: 5,
+          storyPointsInProgress: 0
         },
         {
           epicKey: 'EPIC-2',
@@ -84,7 +90,13 @@ describe('EpicProgressPage', () => {
           totalStoryPoints: 8,
           progressPercent: 83,
           isOverrun: false,
-          teams: []
+          teams: [],
+          ticketsDone: 1,
+          ticketsTodo: 1,
+          ticketsInProgress: 1,
+          storyPointsDone: 2,
+          storyPointsTodo: 3,
+          storyPointsInProgress: 3
         }
       ]
     });
