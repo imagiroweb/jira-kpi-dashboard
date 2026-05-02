@@ -19,4 +19,22 @@ describe('getWorklogCalendarDate', () => {
     expect(getWorklogCalendarDate(date)).toBe('2026-04-29');
     process.env.JIRA_WORKLOG_DATE_TZ = initial;
   });
+
+  it('retombe sur ISO si formatToParts ne fournit pas année/mois/jour', () => {
+    const spy = jest.spyOn(Intl, 'DateTimeFormat').mockImplementation(
+      () =>
+        ({
+          formatToParts: () => [{ type: 'literal', value: '' }]
+        }) as unknown as Intl.DateTimeFormat
+    );
+    const date = new Date('2026-05-01T12:00:00.000Z');
+    expect(getWorklogCalendarDate(date, 'Europe/Paris')).toBe('2026-05-01');
+    spy.mockRestore();
+  });
+
+  it('accepte un fuseau non UTC explicite', () => {
+    const date = new Date('2026-05-01T12:00:00.000Z');
+    const cal = getWorklogCalendarDate(date, 'America/New_York');
+    expect(cal).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+  });
 });

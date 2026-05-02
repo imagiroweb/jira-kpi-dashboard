@@ -53,4 +53,33 @@ describe('SprintMapper', () => {
     expect(result[0].issueKey).toBe('A-1');
     expect(result[1].issueKey).toBe('A-2');
   });
+
+  it('toDomainList mappe chaque sprint', () => {
+    const list = SprintMapper.toDomainList(
+      [
+        { id: 1, name: 'A', state: 'active', boardId: 1 } as any,
+        { id: 2, name: 'B', state: 'future', boardId: 1 } as any
+      ],
+      7
+    );
+    expect(list).toHaveLength(2);
+    expect(list[0].id).toBe(1);
+    expect(list[1].boardId).toBe(7);
+  });
+
+  it('issueToDomin gère summary et status absents', () => {
+    const issue = SprintMapper.issueToDomin(
+      {
+        key: 'Z-1',
+        fields: {
+          customfield_sp: null,
+          timeoriginalestimate: null
+        }
+      } as any,
+      'customfield_sp'
+    );
+    expect(issue.summary).toBe('');
+    expect(issue.storyPoints).toBeNull();
+    expect(issue.originalEstimate).toBeNull();
+  });
 });

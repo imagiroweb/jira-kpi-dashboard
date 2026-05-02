@@ -1,4 +1,8 @@
-import { CachedSprintRepository, CachedWorklogRepository, globalCache } from './CacheDecorator';
+import {
+  CachedSprintRepository,
+  CachedWorklogRepository,
+  globalCache
+} from './CacheDecorator';
 import { DateRange } from '../../domain/worklog/value-objects/DateRange';
 
 describe('CacheDecorator', () => {
@@ -114,5 +118,80 @@ describe('CacheDecorator', () => {
     expect(setIntervalSpy).toHaveBeenCalled();
     expect(unref).toHaveBeenCalledTimes(1);
     setIntervalSpy.mockRestore();
+  });
+
+  it('CachedWorklogRepository met en cache findByProject et findByOpenSprints', async () => {
+    const inner = {
+      findByIssue: jest.fn(),
+      findByUser: jest.fn(),
+      findByProject: jest.fn().mockResolvedValue([{ id: 'p1' }]),
+      findByOpenSprints: jest.fn().mockResolvedValue([{ id: 'o1' }]),
+      search: jest.fn()
+    } as any;
+    const repo = new CachedWorklogRepository(inner);
+    const range = DateRange.create('2026-04-01', '2026-04-15');
+
+    await repo.findByProject('ABC', range);
+    await repo.findByProject('ABC', range);
+    expect(inner.findByProject).toHaveBeenCalledTimes(1);
+
+    await repo.findByOpenSprints();
+    await repo.findByOpenSprints();
+    expect(inner.findByOpenSprints).toHaveBeenCalledTimes(1);
+
+    await repo.findByOpenSprints('XYZ');
+    await repo.findByOpenSprints('XYZ');
+    expect(inner.findByOpenSprints).toHaveBeenCalledTimes(2);
+  });
+
+  it('CachedSprintRepository met en cache findOpenSprints, findClosedSprints, findSprintIssues, issues ouvertes et backlog', async () => {
+    const inner = {
+      findByBoard: jest.fn(),
+      findOpenSprints: jest.fn().mockResolvedValue([{ id: 1 }]),
+      findClosedSprints: jest.fn().mockResolvedValue([{ id: 2 }]),
+      findById: jest.fn(),
+      findSprintIssues: jest.fn().mockResolvedValue([]),
+      findOpenSprintIssues: jest.fn().mockResolvedValue([]),
+      findBacklogIssues: jest.fn().mockResolvedValue([])
+    } as any;
+    const repo = new CachedSprintRepository(inner);
+
+    await repo.findOpenSprints('P');
+    await repo.findOpenSprints('P');
+    expect(inner.findOpenSprints).toHaveBeenCalledTimes(1);
+
+    await repo.findClosedSprints('P', 20);
+    await repo.findClosedSprints('P', 20);
+    expect(inner.findClosedSprints).toHaveBeenCalledWith('P', 20);
+    expect(inner.findClosedSprints).toHaveBeenCalledTimes(1);
+
+    await repo.findSprintIssues(99);
+    await repo.findSprintIssues(99);
+    expect(inner.findSprintIssues).toHaveBeenCalledTimes(1);
+
+    await repo.findOpenSprintIssues('P');
+    await repo.findOpenSprintIssues('P');
+    expect(inner.findOpenSprintIssues).toHaveBeenCalledTimes(1);
+
+    await repo.findBacklogIssues('P', 50);
+    await repo.findBacklogIssues('P', 50);
+    expect(inner.findBacklogIssues).toHaveBeenCalledTimes(1);
+  });
+
+  it('CachedSprintRepository met en cache findById quand le sprint existe', async () => {
+    const sprint = { id: 5, equals: () => false };
+    const inner = {
+      findByBoard: jest.fn(),
+      findOpenSprints: jest.fn(),
+      findClosedSprints: jest.fn(),
+      findById: jest.fn().mockResolvedValue(sprint),
+      findSprintIssues: jest.fn(),
+      findOpenSprintIssues: jest.fn(),
+      findBacklogIssues: jest.fn()
+    } as any;
+    const repo = new CachedSprintRepository(inner);
+    await repo.findById(5);
+    await repo.findById(5);
+    expect(inner.findById).toHaveBeenCalledTimes(1);
   });
 });

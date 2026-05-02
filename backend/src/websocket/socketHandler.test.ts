@@ -105,5 +105,43 @@ describe('socketHandler', () => {
     emitAnalysisComplete(io as any, { report: true }, 'ABC');
     expect(io.to).toHaveBeenCalledWith('project:ABC');
     expect(io._toEmit).toHaveBeenCalledWith('analysis:complete', expect.objectContaining({ analysis: { report: true } }));
+
+    emitAlert(io as any, { level: 'warning', message: 'scoped', projectKey: 'PROJ' });
+    expect(io.to).toHaveBeenCalledWith('project:PROJ');
+    expect(io._toEmit).toHaveBeenCalledWith('alert:new', expect.objectContaining({ level: 'warning', projectKey: 'PROJ' }));
+  });
+
+  it('emitAnalysisComplete sans projectKey cible kpi:all', () => {
+    const io = makeIoMock();
+    emitAnalysisComplete(io as any, { onlyGlobal: true });
+    expect(io.to).toHaveBeenCalledWith('kpi:all');
+    expect(io._toEmit).toHaveBeenCalledWith(
+      'analysis:complete',
+      expect.objectContaining({ analysis: { onlyGlobal: true } })
+    );
+  });
+
+  it('request:sync, subscribe:kpi et error journalisent / émettent', () => {
+    const io = makeIoMock();
+    setupSocketHandlers(io as any);
+    const connectionCb = io.on.mock.calls.find((c) => c[0] === 'connection')?.[1];
+    const socket = makeSocketMock('sock-sync');
+    connectionCb(socket);
+
+    socket._handlers['subscribe:kpi']();
+    expect(socket.join).toHaveBeenCalledWith('kpi:all');
+
+    socket._handlers['request:sync']({ projectKey: 'ABC' });
+    expect(socket.emit).toHaveBeenCalledWith(
+      'sync:progress',
+      expect.objectContaining({ status: 'started' })
+    );
+    expect(io.emit).toHaveBeenCalledWith(
+      'sync:requested',
+      expect.objectContaining({ requestedBy: 'sock-sync', projectKey: 'ABC' })
+    );
+
+    socket._handlers['error'](new Error('socket err'));
+    expect(mockLogger.error).toHaveBeenCalled();
   });
 });

@@ -55,4 +55,42 @@ describe('SprintMetricsCalculator', () => {
     expect(calculator.calculateVelocityTrend([v3, v2, v1])).toBe('decreasing');
     expect(calculator.calculateVelocityTrend([v1, v2])).toBe('stable');
   });
+
+  it('calculateVelocity avec committed 0 évite division par zéro', () => {
+    const v = calculator.calculateVelocity(0, 0);
+    expect(v.completionRate).toBe(0);
+    expect(v.variancePercent).toBe(0);
+  });
+
+  it('calculate avec liste vide', () => {
+    const m = calculator.calculate([]);
+    expect(m.statusCounts.total).toBe(0);
+    expect(m.completionRate).toBe(0);
+  });
+
+  it('calculate avec issue hors colonnes todo/inprogress/qa/done', () => {
+    const orphan = makeIssue({
+      key: 'O-1',
+      status: 'Weird',
+      statusCategory: 'Unknown',
+      statusCategoryKey: 'undefined',
+      storyPoints: 1
+    });
+    const m = calculator.calculate([orphan]);
+    expect(m.statusCounts.total).toBe(1);
+    expect(m.statusCounts.todo).toBe(0);
+    expect(m.statusCounts.inProgress).toBe(0);
+    expect(m.statusCounts.qa).toBe(0);
+    expect(m.statusCounts.resolved).toBe(0);
+    expect(m.storyPointsByStatus.total).toBe(1);
+  });
+
+  it('calculateVelocityTrend stable si variation entre -10 et 10 %', () => {
+    const flat = [
+      calculator.calculateVelocity(10, 10),
+      calculator.calculateVelocity(10, 10),
+      calculator.calculateVelocity(10, 11)
+    ];
+    expect(calculator.calculateVelocityTrend(flat)).toBe('stable');
+  });
 });
