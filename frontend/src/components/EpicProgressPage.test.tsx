@@ -95,8 +95,11 @@ describe('EpicProgressPage', () => {
       expect(mockGetProgress).toHaveBeenCalledWith(12, 'all', 'all', 1, 20, undefined);
     });
 
-    const cardEpic1 = screen.getByText(/EPIC-1/).closest('button');
-    const cardEpic2 = screen.getByText(/EPIC-2/).closest('button');
+    // Attendre le re-render après résolution de getProgress (évite une course en CI).
+    const titleEpic1 = await screen.findByText(/EPIC-1 •/);
+    const titleEpic2 = await screen.findByText(/EPIC-2 •/);
+    const cardEpic1 = titleEpic1.closest('button');
+    const cardEpic2 = titleEpic2.closest('button');
     expect(cardEpic1).toBeInTheDocument();
     expect(cardEpic2).toBeInTheDocument();
     expect(cardEpic2!.compareDocumentPosition(cardEpic1!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
