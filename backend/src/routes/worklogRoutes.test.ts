@@ -108,6 +108,21 @@ describe('worklogRoutes', () => {
     expect(mockWorklogAppService.getWorklogsForUser).not.toHaveBeenCalled();
   });
 
+  it('GET /api/worklog/user/:accountId retourne 200 avec métriques puis 500 en erreur', async () => {
+    const ok = await request(app)
+      .get('/api/worklog/user/u-1')
+      .query({ from: '2026-04-01', to: '2026-04-15' });
+    expect(ok.status).toBe(200);
+    expect(ok.body.totalHours).toBe(1);
+
+    mockWorklogAppService.getWorklogsForUser.mockRejectedValueOnce(new Error('boom'));
+    const err = await request(app)
+      .get('/api/worklog/user/u-1')
+      .query({ from: '2026-04-01', to: '2026-04-15' });
+    expect(err.status).toBe(500);
+    expect(err.body.success).toBe(false);
+  });
+
   it('GET /api/worklog/test retourne l’état de connexion', async () => {
     const res = await request(app).get('/api/worklog/test');
     expect(res.status).toBe(200);
@@ -170,6 +185,49 @@ describe('worklogRoutes', () => {
     );
   });
 
+  it('GET /api/worklog/search avec openSprints et plage fixe active openSprintsFlag', async () => {
+    const res = await request(app)
+      .get('/api/worklog/search')
+      .query({ from: '2026-04-01', to: '2026-04-10', openSprints: 'true' });
+    expect(res.status).toBe(200);
+    expect(mockWorklogAppService.searchWorklogs).toHaveBeenCalledWith(
+      expect.objectContaining({ from: '2026-04-01', to: '2026-04-10', openSprints: true })
+    );
+  });
+
+  it('GET /api/worklog/search avec openSprints sans dates complète via sprint actif', async () => {
+    const res = await request(app).get('/api/worklog/search').query({ openSprints: 'true' });
+    expect(res.status).toBe(200);
+    expect(mockWorklogAppService.getActiveSprintDateRange).toHaveBeenCalled();
+    expect(mockWorklogAppService.searchWorklogs).toHaveBeenCalledWith(
+      expect.objectContaining({
+        from: '2026-04-01',
+        to: '2026-04-15',
+        openSprints: true
+      })
+    );
+  });
+
+  it('GET /api/worklog/search retourne 500 en erreur', async () => {
+    mockWorklogAppService.searchWorklogs.mockRejectedValueOnce(new Error('boom'));
+    const res = await request(app)
+      .get('/api/worklog/search')
+      .query({ from: '2026-04-01', to: '2026-04-10' });
+    expect(res.status).toBe(500);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('GET /api/worklog/search sans projet explicite utilise un seul projet configuré', async () => {
+    mockWorklogAppService.getConfiguredProjects.mockResolvedValueOnce(['ONLY']);
+    const res = await request(app)
+      .get('/api/worklog/search')
+      .query({ from: '2026-04-01', to: '2026-04-10' });
+    expect(res.status).toBe(200);
+    expect(mockWorklogAppService.searchWorklogs).toHaveBeenCalledWith(
+      expect.objectContaining({ projectKey: 'ONLY' })
+    );
+  });
+
   it('GET /api/worklog/report retourne 400 sans plage ni activeSprint resolvable', async () => {
     mockWorklogAppService.getActiveSprintDateRange.mockResolvedValue(null);
     const res = await request(app).get('/api/worklog/report').query({ activeSprint: 'true' });
@@ -192,6 +250,46 @@ describe('worklogRoutes', () => {
     expect(mockWorklogAppService.searchWorklogs).toHaveBeenCalledWith(
       expect.objectContaining({ projectKey: 'ABC', openSprints: false })
     );
+  });
+
+  it('GET /api/worklog/report groupe sur byProject quand groupBy=project', async () => {
+    mockWorklogAppService.calculateMetrics.mockReturnValue({
+      ...defaultMetrics,
+      byProject: { ABC: { timeSpentHours: 3 } }
+    });
+    const res = await request(app)
+      .get('/api/worklog/report')
+      .query({ from: '2026-04-01', to: '2026-04-15', groupBy: 'project' });
+    expect(res.status).toBe(200);
+    expect(res.body.groupBy).toBe('project');
+    expect(res.body.data).toEqual({ ABC: { timeSpentHours: 3 } });
+  });
+
+  it('GET /api/worklog/report groupe par jour par défaut (groupBy=day)', async () => {
+    const res = await request(app)
+      .get('/api/worklog/report')
+      .query({ from: '2026-04-01', to: '2026-04-15', groupBy: 'day' });
+    expect(res.status).toBe(200);
+    expect(res.body.groupBy).toBe('day');
+    expect(res.body.data).toEqual(defaultMetrics.byDay);
+  });
+
+  it('GET /api/worklog/report avec activeSprint résout la plage', async () => {
+    const res = await request(app).get('/api/worklog/report').query({ activeSprint: 'true' });
+    expect(res.status).toBe(200);
+    expect(res.body.activeSprint).toBe(true);
+    expect(res.body.period).toEqual(
+      expect.objectContaining({ activeSprint: true, from: '2026-04-01', to: '2026-04-15' })
+    );
+  });
+
+  it('GET /api/worklog/report retourne 500 en erreur', async () => {
+    mockWorklogAppService.searchWorklogs.mockRejectedValueOnce(new Error('boom'));
+    const res = await request(app)
+      .get('/api/worklog/report')
+      .query({ from: '2026-04-01', to: '2026-04-15' });
+    expect(res.status).toBe(500);
+    expect(res.body.success).toBe(false);
   });
 
   it('GET /api/worklog/project/:projectKey retourne 400 si from/to manquants', async () => {
@@ -252,6 +350,13 @@ describe('worklogRoutes', () => {
     const res = await request(app).get('/api/worklog/support-kpi');
     expect(res.status).toBe(200);
     expect(mockWorklogAppService.getSupportBoardKPI).toHaveBeenCalledWith(undefined, undefined, true);
+  });
+
+  it('GET /api/worklog/support-kpi passe from/to et activeSprint=false', async () => {
+    await request(app)
+      .get('/api/worklog/support-kpi')
+      .query({ from: '2026-04-01', to: '2026-04-15', activeSprint: 'false' });
+    expect(mockWorklogAppService.getSupportBoardKPI).toHaveBeenCalledWith('2026-04-01', '2026-04-15', false);
   });
 
   it('GET /api/worklog/support-kpi retourne 500 en erreur', async () => {
@@ -354,6 +459,19 @@ describe('worklogRoutes', () => {
     expect(res.status).toBe(201);
     expect(res.body.success).toBe(true);
     expect(SupportSprintSnapshot.create).toHaveBeenCalled();
+  });
+
+  it('POST /api/worklog/support-snapshot retourne 500 si create échoue', async () => {
+    mockWorklogAppService.getSupportBoardKPI.mockResolvedValue({
+      statusCounts: { total: 1 },
+      ponderationByStatus: { total: 1 }
+    });
+    (SupportSprintSnapshot.create as jest.Mock).mockRejectedValueOnce(new Error('db'));
+    const res = await request(app)
+      .post('/api/worklog/support-snapshot')
+      .send({ sprintName: 'S1' });
+    expect(res.status).toBe(500);
+    expect(res.body.success).toBe(false);
   });
 
   it('GET /api/worklog/support-snapshots retourne la liste mappée', async () => {

@@ -106,4 +106,102 @@ describe('brevoRoutes', () => {
     expect(mockBrevoClient.getCampaignRecipientEmails).toHaveBeenCalledWith(10, 'clickers');
     expect(res.body.emails).toEqual(['a@test.com']);
   });
+
+  it('GET /api/brevo/account retourne 200 avec le compte', async () => {
+    const res = await request(app).get('/api/brevo/account');
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.account.email).toBe('owner@test.com');
+  });
+
+  it('GET /api/brevo/account retourne 502 si getAccount renvoie null', async () => {
+    mockBrevoClient.getAccount.mockResolvedValueOnce(null);
+    const res = await request(app).get('/api/brevo/account');
+    expect(res.status).toBe(502);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('GET /api/brevo/account retourne 500 en exception', async () => {
+    mockBrevoClient.getAccount.mockRejectedValueOnce(new Error('boom'));
+    const res = await request(app).get('/api/brevo/account');
+    expect(res.status).toBe(500);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('GET /api/brevo/stats retourne 503 si non configuré', async () => {
+    mockBrevoClient.isConfigured.mockReturnValue(false);
+    const res = await request(app).get('/api/brevo/stats');
+    expect(res.status).toBe(503);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('GET /api/brevo/stats met brevoAuthFailed si tout est vide et compte null', async () => {
+    mockBrevoClient.getContactsCount.mockResolvedValue(0);
+    mockBrevoClient.getLists.mockResolvedValue([]);
+    mockBrevoClient.getCampaigns.mockResolvedValue([]);
+    mockBrevoClient.getManualCampaigns.mockResolvedValue([]);
+    mockBrevoClient.getAccount.mockResolvedValueOnce(null);
+    const res = await request(app).get('/api/brevo/stats');
+    expect(res.status).toBe(200);
+    expect(res.body.brevoAuthFailed).toBe(true);
+  });
+
+  it('GET /api/brevo/stats normalise statistics sans globalStats (opened, uniqueClicks)', async () => {
+    mockBrevoClient.getCampaigns.mockResolvedValue([
+      {
+        id: 1,
+        name: 'C',
+        type: 'classic',
+        status: 'sent',
+        statistics: { opened: 2, uniqueClicks: 1, unsubscribed: 0, hardBounces: 0, softBounces: 0, sent: 1, delivered: 1 }
+      }
+    ]);
+    const res = await request(app).get('/api/brevo/stats');
+    expect(res.status).toBe(200);
+    const stats = res.body.stats.recentCampaigns[0].statistics;
+    expect(stats.opened).toBe(2);
+    expect(stats.clicked).toBe(1);
+  });
+
+  it('GET /api/brevo/stats retourne 500 en exception', async () => {
+    mockBrevoClient.getContactsCount.mockRejectedValueOnce(new Error('boom'));
+    const res = await request(app).get('/api/brevo/stats');
+    expect(res.status).toBe(500);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('GET /api/brevo/transactional/events retourne 503 si non configuré', async () => {
+    mockBrevoClient.isConfigured.mockReturnValue(false);
+    const res = await request(app).get('/api/brevo/transactional/events');
+    expect(res.status).toBe(503);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('GET /api/brevo/transactional/events ignore event inconnu', async () => {
+    await request(app).get('/api/brevo/transactional/events').query({ event: 'not-a-real-type' });
+    expect(mockBrevoClient.getTransactionalEvents).toHaveBeenCalledWith(
+      expect.objectContaining({ event: undefined })
+    );
+  });
+
+  it('GET /api/brevo/transactional/events retourne 500 en exception', async () => {
+    mockBrevoClient.getTransactionalEvents.mockRejectedValueOnce(new Error('boom'));
+    const res = await request(app).get('/api/brevo/transactional/events');
+    expect(res.status).toBe(500);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('GET /api/brevo/campaigns/:id/recipients retourne 503 si non configuré', async () => {
+    mockBrevoClient.isConfigured.mockReturnValue(false);
+    const res = await request(app).get('/api/brevo/campaigns/10/recipients').query({ type: 'clickers' });
+    expect(res.status).toBe(503);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('GET /api/brevo/campaigns/:id/recipients retourne 500 en exception', async () => {
+    mockBrevoClient.getCampaignRecipientEmails.mockRejectedValueOnce(new Error('boom'));
+    const res = await request(app).get('/api/brevo/campaigns/10/recipients').query({ type: 'unsubscribed' });
+    expect(res.status).toBe(500);
+    expect(res.body.success).toBe(false);
+  });
 });

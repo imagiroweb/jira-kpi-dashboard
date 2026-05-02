@@ -67,4 +67,27 @@ describe('healthRoutes', () => {
     expect(res.status).toBe(503);
     expect(res.body.status).toBe('not ready');
   });
+
+  it('GET /api/health/live retourne alive', async () => {
+    const res = await request(app).get('/api/health/live');
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe('alive');
+  });
+
+  it('GET /api/health/detailed retourne 503 si testConnection lève', async () => {
+    mockTestConnection.mockRejectedValueOnce(new Error('boom'));
+    const res = await request(app).get('/api/health/detailed');
+    expect(res.status).toBe(503);
+    expect(res.body.status).toBe('degraded');
+    expect(res.body.services.jira.status).toBe('error');
+    expect(res.body.services.jira.message).toBe('Connection check failed');
+  });
+
+  it('GET /api/health/ready retourne 503 si testConnection lève', async () => {
+    mockTestConnection.mockRejectedValueOnce(new Error('boom'));
+    const res = await request(app).get('/api/health/ready');
+    expect(res.status).toBe(503);
+    expect(res.body.status).toBe('not ready');
+    expect(res.body.reason).toBe('Health check failed');
+  });
 });

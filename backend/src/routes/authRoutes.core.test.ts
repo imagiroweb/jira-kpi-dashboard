@@ -253,4 +253,29 @@ describe('authRoutes (core)', () => {
     expect(res.status).toBe(400);
     expect(res.body.success).toBe(false);
   });
+
+  it('POST /api/auth/register retourne 500 si exception', async () => {
+    mockAuthService.register.mockRejectedValueOnce(new Error('boom'));
+    const res = await request(app)
+      .post('/api/auth/register')
+      .send({ email: 'user@test.com', password: 'ValidPass123!', firstName: 'A', lastName: 'B' });
+    expect(res.status).toBe(500);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('POST /api/auth/validate-password retourne 500 si exception', async () => {
+    mockAuthService.validatePassword.mockImplementationOnce(() => {
+      throw new Error('boom');
+    });
+    const res = await request(app).post('/api/auth/validate-password').send({ password: 'ValidPass123!' });
+    expect(res.status).toBe(500);
+    expect(res.body.success).toBe(false);
+  });
+
+  it('PATCH /api/auth/me/role retourne 500 si exception', async () => {
+    mockAuthService.setMyRole.mockRejectedValueOnce(new Error('boom'));
+    const res = await request(app).patch('/api/auth/me/role').send({ roleId: '507f1f77bcf86cd799439011' });
+    expect(res.status).toBe(500);
+    expect(res.body.success).toBe(false);
+  });
 });
