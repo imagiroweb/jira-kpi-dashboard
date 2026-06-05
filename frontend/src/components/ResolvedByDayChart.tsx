@@ -46,6 +46,7 @@ export function ResolvedByDayChart({ dateRange, boards, useActiveSprint = false 
   const [error, setError] = useState<string | null>(null);
 
   const loadData = useCallback(async () => {
+    if (boards.length === 0) return;
     if (!useActiveSprint && (!dateRange.from || !dateRange.to)) return;
     setIsLoading(true);
     setError(null);
@@ -83,7 +84,7 @@ export function ResolvedByDayChart({ dateRange, boards, useActiveSprint = false 
     } finally {
       setIsLoading(false);
     }
-  }, [dateRange.from, dateRange.to, useActiveSprint]);
+  }, [boards.length, dateRange.from, dateRange.to, useActiveSprint]);
 
   const displayRange = effectiveDateRange || dateRange;
 

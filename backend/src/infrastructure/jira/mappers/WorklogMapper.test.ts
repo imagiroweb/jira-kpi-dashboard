@@ -1,8 +1,9 @@
 import { WorklogMapper } from './WorklogMapper';
+import type { JiraWorklog } from '../JiraClient';
 
 describe('WorklogMapper', () => {
   it('mappe un JiraWorklog vers Worklog domaine', () => {
-    const jiraWorklog: any = {
+    const jiraWorklog: JiraWorklog = {
       id: 'w1',
       started: '2026-04-01T10:00:00.000Z',
       timeSpentSeconds: 3600,
@@ -45,7 +46,7 @@ describe('WorklogMapper', () => {
   });
 
   it('retourne description vide si commentaire non exploitable', () => {
-    const jiraWorklog: any = {
+    const jiraWorklog: JiraWorklog = {
       id: 'w2',
       started: '2026-04-01T10:00:00.000Z',
       timeSpentSeconds: 60,
@@ -59,9 +60,9 @@ describe('WorklogMapper', () => {
   it('toDomainList mappe toute la liste', () => {
     const list = WorklogMapper.toDomainList(
       [
-        { id: '1', started: '2026-04-01T10:00:00.000Z', timeSpentSeconds: 60, author: { accountId: 'u1', displayName: 'A' } } as any,
-        { id: '2', started: '2026-04-01T10:00:00.000Z', timeSpentSeconds: 120, author: { accountId: 'u2', displayName: 'B' } } as any
-      ],
+        { id: '1', started: '2026-04-01T10:00:00.000Z', timeSpentSeconds: 60, author: { accountId: 'u1', displayName: 'A' } },
+        { id: '2', started: '2026-04-01T10:00:00.000Z', timeSpentSeconds: 120, author: { accountId: 'u2', displayName: 'B' } }
+      ] satisfies JiraWorklog[],
       'ABC-1'
     );
     expect(list).toHaveLength(2);

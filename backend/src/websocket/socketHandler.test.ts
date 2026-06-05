@@ -7,6 +7,7 @@ jest.mock('../utils/logger', () => ({
   }
 }));
 
+import type { Server, Socket } from 'socket.io';
 import { logger } from '../utils/logger';
 import {
   setupSocketHandlers,
@@ -26,7 +27,27 @@ const mockLogger = logger as unknown as {
   debug: jest.Mock;
 };
 
-function makeIoMock() {
+type SocketEventHandler = (...args: unknown[]) => unknown;
+
+type IoMock = {
+  emit: jest.Mock;
+  to: jest.Mock;
+  use: jest.Mock;
+  on: jest.Mock;
+  _toEmit: jest.Mock;
+};
+
+type SocketMock = {
+  id: string;
+  handshake: { auth: Record<string, unknown> };
+  on: jest.Mock;
+  join: jest.Mock;
+  leave: jest.Mock;
+  emit: jest.Mock;
+  _handlers: Record<string, SocketEventHandler>;
+};
+
+function makeIoMock(): IoMock {
   const ioEmit = jest.fn();
   const toEmit = jest.fn();
   const to = jest.fn(() => ({ emit: toEmit }));
@@ -35,12 +56,12 @@ function makeIoMock() {
   return { emit: ioEmit, to, use, on, _toEmit: toEmit };
 }
 
-function makeSocketMock(id: string) {
-  const handlers: Record<string, (...args: any[]) => any> = {};
+function makeSocketMock(id: string): SocketMock {
+  const handlers: Record<string, SocketEventHandler> = {};
   return {
     id,
     handshake: { auth: {} },
-    on: jest.fn((event: string, cb: (...args: any[]) => any) => {
+    on: jest.fn((event: string, cb: SocketEventHandler) => {
       handlers[event] = cb;
     }),
     join: jest.fn(),
@@ -50,6 +71,10 @@ function makeSocketMock(id: string) {
   };
 }
 
+function asServer(io: IoMock): Server {
+  return io as unknown as Server;
+}
+
 describe('socketHandler', () => {
   beforeEach(() => {
     jest.clearAllMocks();
@@ -57,18 +82,20 @@ describe('socketHandler', () => {
 
   it('setupSocketHandlers enregistre middleware et handlers de connexion', () => {
     const io = makeIoMock();
-    setupSocketHandlers(io as any);
+    setupSocketHandlers(asServer(io));
     expect(io.use).toHaveBeenCalledTimes(1);
     expect(io.on).toHaveBeenCalledWith('connection', expect.any(Function));
   });
 
   it('gère subscribe/unsubscribe/ping/disconnect et met à jour les clients connectés', () => {
     const io = makeIoMock();
-    setupSocketHandlers(io as any);
-    const connectionCb = io.on.mock.calls.find((c) => c[0] === 'connection')?.[1];
+    setupSocketHandlers(asServer(io));
+    const connectionCb = io.on.mock.calls.find((c) => c[0] === 'connection')?.[1] as
+      | ((socket: Socket) => void)
+      | undefined;
     const socket = makeSocketMock('sock-1');
 
-    connectionCb(socket);
+    connectionCb?.(socket as unknown as Socket);
     expect(getConnectedClientsCount()).toBeGreaterThanOrEqual(1);
 
     socket._handlers['subscribe:project']('ABC');
@@ -88,32 +115,32 @@ describe('socketHandler', () => {
   it('émet les événements helpers vers les bons canaux', () => {
     const io = makeIoMock();
 
-    emitKPIUpdate(io as any, { x: 1 });
+    emitKPIUpdate(asServer(io), { x: 1 });
     expect(io.to).toHaveBeenCalledWith('kpi:all');
     expect(io._toEmit).toHaveBeenCalledWith('kpi:update', { x: 1 });
 
-    emitProjectUpdate(io as any, 'ABC', { y: 2 });
+    emitProjectUpdate(asServer(io), 'ABC', { y: 2 });
     expect(io.to).toHaveBeenCalledWith('project:ABC');
     expect(io._toEmit).toHaveBeenCalledWith('project:update', { y: 2 });
 
-    emitSyncProgress(io as any, { status: 'started', progress: 0, message: 'start' });
+    emitSyncProgress(asServer(io), { status: 'started', progress: 0, message: 'start' });
     expect(io.emit).toHaveBeenCalledWith('sync:progress', { status: 'started', progress: 0, message: 'start' });
 
-    emitAlert(io as any, { level: 'info', message: 'hello' });
+    emitAlert(asServer(io), { level: 'info', message: 'hello' });
     expect(io.emit).toHaveBeenCalledWith('alert:new', expect.objectContaining({ level: 'info', message: 'hello' }));
 
-    emitAnalysisComplete(io as any, { report: true }, 'ABC');
+    emitAnalysisComplete(asServer(io), { report: true }, 'ABC');
     expect(io.to).toHaveBeenCalledWith('project:ABC');
     expect(io._toEmit).toHaveBeenCalledWith('analysis:complete', expect.objectContaining({ analysis: { report: true } }));
 
-    emitAlert(io as any, { level: 'warning', message: 'scoped', projectKey: 'PROJ' });
+    emitAlert(asServer(io), { level: 'warning', message: 'scoped', projectKey: 'PROJ' });
     expect(io.to).toHaveBeenCalledWith('project:PROJ');
     expect(io._toEmit).toHaveBeenCalledWith('alert:new', expect.objectContaining({ level: 'warning', projectKey: 'PROJ' }));
   });
 
   it('emitAnalysisComplete sans projectKey cible kpi:all', () => {
     const io = makeIoMock();
-    emitAnalysisComplete(io as any, { onlyGlobal: true });
+    emitAnalysisComplete(asServer(io), { onlyGlobal: true });
     expect(io.to).toHaveBeenCalledWith('kpi:all');
     expect(io._toEmit).toHaveBeenCalledWith(
       'analysis:complete',
@@ -123,10 +150,12 @@ describe('socketHandler', () => {
 
   it('request:sync, subscribe:kpi et error journalisent / émettent', () => {
     const io = makeIoMock();
-    setupSocketHandlers(io as any);
-    const connectionCb = io.on.mock.calls.find((c) => c[0] === 'connection')?.[1];
+    setupSocketHandlers(asServer(io));
+    const connectionCb = io.on.mock.calls.find((c) => c[0] === 'connection')?.[1] as
+      | ((socket: Socket) => void)
+      | undefined;
     const socket = makeSocketMock('sock-sync');
-    connectionCb(socket);
+    connectionCb?.(socket as unknown as Socket);
 
     socket._handlers['subscribe:kpi']();
     expect(socket.join).toHaveBeenCalledWith('kpi:all');

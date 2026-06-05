@@ -34,6 +34,8 @@ Détails des schémas et réponses : voir les blocs `@swagger` dans `src/routes/
 
 ## Tests
 
+Voir aussi le [guide général des tests de routes](./testing-routes.md).
+
 ### Backend (Jest)
 
 - **TU**

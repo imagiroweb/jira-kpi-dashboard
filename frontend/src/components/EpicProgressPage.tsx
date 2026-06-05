@@ -29,8 +29,6 @@ function formatHoursOnly(seconds: number): string {
   return `${hours.toFixed(1)}h`;
 }
 
-export { TICKET_PREFIXES, type TicketPrefixFilter, buildStoryPointsDetailRows, type StoryPointsDetailRow } from '../domain/epicProgress';
-
 function getStatusLabel(statusCategoryKey: string | null): string {
   switch (statusCategoryKey) {
     case 'done':

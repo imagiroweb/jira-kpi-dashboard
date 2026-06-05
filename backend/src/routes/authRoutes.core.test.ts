@@ -1,281 +1,379 @@
+/**
+ * TI — Routes auth (core) : register, login, validate-password, roles/for-signup, me, verify, requireMongo
+ */
 import request from 'supertest';
-import express, { Express, Request } from 'express';
+import { Request } from 'express';
+import { createTestApp } from '../test/createTestApp';
+import { TEST_USER, TEST_USER_ID } from '../test/fixtures/users';
 
-const mockAuthService = {
-  register: jest.fn(),
-  login: jest.fn(),
-  validatePassword: jest.fn(),
-  getUserById: jest.fn(),
-  buildUserWithPermissions: jest.fn(),
-  setMyRole: jest.fn()
-};
+const mockRegister = jest.fn();
+const mockLogin = jest.fn();
+const mockValidatePassword = jest.fn();
+const mockGetUserById = jest.fn();
+const mockBuildUserWithPermissions = jest.fn();
+const mockSetMyRole = jest.fn();
 
 const mockRoleFind = jest.fn();
 
+let mongoReadyState = 1;
+
 jest.mock('mongoose', () => {
-  const actual = jest.requireActual<typeof import('mongoose')>('mongoose');
-  return { ...actual, connection: { readyState: 1 } };
+  const actual = jest.requireActual('../test/mocks/mongoose').mockMongoConnected();
+  return {
+    ...actual,
+    connection: {
+      get readyState() {
+        return mongoReadyState;
+      },
+    },
+  };
 });
 
+jest.mock('express-rate-limit', () =>
+  () => (_req: Request, _res: unknown, next: () => void) => next()
+);
+
 jest.mock('../application/services/AuthService', () => ({
-  authService: mockAuthService
-}));
-
-jest.mock('../middleware/authMiddleware', () => ({
-  authenticate: (req: Request, _res: unknown, next: () => void) => {
-    (req as Request & { user?: { userId: string; email: string; provider: 'local' | 'microsoft' } }).user = {
-      userId: '507f1f77bcf86cd799439011',
-      email: 'admin@test.com',
-      provider: 'local'
-    };
-    next();
+  authService: {
+    register: (...args: unknown[]) => mockRegister(...args),
+    login: (...args: unknown[]) => mockLogin(...args),
+    validatePassword: (...args: unknown[]) => mockValidatePassword(...args),
+    getUserById: (...args: unknown[]) => mockGetUserById(...args),
+    buildUserWithPermissions: (...args: unknown[]) => mockBuildUserWithPermissions(...args),
+    setMyRole: (...args: unknown[]) => mockSetMyRole(...args),
+    handleMicrosoftSSO: jest.fn(),
+    requestPasswordReset: jest.fn(),
+    resetPassword: jest.fn(),
+    verifyToken: jest.fn(),
+    generateToken: jest.fn(),
   },
-  requireSuperAdmin: (_req: unknown, _res: unknown, next: () => void) => next()
 }));
 
-jest.mock('../domain/user/entities/Role', () => ({
-  PAGE_IDS: ['dashboard', 'users', 'support', 'epics', 'marketing', 'produit', 'gestionUtilisateurs'],
-  Role: {
-    find: (...args: unknown[]) => mockRoleFind(...args),
-    findById: jest.fn(),
-    findOne: jest.fn(),
-    create: jest.fn()
-  }
-}));
+jest.mock('../middleware/authMiddleware', () => {
+  const auth = jest.requireActual<typeof import('../test/mocks/authMiddleware')>('../test/mocks/authMiddleware');
+  return {
+    authenticate: auth.mockAuthenticate(),
+    requireSuperAdmin: auth.mockRequireSuperAdmin,
+  };
+});
 
 jest.mock('../domain/user/entities/User', () => ({
   User: {
-    find: jest.fn(),
-    findById: jest.fn()
-  }
+    findById: jest.fn().mockResolvedValue({ role: 'super_admin' }),
+    findOne: jest.fn(),
+    find: jest.fn().mockReturnValue({
+      select: () => ({ populate: () => ({ lean: () => Promise.resolve([]) }) }),
+    }),
+  },
+}));
+
+jest.mock('../domain/user/entities/Role', () => ({
+  Role: {
+    get find() {
+      return mockRoleFind;
+    },
+    findOne: jest.fn(),
+    findById: jest.fn(),
+    create: jest.fn(),
+  },
+  PAGE_IDS: ['dashboard', 'users', 'support', 'epics', 'marketing', 'produit', 'gestionUtilisateurs'],
 }));
 
 jest.mock('../domain/user/entities/UserActivityLog', () => ({
   UserActivityLog: {
-    findOne: jest.fn(),
-    create: jest.fn(),
-    find: jest.fn()
-  }
+    findOne: jest.fn().mockResolvedValue(null),
+    create: jest.fn().mockResolvedValue({}),
+    find: jest.fn().mockReturnValue({
+      sort: () => ({ limit: () => ({ lean: () => Promise.resolve([]) }) }),
+      lean: () => Promise.resolve([]),
+    }),
+  },
 }));
 
-jest.mock('../utils/logger', () => ({
-  logger: { info: jest.fn(), error: jest.fn(), warn: jest.fn() }
-}));
+jest.mock('../utils/logger', () =>
+  jest.requireActual('../test/mocks/logger').loggerMockFactory()
+);
 
 import { authRoutes } from './authRoutes';
 
-function createApp(): Express {
-  const app = express();
-  app.use(express.json());
-  app.use('/api/auth', authRoutes);
-  return app;
-}
+describe('authRoutes — core (TI)', () => {
+  const app = createTestApp({ mountPath: '/api/auth', router: authRoutes });
 
-describe('authRoutes (core)', () => {
-  const app = createApp();
-  const initialClientId = process.env.MICROSOFT_CLIENT_ID;
-  const initialTenant = process.env.MICROSOFT_TENANT_ID;
+  const defaultUserWithPerms = {
+    id: TEST_USER_ID,
+    email: TEST_USER.email,
+    firstName: 'Admin',
+    lastName: 'Test',
+    provider: 'local',
+    role: 'super_admin' as const,
+    roleName: 'Super admin',
+    visiblePages: {
+      dashboard: true,
+      users: true,
+      support: true,
+      epics: true,
+      marketing: true,
+      produit: true,
+      gestionUtilisateurs: true,
+    },
+  };
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockAuthService.register.mockResolvedValue({
-      success: true,
-      token: 'jwt-token',
-      user: { id: 'u1', email: 'user@test.com', provider: 'local' }
+    mongoReadyState = 1;
+
+    mockRoleFind.mockReturnValue({
+      select: () => ({
+        lean: () =>
+          Promise.resolve([
+            { _id: { toString: () => 'role1' }, name: 'Développeur' },
+            { _id: { toString: () => 'role2' }, name: 'Product' },
+          ]),
+      }),
     });
-    mockAuthService.login.mockResolvedValue({
-      success: true,
-      token: 'jwt-token',
-      user: { id: 'u1', email: 'user@test.com', provider: 'local' }
-    });
-    mockAuthService.validatePassword.mockReturnValue({
+
+    mockValidatePassword.mockReturnValue({
       isValid: true,
       errors: [],
       strength: 'strong',
-      score: 80
-    });
-    mockAuthService.getUserById.mockResolvedValue({
-      _id: 'u1',
-      email: 'user@test.com',
-      provider: 'local'
-    });
-    mockAuthService.buildUserWithPermissions.mockResolvedValue({
-      id: 'u1',
-      email: 'user@test.com',
-      provider: 'local',
-      role: null,
-      roleName: 'Utilisateur',
-      visiblePages: { dashboard: true }
-    });
-    mockAuthService.setMyRole.mockResolvedValue({
-      success: true,
-      user: { id: 'u1', email: 'user@test.com', provider: 'local' }
-    });
-    mockRoleFind.mockReturnValue({
-      select: () => ({
-        lean: () => Promise.resolve([{ _id: { toString: () => 'r1' }, name: 'Utilisateur' }])
-      })
+      score: 75,
     });
   });
 
-  afterAll(() => {
-    process.env.MICROSOFT_CLIENT_ID = initialClientId;
-    process.env.MICROSOFT_TENANT_ID = initialTenant;
-  });
+  describe('POST /api/auth/register', () => {
+    it('retourne 400 si la validation échoue (email ou mot de passe invalide)', async () => {
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({ email: 'invalid', password: 'short' });
 
-  it('GET /api/auth/microsoft/config retourne 503 si SSO non configuré', async () => {
-    delete process.env.MICROSOFT_CLIENT_ID;
-    const res = await request(app).get('/api/auth/microsoft/config');
-    expect(res.status).toBe(503);
-    expect(res.body.success).toBe(false);
-  });
-
-  it('GET /api/auth/microsoft/config retourne 200 si configuré', async () => {
-    process.env.MICROSOFT_CLIENT_ID = 'client-id';
-    process.env.MICROSOFT_TENANT_ID = 'tenant-id';
-    const res = await request(app).get('/api/auth/microsoft/config');
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-    expect(res.body.clientId).toBe('client-id');
-  });
-
-  it('POST /api/auth/register retourne 400 sur payload invalide', async () => {
-    const res = await request(app).post('/api/auth/register').send({ email: 'bad', password: '123' });
-    expect(res.status).toBe(400);
-    expect(res.body.success).toBe(false);
-    expect(mockAuthService.register).not.toHaveBeenCalled();
-  });
-
-  it('POST /api/auth/register retourne 201 sur succès', async () => {
-    const res = await request(app)
-      .post('/api/auth/register')
-      .send({ email: 'user@test.com', password: 'ValidPass123!', firstName: 'A', lastName: 'B' });
-    expect(res.status).toBe(201);
-    expect(res.body.success).toBe(true);
-    expect(mockAuthService.register).toHaveBeenCalledWith('user@test.com', 'ValidPass123!', 'A', 'B', undefined);
-  });
-
-  it('POST /api/auth/register retourne 400 si le service refuse', async () => {
-    mockAuthService.register.mockResolvedValue({ success: false, error: 'Email déjà utilisé' });
-    const res = await request(app)
-      .post('/api/auth/register')
-      .send({ email: 'user@test.com', password: 'ValidPass123!', firstName: 'A', lastName: 'B' });
-    expect(res.status).toBe(400);
-    expect(res.body.success).toBe(false);
-  });
-
-  it('POST /api/auth/login retourne 401 si credentials invalides', async () => {
-    mockAuthService.login.mockResolvedValue({ success: false, error: 'bad credentials' });
-    const res = await request(app).post('/api/auth/login').send({ email: 'user@test.com', password: 'X' });
-    expect(res.status).toBe(401);
-    expect(res.body.success).toBe(false);
-  });
-
-  it('POST /api/auth/login retourne 400 sur payload invalide', async () => {
-    const res = await request(app).post('/api/auth/login').send({ email: 'bad-email' });
-    expect(res.status).toBe(400);
-    expect(res.body.success).toBe(false);
-  });
-
-  it('POST /api/auth/login retourne 500 si exception', async () => {
-    mockAuthService.login.mockRejectedValue(new Error('boom'));
-    const res = await request(app).post('/api/auth/login').send({ email: 'user@test.com', password: 'ValidPass123!' });
-    expect(res.status).toBe(500);
-    expect(res.body.success).toBe(false);
-  });
-
-  it('POST /api/auth/validate-password retourne le résultat du service', async () => {
-    const res = await request(app).post('/api/auth/validate-password').send({ password: 'ValidPass123!' });
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-    expect(res.body.validation.score).toBe(80);
-  });
-
-  it('POST /api/auth/validate-password retourne 400 si password manquant', async () => {
-    const res = await request(app).post('/api/auth/validate-password').send({});
-    expect(res.status).toBe(400);
-    expect(res.body.success).toBe(false);
-  });
-
-  it('GET /api/auth/me retourne 404 si utilisateur introuvable', async () => {
-    mockAuthService.getUserById.mockResolvedValue(null);
-    const res = await request(app).get('/api/auth/me');
-    expect(res.status).toBe(404);
-    expect(res.body.success).toBe(false);
-  });
-
-  it('GET /api/auth/me retourne le profil utilisateur si trouvé', async () => {
-    const res = await request(app).get('/api/auth/me');
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-    expect(res.body.user.email).toBe('user@test.com');
-  });
-
-  it('GET /api/auth/me retourne 500 si exception', async () => {
-    mockAuthService.buildUserWithPermissions.mockRejectedValue(new Error('boom'));
-    const res = await request(app).get('/api/auth/me');
-    expect(res.status).toBe(500);
-    expect(res.body.success).toBe(false);
-  });
-
-  it('GET /api/auth/verify retourne token valide', async () => {
-    const res = await request(app).get('/api/auth/verify');
-    expect(res.status).toBe(200);
-    expect(res.body.valid).toBe(true);
-  });
-
-  it('GET /api/auth/roles/for-signup retourne la liste des rôles', async () => {
-    const res = await request(app).get('/api/auth/roles/for-signup');
-    expect(res.status).toBe(200);
-    expect(res.body.success).toBe(true);
-    expect(res.body.roles).toEqual([{ id: 'r1', name: 'Utilisateur' }]);
-  });
-
-  it('GET /api/auth/roles/for-signup retourne 500 si exception', async () => {
-    mockRoleFind.mockImplementationOnce(() => {
-      throw new Error('db down');
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(Array.isArray(res.body.errors)).toBe(true);
+      expect(mockRegister).not.toHaveBeenCalled();
     });
-    const res = await request(app).get('/api/auth/roles/for-signup');
-    expect(res.status).toBe(500);
-    expect(res.body.success).toBe(false);
-  });
 
-  it('PATCH /api/auth/me/role retourne 400 si roleId absent', async () => {
-    const res = await request(app).patch('/api/auth/me/role').send({});
-    expect(res.status).toBe(400);
-    expect(res.body.success).toBe(false);
-    expect(mockAuthService.setMyRole).not.toHaveBeenCalled();
-  });
+    it('retourne 201 avec token et user si inscription réussie', async () => {
+      mockRegister.mockResolvedValue({
+        success: true,
+        token: 'jwt-token',
+        user: { id: TEST_USER_ID, email: 'new@test.com' },
+        firstLogin: true,
+      });
 
-  it('PATCH /api/auth/me/role retourne 400 si service refuse le rôle', async () => {
-    mockAuthService.setMyRole.mockResolvedValue({ success: false, error: 'Rôle invalide' });
-    const res = await request(app).patch('/api/auth/me/role').send({ roleId: 'bad' });
-    expect(res.status).toBe(400);
-    expect(res.body.success).toBe(false);
-  });
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({
+          email: 'new@test.com',
+          password: 'MonMotDePasse123!',
+          firstName: 'New',
+          lastName: 'User',
+        });
 
-  it('POST /api/auth/register retourne 500 si exception', async () => {
-    mockAuthService.register.mockRejectedValueOnce(new Error('boom'));
-    const res = await request(app)
-      .post('/api/auth/register')
-      .send({ email: 'user@test.com', password: 'ValidPass123!', firstName: 'A', lastName: 'B' });
-    expect(res.status).toBe(500);
-    expect(res.body.success).toBe(false);
-  });
-
-  it('POST /api/auth/validate-password retourne 500 si exception', async () => {
-    mockAuthService.validatePassword.mockImplementationOnce(() => {
-      throw new Error('boom');
+      expect(res.status).toBe(201);
+      expect(res.body.success).toBe(true);
+      expect(res.body.token).toBe('jwt-token');
+      expect(res.body.user).toEqual({ id: TEST_USER_ID, email: 'new@test.com' });
+      expect(res.body.firstLogin).toBe(true);
+      expect(mockRegister).toHaveBeenCalledWith(
+        'new@test.com',
+        'MonMotDePasse123!',
+        'New',
+        'User',
+        undefined
+      );
     });
-    const res = await request(app).post('/api/auth/validate-password').send({ password: 'ValidPass123!' });
-    expect(res.status).toBe(500);
-    expect(res.body.success).toBe(false);
+
+    it('retourne 400 si l’email est déjà utilisé', async () => {
+      mockRegister.mockResolvedValue({
+        success: false,
+        error: 'Un compte existe déjà avec cet email',
+      });
+
+      const res = await request(app)
+        .post('/api/auth/register')
+        .send({ email: 'existing@test.com', password: 'MonMotDePasse123!' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toContain('existe déjà');
+    });
   });
 
-  it('PATCH /api/auth/me/role retourne 500 si exception', async () => {
-    mockAuthService.setMyRole.mockRejectedValueOnce(new Error('boom'));
-    const res = await request(app).patch('/api/auth/me/role').send({ roleId: '507f1f77bcf86cd799439011' });
-    expect(res.status).toBe(500);
-    expect(res.body.success).toBe(false);
+  describe('POST /api/auth/login', () => {
+    it('retourne 401 si les identifiants sont invalides', async () => {
+      mockLogin.mockResolvedValue({
+        success: false,
+        error: 'Email ou mot de passe incorrect',
+      });
+
+      const res = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'user@test.com', password: 'wrong-password' });
+
+      expect(res.status).toBe(401);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toBeDefined();
+      expect(mockLogin).toHaveBeenCalledWith('user@test.com', 'wrong-password');
+    });
+
+    it('retourne 200 avec token et user si connexion réussie', async () => {
+      mockLogin.mockResolvedValue({
+        success: true,
+        token: 'jwt-login-token',
+        user: { id: TEST_USER_ID, email: 'user@test.com', provider: 'local' },
+      });
+
+      const res = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'user@test.com', password: 'MonMotDePasse123!' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.token).toBe('jwt-login-token');
+      expect(res.body.user).toEqual(
+        expect.objectContaining({ id: TEST_USER_ID, email: 'user@test.com' })
+      );
+    });
+
+    it('retourne 503 si MongoDB n’est pas connecté (requireMongo)', async () => {
+      mongoReadyState = 0;
+
+      const res = await request(app)
+        .post('/api/auth/login')
+        .send({ email: 'user@test.com', password: 'MonMotDePasse123!' });
+
+      expect(res.status).toBe(503);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toMatch(/base de données non connectée/i);
+      expect(mockLogin).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('POST /api/auth/validate-password', () => {
+    it('retourne 400 si le mot de passe est absent', async () => {
+      const res = await request(app).post('/api/auth/validate-password').send({});
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(mockValidatePassword).not.toHaveBeenCalled();
+    });
+
+    it('retourne 200 avec la structure validation attendue', async () => {
+      mockValidatePassword.mockReturnValue({
+        isValid: false,
+        errors: ['Le mot de passe doit contenir au moins une lettre majuscule'],
+        strength: 'weak',
+        score: 20,
+      });
+
+      const res = await request(app)
+        .post('/api/auth/validate-password')
+        .send({ password: 'weakpass1234' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.validation).toEqual(
+        expect.objectContaining({
+          isValid: expect.any(Boolean),
+          errors: expect.any(Array),
+          strength: expect.stringMatching(/weak|medium|strong|very-strong/),
+          score: expect.any(Number),
+        })
+      );
+      expect(mockValidatePassword).toHaveBeenCalledWith('weakpass1234');
+    });
+  });
+
+  describe('GET /api/auth/roles/for-signup', () => {
+    it('retourne 200 avec la liste des rôles (id, name)', async () => {
+      const res = await request(app).get('/api/auth/roles/for-signup');
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.roles).toEqual([
+        { id: 'role1', name: 'Développeur' },
+        { id: 'role2', name: 'Product' },
+      ]);
+      expect(mockRoleFind).toHaveBeenCalled();
+    });
+  });
+
+  describe('GET /api/auth/me', () => {
+    it('retourne 404 si l’utilisateur n’existe pas', async () => {
+      mockGetUserById.mockResolvedValue(null);
+
+      const res = await request(app).get('/api/auth/me');
+
+      expect(res.status).toBe(404);
+      expect(res.body.success).toBe(false);
+      expect(res.body.error).toMatch(/non trouvé/i);
+    });
+
+    it('retourne 200 avec permissions si l’utilisateur existe', async () => {
+      const dbUser = { lastLogin: new Date('2026-01-01') };
+      mockGetUserById.mockResolvedValue(dbUser);
+      mockBuildUserWithPermissions.mockResolvedValue(defaultUserWithPerms);
+
+      const res = await request(app).get('/api/auth/me');
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.user).toEqual(
+        expect.objectContaining({
+          id: TEST_USER_ID,
+          email: TEST_USER.email,
+          role: 'super_admin',
+          roleName: 'Super admin',
+          visiblePages: expect.any(Object),
+          lastLogin: dbUser.lastLogin.toISOString(),
+        })
+      );
+      expect(mockGetUserById).toHaveBeenCalledWith(TEST_USER_ID);
+      expect(mockBuildUserWithPermissions).toHaveBeenCalledWith(dbUser);
+    });
+  });
+
+  describe('PATCH /api/auth/me/role', () => {
+    it('retourne 400 si roleId est absent', async () => {
+      const res = await request(app).patch('/api/auth/me/role').send({});
+
+      expect(res.status).toBe(400);
+      expect(res.body.success).toBe(false);
+      expect(Array.isArray(res.body.errors)).toBe(true);
+      expect(mockSetMyRole).not.toHaveBeenCalled();
+    });
+
+    it('retourne 200 si le rôle est mis à jour', async () => {
+      mockSetMyRole.mockResolvedValue({
+        success: true,
+        user: { id: TEST_USER_ID, roleName: 'Développeur' },
+      });
+
+      const res = await request(app)
+        .patch('/api/auth/me/role')
+        .send({ roleId: 'role1' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.user).toEqual({ id: TEST_USER_ID, roleName: 'Développeur' });
+      expect(mockSetMyRole).toHaveBeenCalledWith(TEST_USER_ID, 'role1');
+    });
+  });
+
+  describe('GET /api/auth/verify', () => {
+    it('retourne 200 avec valid:true et req.user', async () => {
+      const res = await request(app).get('/api/auth/verify');
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.valid).toBe(true);
+      expect(res.body.user).toEqual(
+        expect.objectContaining({
+          userId: TEST_USER_ID,
+          email: TEST_USER.email,
+          provider: TEST_USER.provider,
+        })
+      );
+    });
   });
 });

@@ -1,0 +1,72 @@
+/** Payload minimal GET /worklog/support-kpi — aligné sur SupportDashboard.SupportKPIData */
+export const TEST_SUPPORT_KPI_PAYLOAD = {
+  issues: [
+    {
+      issueKey: 'SUP-1',
+      summary: 'Ticket support test',
+      issueType: 'Bug',
+      status: 'Resolved',
+      statusCategory: 'done',
+      ponderation: 12,
+      assignee: 'Alice',
+      created: '2026-04-01T08:00:00.000Z',
+      resolved: '2026-04-02T10:00:00.000Z',
+    },
+  ],
+  statusCounts: {
+    total: 4,
+    todo: 1,
+    inProgress: 1,
+    qa: 0,
+    resolved: 2,
+  },
+  ponderationByStatus: {
+    total: 40,
+    todo: 8,
+    inProgress: 12,
+    qa: 0,
+    resolved: 20,
+  },
+  ponderationByType: { Bug: 20, Task: 20 },
+  ponderationByAssignee: [{ assignee: 'Alice', ponderation: 25, ticketCount: 2 }],
+  ponderationByLevel: {
+    low: { count: 1, total: 8 },
+    medium: { count: 2, total: 20 },
+    high: { count: 1, total: 12 },
+    veryHigh: { count: 0, total: 0 },
+  },
+  ponderationByLabel: [{ label: 'urgent', ponderation: 12, ticketCount: 1 }],
+  ponderationByTeam: [{ team: 'Support', ponderation: 40, ticketCount: 4 }],
+  backlog: { ticketCount: 2, totalPonderation: 15 },
+  avgResolutionTimeHours: 18.5,
+  avgFirstResponseTimeHours: 4.2,
+  avgResolutionTimeFromDatesHours: 16,
+  highPondFastResolutionPercent: 75,
+  veryHighPondFastResolutionPercent: 100,
+  totalPonderation: 40,
+  resolutionDetails: [
+    {
+      issueKey: 'SUP-1',
+      summary: 'Ticket support test',
+      beginDate: '2026-04-01',
+      endDate: '2026-04-02',
+      workingDays: 1,
+      ponderation: 12,
+    },
+  ],
+  firstResponseDetails: [
+    {
+      issueKey: 'SUP-1',
+      summary: 'Ticket support test',
+      created: '2026-04-01T08:00:00.000Z',
+      beginDate: '2026-04-01T09:00:00.000Z',
+      workingDays: 0.1,
+    },
+  ],
+  supportBuildRatio: {
+    activeSprintPercent: 12.5,
+    yearToDatePercent: 10,
+    activeSprintByProject: [{ projectKey: 'PROJ', hours: 8, percent: 12.5 }],
+    yearToDateByProject: [{ projectKey: 'PROJ', hours: 40, percent: 10 }],
+  },
+};
