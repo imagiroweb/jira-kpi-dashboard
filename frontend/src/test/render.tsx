@@ -45,7 +45,14 @@ export function renderWithProviders(
         : createMockSocketContextValue(socket);
 
   function Wrapper({ children }: { children: ReactNode }) {
-    const routed = <MemoryRouter initialEntries={[route]}>{children}</MemoryRouter>;
+    const routed = (
+      <MemoryRouter
+        initialEntries={[route]}
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        {children}
+      </MemoryRouter>
+    );
 
     if (!socketValue) {
       return routed;
