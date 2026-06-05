@@ -118,6 +118,16 @@ describe('Routes activité / logs (TI)', () => {
       expect(res.body.success).toBe(false);
       expect(mockLogCreate).not.toHaveBeenCalled();
     });
+
+    it('retourne 500 si la création du log échoue', async () => {
+      mockLogCreate.mockRejectedValueOnce(new Error('db fail'));
+      const res = await request(app)
+        .post('/api/auth/me/page-view')
+        .set('Content-Type', 'application/json')
+        .send({ page: 'dashboard' });
+      expect(res.status).toBe(500);
+      expect(res.body.success).toBe(false);
+    });
   });
 
   describe('GET /api/auth/users/:id/logs', () => {
@@ -154,6 +164,15 @@ describe('Routes activité / logs (TI)', () => {
         .query({ limit: 50 });
 
       expect(mockLogFind).toHaveBeenCalledWith({ userId: '507f1f77bcf86cd799439011' });
+    });
+
+    it('retourne 500 si la récupération des logs échoue', async () => {
+      mockLogFind.mockImplementationOnce(() => {
+        throw new Error('db fail');
+      });
+      const res = await request(app).get('/api/auth/users/507f1f77bcf86cd799439011/logs');
+      expect(res.status).toBe(500);
+      expect(res.body.success).toBe(false);
     });
   });
 
@@ -196,6 +215,15 @@ describe('Routes activité / logs (TI)', () => {
           type: 'page_view'
         })
       );
+    });
+
+    it('retourne 500 si le calcul des stats échoue', async () => {
+      mockLogFind.mockImplementationOnce(() => {
+        throw new Error('db fail');
+      });
+      const res = await request(app).get('/api/auth/users/507f1f77bcf86cd799439011/page-stats');
+      expect(res.status).toBe(500);
+      expect(res.body.success).toBe(false);
     });
   });
 });
