@@ -1,5 +1,69 @@
 import { vi } from 'vitest';
 
+export type MockSocketEventHandler = (...args: unknown[]) => void;
+
+/** Socket.io-client mock avec enregistrement des handlers pour les tests useSocket */
+export interface MockSocket {
+  id: string;
+  connected: boolean;
+  on: ReturnType<typeof vi.fn>;
+  emit: ReturnType<typeof vi.fn>;
+  disconnect: ReturnType<typeof vi.fn>;
+  /** Déclenche un événement enregistré via socket.on */
+  trigger: (event: string, ...args: unknown[]) => void;
+  /** Réinitialise les handlers entre les tests */
+  clearHandlers: () => void;
+}
+
+export function createMockSocket(overrides: Partial<MockSocket> = {}): MockSocket {
+  const handlers: Record<string, MockSocketEventHandler[]> = {};
+
+  const socket: MockSocket = {
+    id: 'mock-socket-id',
+    connected: false,
+    on: vi.fn((event: string, handler: MockSocketEventHandler) => {
+      if (!handlers[event]) handlers[event] = [];
+      handlers[event].push(handler);
+    }),
+    emit: vi.fn(),
+    disconnect: vi.fn(),
+    trigger(event: string, ...args: unknown[]) {
+      if (event === 'connect') {
+        socket.connected = true;
+      }
+      if (event === 'disconnect') {
+        socket.connected = false;
+      }
+      handlers[event]?.forEach((handler) => handler(...args));
+    },
+    clearHandlers() {
+      for (const key of Object.keys(handlers)) {
+        delete handlers[key];
+      }
+    },
+    ...overrides,
+  };
+
+  return socket;
+}
+
+/**
+ * Factory Vitest pour mocker `socket.io-client`.
+ * ```ts
+ * const { mockIo, mockSocket } = vi.hoisted(() => {
+ *   const mockSocket = createMockSocket();
+ *   return { mockSocket, mockIo: vi.fn(() => mockSocket) };
+ * });
+ * vi.mock('socket.io-client', () => socketIoModuleMock(mockIo));
+ * ```
+ */
+export function socketIoModuleMock(mockIo: ReturnType<typeof vi.fn>) {
+  return {
+    io: mockIo,
+    default: { io: mockIo },
+  };
+}
+
 export interface MockSocketContextValue {
   isConnected: boolean;
   clientsCount: number;

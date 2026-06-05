@@ -1,41 +1,41 @@
 # Tests frontend (Vitest + Testing Library)
 
-Guide pour écrire et maintenir les tests unitaires et composants React du frontend.
+Guide pour écrire et maintenir les tests unitaires, hooks et composants React du frontend Jira KPI Dashboard.
 
-## Objectif
+## Vue d'ensemble
 
-Couvrir la logique domaine, les services API et les composants sans dépendre du backend réel ni de socket.io / recharts en environnement jsdom. L’infrastructure partagée vit dans `src/test/` (miroir de `backend/src/test/`).
+**Objectif** : couvrir progressivement la logique métier, les services API, les hooks temps réel et le shell d’authentification sans dépendre du backend réel, de MongoDB ni de socket.io en environnement jsdom.
 
-## Stack
+**Stack** :
 
 | Outil | Rôle |
 |-------|------|
 | **Vitest** | Runner, mocks (`vi.mock`, `vi.hoisted`) |
 | **jsdom** | Environnement DOM |
-| **Testing Library** | Rendu et interactions composants |
+| **Testing Library** | Rendu composants, `renderHook`, interactions |
 | **`src/test/`** | Fixtures, mocks réutilisables, `renderWithProviders` |
 
-## Commandes
-
-Depuis la racine du monorepo, `npm run test` lance backend + frontend et affiche un tableau récapitulatif.
+**Commandes** :
 
 ```bash
+# Depuis la racine du monorepo
+npm run test              # Backend + frontend + tableau récap (couverture incluse)
+npm run test:frontend     # Frontend uniquement
+
 cd frontend
-
-# Tous les tests
-npm run test
-
-# Mode watch
-npm run test:watch
-
-# Couverture
-npx vitest run --coverage
-
-# Fichier précis
-npx vitest run src/services/authApi.test.ts
+npm run test              # Tous les tests Vitest
+npm run test:watch        # Mode watch
+npx vitest run --coverage # Rapport de couverture détaillé
+npx vitest run src/hooks/useSocket.test.ts  # Fichier précis
 ```
 
-## Infrastructure partagée (`src/test/`)
+La couverture exclut `src/test/**` (voir `vitest.config.ts`).
+
+---
+
+## Phase 0 — Infrastructure partagée
+
+Miroir de `backend/src/test/` : helpers centralisés pour éviter la duplication de mocks entre les phases.
 
 ```
 src/test/
@@ -51,10 +51,228 @@ src/test/
     ├── authApi.ts        # createAuthApiMock() pour composants
     ├── store.ts          # resetStore(), seedAuthenticatedUser()
     ├── recharts.tsx      # stub ResponsiveContainer, BarChart, …
-    └── socket.ts         # createMockSocketContextValue(), socketContextModuleMock()
+    └── socket.ts         # createMockSocket(), socketIoModuleMock(), createMockSocketContextValue()
 ```
 
-## Template — test service (axios)
+### `renderWithProviders`
+
+| Option | Défaut | Usage |
+|--------|--------|-------|
+| `route` | `'/'` | Route initiale `MemoryRouter` |
+| `user` | — | `TEST_USER` connecté ; `null` = anonyme ; omis = état après `resetStore` |
+| `socket` | `false` | `true` = `SocketContext` mocké ; objet = surcharge partielle |
+| `resetStore` | `true` | Réinitialise Zustand + persist avant rendu |
+
+### Conventions (toutes phases)
+
+- **Descriptions** : `it('retourne …')`, `it('affiche …')` — en **français**.
+- **Isolation** : `beforeEach(() => { resetStore(); vi.clearAllMocks(); })`.
+- **Hoisting** : déclarer les `vi.fn()` dans `vi.hoisted()` ; les mocks `vi.mock` doivent précéder l’import du module sous test.
+- **Co-localisation** : `{Module}.test.ts(x)` à côté du fichier source.
+- **Pas de régression** : refactoriser vers les helpers ne doit pas changer le comportement testé.
+
+---
+
+## Phase 1 — Services & utilitaires
+
+Quick wins sur la logique pure et les appels API mockés (axios).
+
+| Fichier source | Fichier test | Cas principaux | Couverture lignes |
+|----------------|--------------|----------------|-------------------|
+| `src/services/api.ts` | `api.test.ts` | jiraApi, epicApi, syncApi, snapshots, brevoApi, mondayApi | ~94 % |
+| `src/services/authApi.ts` | `authApi.test.ts` | login, register, verifyToken, reset password | ~81 % |
+| `src/services/mondayProduitCache.ts` | `mondayProduitCache.test.ts` | TTL mémoire, sessionStorage, invalidation | ~95 % |
+| `src/utils/dateUtils.ts` | `dateUtils.test.ts` | `formatDate`, `getDefaultDateRange` (fake timers) | 100 % |
+| `src/constants/transactionalEvents.ts` | `transactionalEvents.test.ts` | `getTransactionalEventBadgeClass` | 100 % |
+| `src/store/useStore.ts` | `useStore.test.ts` | `updateUser`, `logout`, `triggerKpiRefresh`, persist | 100 % |
+| `src/domain/epicProgress.ts` | `epicProgress.test.ts` | calculs progression épics | 100 % |
+| `src/domain/roadmapAdoriaKpi.ts` | `roadmapAdoriaKpi.test.ts` | filtres roadmap Adoria | ~91 % |
+
+**Pattern** : `vi.hoisted` + `axiosModuleMock(mocks)` pour les services HTTP.
+
+**Couverture globale après Phase 1** : ~19,4 % lignes.
+
+---
+
+## Phase 2 — Auth shell & petits composants
+
+Composants transverses et parcours d’authentification.
+
+| Fichier source | Fichier test | Tests | Couverture lignes |
+|----------------|--------------|-------|-------------------|
+| `PasswordStrengthIndicator.tsx` | `PasswordStrengthIndicator.test.tsx` | 7 | 100 % |
+| `LoginPage.tsx` | `LoginPage.test.tsx` | 5 | ~84 % |
+| `Sidebar.tsx` | `Sidebar.test.tsx` | 5 | ~91 % |
+| `RoleSelectionScreen.tsx` | `RoleSelectionScreen.test.tsx` | 3 | ~98 % |
+| `ProjectSelector.tsx` | `ProjectSelector.test.tsx` | 4 | ~90 % |
+| `NotificationToast.tsx` | `NotificationToast.test.tsx` | 8 | 100 % |
+| `ForgotPasswordPage.tsx` | `ForgotPasswordPage.test.tsx` | — | — |
+| `ResetPasswordPage.tsx` | `ResetPasswordPage.test.tsx` | 14 | ~98 % |
+| `DateRangePicker.tsx` | `DateRangePicker.test.tsx` | 3 | — |
+
+### Mocks Phase 2
+
+| Composant | Mock |
+|-----------|------|
+| `LoginPage`, `RoleSelectionScreen` | `createAuthApiMock()` |
+| `Sidebar` | `syncApi` + `useSocketContext` + `window.confirm` |
+| `ProjectSelector` | `jiraApi.getProjects` |
+| `PasswordStrengthIndicator`, `NotificationToast` | Aucun mock externe |
+
+**Couverture globale après Phase 2** : ~26,8 % lignes (218 tests).
+
+---
+
+## Phase 3 — Hooks, socket & routage App
+
+Couche temps réel et orchestration du shell applicatif.
+
+| Fichier source | Fichier test | Cas testés | Couverture lignes |
+|----------------|--------------|------------|-------------------|
+| `hooks/useNotifications.ts` | `useNotifications.test.ts` | add/remove/update/clearAll ; helpers success/error/warning/info ; sync (update/complete/fail) ; `fromAlert` ; `fromSyncProgress` | ~100 % |
+| `hooks/useSocket.ts` | `useSocket.test.ts` | pas de connexion si non auth ; connexion + `subscribe:kpi` ; déconnexion ; `clients:count` / `pong` ; handlers `alert:new` / `sync:progress` ; emit subscribe/sync/ping ; cleanup unmount | ~87 % |
+| `hooks/useSocketContext.ts` | `useSocketContext.test.tsx` | erreur hors provider ; `useSocketOptional` → null ; contexte via mock | 100 % |
+| `contexts/SocketContext.tsx` | `SocketContext.test.tsx` | rendu enfants ; alerte → toast ; sync → `dashboardLoading` ; `notify.success` | ~92 % |
+| `App.tsx` | `App.test.tsx` | `/auth/microsoft/callback` ; `/reset-password?token=` ; loader verify ; redirect LoginPage ; logout si token invalide ; `pendingRoleSelection` → RoleSelectionScreen ; app authentifiée | ~94 % |
+
+### Mocks Phase 3
+
+| Module | Approche |
+|--------|----------|
+| `socket.io-client` | `vi.hoisted` + mock inline (`on`/`emit`/`trigger`) — voir `useSocket.test.ts` |
+| `SocketContext` (tests App) | `SocketProvider` stubé (pas de socket réel) |
+| Dashboards lourds (tests App) | `vi.mock('./components/SprintDashboard')`, etc. |
+| `MicrosoftCallback` (tests App) | stub léger pour isoler le routage |
+| `authApi` (tests App) | `createAuthApiMock()` — `verifyToken`, `getCurrentUser` |
+| `window.location` | `vi.stubGlobal('location', { pathname, search, … })` |
+
+### Extension `src/test/mocks/socket.ts`
+
+- `createMockSocket()` — socket factice avec `trigger(event, …args)` pour simuler les événements socket.io.
+- `socketIoModuleMock(mockIo)` — factory pour `vi.mock('socket.io-client')`.
+- `createMockSocketContextValue()` / `socketContextModuleMock()` — inchangés (Phase 0/2).
+
+**Couverture globale après Phase 3** : ~30,1 % lignes (246 tests, +28).
+
+---
+
+## Phase 4 — EpicProgress & graphiques (planifiée)
+
+**Non implémentée.** Extension prévue :
+
+| Cible | Fichier test prévu | Cas envisagés |
+|-------|-------------------|---------------|
+| `EpicProgressPage.tsx` | `EpicProgressPage.test.tsx` (extension) | chargement boards, filtres type/statut/préfixe, pagination, modale détail SP |
+| `UserWorkloadChart.tsx` | `UserWorkloadChart.test.tsx` | rendu avec mock recharts, légende, tooltip |
+| `UserTicketsChart.tsx` | `UserTicketsChart.test.tsx` | idem |
+| `ResolvedByDayChart.tsx` | `ResolvedByDayChart.test.tsx` | idem |
+
+**Mocks** : `jiraApi.getEpicProgress`, fixtures `TEST_EPIC_PROGRESS_*` ; recharts déjà stubé globalement dans `setup.ts`.
+
+**Objectif couverture** : ~38–42 % lignes.
+
+---
+
+## Phase 5 — Dashboards & smoke tests (planifiée)
+
+**Non implémentée.** Extraction de la logique testable des gros dashboards :
+
+| Cible | Approche |
+|-------|----------|
+| `SprintDashboard.tsx` | smoke : rendu avec store seedé + mocks API |
+| `SupportDashboard.tsx` | smoke + filtres sprint |
+| `MarketingDashboard.tsx` | smoke + chargement données |
+| `ProduitDashboard.tsx` | smoke + cache Monday |
+| `UserDetailPage.tsx` | rapport utilisateur mocké |
+| `UserManagementPage.tsx` | liste rôles / CRUD admin mocké |
+
+**Pattern** : `renderWithProviders` + `seedAuthenticatedUser` + stubs composants charts ; assert sur titres, états loading/erreur, pas sur le SVG recharts.
+
+**Objectif couverture** : ~48–55 % lignes.
+
+---
+
+## Phase 6 — Couverture avancée (optionnelle)
+
+**Non implémentée.** Cibles secondaires :
+
+- `MicrosoftCallback.tsx` — flux SSO hash/query, erreurs Azure
+- Intercepteurs axios 401 (`api.ts`) — redirect `/login`
+- Tests E2E Playwright (hors Vitest) si besoin QA
+- Hooks restants dans les dashboards (extraction custom hooks)
+- `index.ts` barrel — ignoré ou smoke minimal
+
+**Objectif couverture** : ~60 %+ lignes (diminishing returns).
+
+---
+
+## Tableau de couverture par phase
+
+| Phase | Périmètre | Tests cumulés | Couverture lignes (cible / atteinte) |
+|-------|-----------|---------------|--------------------------------------|
+| 0 | Infra `src/test/` | — | 0 % (setup) |
+| 1 | Services, utils, store, domain | ~186 | ~19,4 % |
+| 2 | Auth shell, petits composants | 218 | ~26,8 % |
+| 3 | Hooks socket, App routing | 246 | ~30,1 % |
+| 4 | EpicProgress, charts | ~280 (est.) | ~40 % |
+| 5 | Dashboards smoke | ~320 (est.) | ~52 % |
+| 6 | SSO, intercepteurs, E2E | ~350+ (est.) | ~60 %+ |
+
+---
+
+## Tableau fichiers testés / restants
+
+### Testés ✅
+
+| Fichier source | Fichier test |
+|----------------|--------------|
+| `App.tsx` | `App.test.tsx` |
+| `services/api.ts` | `services/api.test.ts` |
+| `services/authApi.ts` | `services/authApi.test.ts` |
+| `services/mondayProduitCache.ts` | `services/mondayProduitCache.test.ts` |
+| `utils/dateUtils.ts` | `utils/dateUtils.test.ts` |
+| `constants/transactionalEvents.ts` | `constants/transactionalEvents.test.ts` |
+| `store/useStore.ts` | `store/useStore.test.ts` |
+| `domain/epicProgress.ts` | `domain/epicProgress.test.ts` |
+| `domain/roadmapAdoriaKpi.ts` | `domain/roadmapAdoriaKpi.test.ts` |
+| `hooks/useNotifications.ts` | `hooks/useNotifications.test.ts` |
+| `hooks/useSocket.ts` | `hooks/useSocket.test.ts` |
+| `hooks/useSocketContext.ts` | `hooks/useSocketContext.test.tsx` |
+| `contexts/SocketContext.tsx` | `contexts/SocketContext.test.tsx` |
+| `components/LoginPage.tsx` | `components/LoginPage.test.tsx` |
+| `components/ForgotPasswordPage.tsx` | `components/ForgotPasswordPage.test.tsx` |
+| `components/ResetPasswordPage.tsx` | `components/ResetPasswordPage.test.tsx` |
+| `components/RoleSelectionScreen.tsx` | `components/RoleSelectionScreen.test.tsx` |
+| `components/Sidebar.tsx` | `components/Sidebar.test.tsx` |
+| `components/ProjectSelector.tsx` | `components/ProjectSelector.test.tsx` |
+| `components/PasswordStrengthIndicator.tsx` | `components/PasswordStrengthIndicator.test.tsx` |
+| `components/NotificationToast.tsx` | `components/NotificationToast.test.tsx` |
+| `components/DateRangePicker.tsx` | `components/DateRangePicker.test.tsx` |
+| `components/EpicProgressPage.tsx` | `components/EpicProgressPage.test.tsx` *(amorce Phase 4, extension prévue)* |
+
+### Restants ⏳
+
+| Fichier source | Phase prévue | Priorité |
+|----------------|--------------|----------|
+| `components/EpicProgressPage.tsx` | 4 | Haute *(tests partiels existants)* |
+| `components/UserWorkloadChart.tsx` | 4 | Moyenne |
+| `components/UserTicketsChart.tsx` | 4 | Moyenne |
+| `components/ResolvedByDayChart.tsx` | 4 | Moyenne |
+| `components/SprintDashboard.tsx` | 5 | Haute |
+| `components/SupportDashboard.tsx` | 5 | Haute |
+| `components/MarketingDashboard.tsx` | 5 | Moyenne |
+| `components/ProduitDashboard.tsx` | 5 | Moyenne |
+| `components/UserDetailPage.tsx` | 5 | Moyenne |
+| `components/UserManagementPage.tsx` | 5 | Moyenne |
+| `components/MicrosoftCallback.tsx` | 6 | Basse |
+| `components/index.ts` | — | Ignoré (barrel) |
+| `types/index.ts` | — | Ignoré (types) |
+
+---
+
+## Templates
+
+### Test service (axios)
 
 ```typescript
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -86,7 +304,7 @@ describe('authApi', () => {
 });
 ```
 
-## Template — test composant avec providers
+### Test composant avec providers
 
 ```typescript
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -111,82 +329,63 @@ describe('MonComposant', () => {
 });
 ```
 
+### Test hook socket (socket.io mock)
+
+```typescript
+const socketHarness = vi.hoisted(() => {
+  const handlers: Record<string, Array<(...args: unknown[]) => void>> = {};
+  const mockSocket = {
+    connected: false,
+    on: vi.fn((event: string, handler: (...args: unknown[]) => void) => {
+      (handlers[event] ??= []).push(handler);
+    }),
+    emit: vi.fn(),
+    disconnect: vi.fn(),
+    trigger(event: string, ...args: unknown[]) {
+      handlers[event]?.forEach((h) => h(...args));
+    },
+    clearHandlers() { for (const k of Object.keys(handlers)) delete handlers[k]; },
+  };
+  return { mockSocket, mockIo: vi.fn(() => mockSocket) };
+});
+
+vi.mock('socket.io-client', () => ({
+  io: socketHarness.mockIo,
+  default: { io: socketHarness.mockIo },
+}));
+```
+
+---
+
 ## Stratégie de mocks
 
 | Couche | Approche |
 |--------|----------|
-| **axios** | `vi.hoisted(() => ({ mockGet: vi.fn(), … }))` + `axiosModuleMock(mocks)` |
-| **authApi** | `createAuthApiMock()` — mock module entier dans les tests composants |
-| **Zustand store** | `resetStore()` dans `beforeEach` ; `seedAuthenticatedUser()` si besoin |
-| **localStorage** | Stub automatique via `resetStore()` / `stubLocalStorage()` |
-| **recharts** | Mock global dans `setup.ts` — pas de configuration par test |
-| **Socket** | `socket: true` dans `renderWithProviders` ou `socketContextModuleMock()` |
+| **axios** | `vi.hoisted` + `axiosModuleMock(mocks)` |
+| **authApi** | `createAuthApiMock()` — mock module entier |
+| **Zustand store** | `resetStore()` ; `seedAuthenticatedUser()` |
+| **localStorage** | Stub via `resetStore()` / `stubLocalStorage()` |
+| **recharts** | Mock global `setup.ts` |
+| **socket.io-client** | Mock inline hoisted avec `trigger()` |
+| **SocketContext** | `renderWithProviders({ socket: true })` ou mock module |
 
-**Règle** : mocker au niveau le plus proche du code testé (service ou hook), pas toute l’arborescence.
+**Règle** : mocker au niveau le plus proche du code testé, pas toute l’arborescence.
 
-## `renderWithProviders`
-
-| Option | Défaut | Usage |
-|--------|--------|-------|
-| `route` | `'/'` | Route initiale `MemoryRouter` |
-| `user` | — | `TEST_USER` connecté ; `null` = anonyme ; omis = état après `resetStore` |
-| `socket` | `false` | `true` = `SocketContext` mocké ; objet = surcharge partielle |
-| `resetStore` | `true` | Réinitialise Zustand + persist avant rendu |
-
-Pattern recommandé :
-
-```typescript
-describe('MaPage', () => {
-  beforeEach(() => {
-    resetStore();
-    vi.clearAllMocks();
-  });
-
-  it('…', () => {
-    renderWithProviders(<MaPage />, { user: TEST_USER });
-  });
-});
-```
-
-## Fixtures
-
-| Fichier | Contenu |
-|---------|---------|
-| `fixtures/users.ts` | `TEST_USER_ID`, `TEST_USER`, `TEST_VISIBLE_PAGES_*` |
-| `fixtures/jira.ts` | `TEST_JIRA_BOARDS`, `TEST_EPIC_PROGRESS_RESPONSE`, `TEST_BOARD_STATS` |
-| `fixtures/monday.ts` | `TEST_MONDAY_COLUMNS`, `TEST_MONDAY_ITEMS` |
-| `fixtures/supportKpi.ts` | `TEST_SUPPORT_KPI_PAYLOAD` |
-
-## Conventions
-
-- **Descriptions** : `it('retourne …')`, `it('affiche …')` — en français, comme les tests existants.
-- **Isolation** : `beforeEach(() => { resetStore(); vi.clearAllMocks(); })`.
-- **Hoisting** : déclarer les `vi.fn()` dans `vi.hoisted()` du fichier de test ; utiliser `axiosModuleMock(mocks)` pour le factory axios.
-- **Pas de régression** : refactoriser vers les helpers ne doit pas changer le comportement testé.
+---
 
 ## Anti-patterns
 
-- **Oublier `resetStore()`** — fuites d’état Zustand / localStorage entre tests.
-- **Importer le module sous test avant `vi.mock`** — les mocks doivent précéder l’import.
-- **Tester recharts / layout SVG** — le mock global suffit ; assert sur le contenu métier.
-- **Démarrer socket.io réel** — utiliser `socketContextModuleMock()` ou `renderWithProviders({ socket: true })`.
-- **Dupliquer les fixtures utilisateur** — importer `TEST_USER` depuis `fixtures/users.ts`.
+- **Oublier `resetStore()`** — fuites Zustand / localStorage entre tests.
+- **Importer le module sous test avant `vi.mock`** — ordre incorrect.
+- **Tester recharts / layout SVG** — assert sur le contenu métier uniquement.
+- **Démarrer socket.io réel** — toujours mocker `socket.io-client`.
+- **Dupliquer les fixtures** — importer depuis `src/test/fixtures/`.
+- **Importer `createMockSocket` dans `vi.hoisted`** — préférer le mock inline hoisted (cf. Phase 3).
 
-## Phase 1 — services & utilitaires (couverture ciblée)
-
-Fichiers couverts en priorité (quick wins) :
-
-| Fichier | Tests | Couverture lignes (indicatif) |
-|---------|-------|-------------------------------|
-| `src/services/api.test.ts` | jiraApi, epicApi, syncApi, snapshots, brevoApi, mondayApi | ~94 % (`api.ts`) |
-| `src/services/mondayProduitCache.test.ts` | TTL mémoire, sessionStorage, invalidation, clés workspace | ~95 % |
-| `src/utils/dateUtils.test.ts` | `formatDate`, `getDefaultDateRange` (fake timers) | 100 % |
-| `src/constants/transactionalEvents.test.ts` | `getTransactionalEventBadgeClass` par type d’événement | 100 % |
-| `src/store/useStore.test.ts` (étendu) | `updateUser`, `logout` (caches), `triggerKpiRefresh`, persist merge ISO | 100 % |
-
-Les intercepteurs axios 401 de `api.ts` (redirect `/login`) ne sont pas testés ici — ils seront couverts en Phase 2+ si nécessaire via tests d’intégration composant.
+---
 
 ## Liens
 
+- Index docs frontend : [README.md](./README.md)
 - Tests backend : [backend/docs/testing-routes.md](../../backend/docs/testing-routes.md)
-- Couverture exclut `src/test/**` (voir `vitest.config.ts`)
+- Suivi épics (UI) : [docs/SUIVI_EPICS.md](../../docs/SUIVI_EPICS.md)

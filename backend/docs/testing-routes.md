@@ -168,4 +168,4 @@ Voir aussi les tests domaine / services (hors routes) : `AuthService.*.test.ts`,
 ## Liens
 
 - [Logs d’activité (activity-logs.md)](./activity-logs.md) — endpoints auth liés aux logs et leurs tests.
-- Tests frontend : `cd frontend && yarn test`
+- Tests frontend : [frontend/docs/testing.md](../frontend/docs/testing.md)

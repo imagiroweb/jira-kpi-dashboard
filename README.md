@@ -130,6 +130,19 @@ yarn test:routes       # Routes uniquement
 yarn test:coverage     # Couverture
 ```
 
+### Tests frontend
+
+Les tests Vitest + Testing Library (plan de couverture par phases, mocks `src/test/`, hooks socket, routage App) sont documentés ici :
+
+- **[Guide tests frontend](frontend/docs/testing.md)**
+- Index : [frontend/docs/README.md](frontend/docs/README.md)
+
+```bash
+cd frontend
+npm run test              # Tous les tests
+npx vitest run --coverage # Couverture (~30 % lignes après Phase 3)
+```
+
 ### 4. Production avec Docker
 ```bash
 docker-compose up -d
