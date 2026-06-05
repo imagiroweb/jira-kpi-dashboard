@@ -156,20 +156,41 @@ Couche temps réel et orchestration du shell applicatif.
 
 ---
 
-## Phase 4 — EpicProgress & graphiques (planifiée)
+## Phase 4 — EpicProgress & graphiques ✅
 
-**Non implémentée.** Extension prévue :
+Couverture des pages épics, graphiques worklog et détail utilisateurs.
 
-| Cible | Fichier test prévu | Cas envisagés |
-|-------|-------------------|---------------|
-| `EpicProgressPage.tsx` | `EpicProgressPage.test.tsx` (extension) | chargement boards, filtres type/statut/préfixe, pagination, modale détail SP |
-| `UserWorkloadChart.tsx` | `UserWorkloadChart.test.tsx` | rendu avec mock recharts, légende, tooltip |
-| `UserTicketsChart.tsx` | `UserTicketsChart.test.tsx` | idem |
-| `ResolvedByDayChart.tsx` | `ResolvedByDayChart.test.tsx` | idem |
+| Fichier source | Fichier test | Tests | Couverture lignes |
+|----------------|--------------|-------|-------------------|
+| `EpicProgressPage.tsx` | `EpicProgressPage.test.tsx` | 9 (+7) | ~82 % |
+| `ResolvedByDayChart.tsx` | `ResolvedByDayChart.test.tsx` | 4 | ~87 % |
+| `UserTicketsChart.tsx` | `UserTicketsChart.test.tsx` | 2 | ~91 % |
+| `UserWorkloadChart.tsx` | `UserWorkloadChart.test.tsx` | 2 | ~62 % |
+| `UserDetailPage.tsx` | `UserDetailPage.test.tsx` | 2 | ~83 % |
 
-**Mocks** : `jiraApi.getEpicProgress`, fixtures `TEST_EPIC_PROGRESS_*` ; recharts déjà stubé globalement dans `setup.ts`.
+### Cas testés Phase 4
 
-**Objectif couverture** : ~38–42 % lignes.
+| Composant | Scénarios |
+|-----------|-----------|
+| `EpicProgressPage` | chargement + tri ; recherche + modale détail ; filtres type / statut / préfixe ; pagination ; cache `filtersKey` ; modale story points ; erreur API détail |
+| `ResolvedByDayChart` | rendu null sans boards ; données mockées (fetch) ; état vide ; erreur API |
+| `UserTicketsChart` | skeleton chargement utilisateurs ; sélection user + tickets (fetch `/worklog/search`) |
+| `UserWorkloadChart` | skeleton chargement ; rendu utilisateurs depuis `sharedReportPayload` |
+| `UserDetailPage` | chargement rapport worklog ; affichage graphiques après fetch `/worklog/report` |
+
+### Mocks Phase 4
+
+| Module | Approche |
+|--------|----------|
+| `epicApi` / `jiraApi` | `vi.mock('../services/api')` — `getProgress`, `search`, `getDetails`, `getConfiguredBoards` |
+| Cache épics | `useStore.setState` — `epicsLastFiltersKey` + `epicsProgressPayload` pré-remplis |
+| Charts fetch | `vi.stubGlobal('fetch', mockFetch)` — `/jira/resolved-by-day`, `/worklog/report`, `/worklog/search`, `/worklog/saved-reports` |
+| `UserDetailPage` | stubs `ProjectSelector` + `DateRangePicker` ; projets seedés dans le store |
+| recharts | mock global `setup.ts` (inchangé Phase 0) |
+
+Fixtures : `TEST_EPIC_PROGRESS_ITEM`, `TEST_EPIC_DETAILS_RESPONSE` depuis `src/test/fixtures/jira.ts`.
+
+**Couverture globale après Phase 4** : ~39,7 % lignes (263 tests, +17).
 
 ---
 
@@ -183,7 +204,6 @@ Couche temps réel et orchestration du shell applicatif.
 | `SupportDashboard.tsx` | smoke + filtres sprint |
 | `MarketingDashboard.tsx` | smoke + chargement données |
 | `ProduitDashboard.tsx` | smoke + cache Monday |
-| `UserDetailPage.tsx` | rapport utilisateur mocké |
 | `UserManagementPage.tsx` | liste rôles / CRUD admin mocké |
 
 **Pattern** : `renderWithProviders` + `seedAuthenticatedUser` + stubs composants charts ; assert sur titres, états loading/erreur, pas sur le SVG recharts.
@@ -214,7 +234,7 @@ Couche temps réel et orchestration du shell applicatif.
 | 1 | Services, utils, store, domain | ~186 | ~19,4 % |
 | 2 | Auth shell, petits composants | 218 | ~26,8 % |
 | 3 | Hooks socket, App routing | 246 | ~30,1 % |
-| 4 | EpicProgress, charts | ~280 (est.) | ~40 % |
+| 4 | EpicProgress, charts, UserDetail | 263 | ~39,7 % |
 | 5 | Dashboards smoke | ~320 (est.) | ~52 % |
 | 6 | SSO, intercepteurs, E2E | ~350+ (est.) | ~60 %+ |
 
@@ -248,21 +268,20 @@ Couche temps réel et orchestration du shell applicatif.
 | `components/PasswordStrengthIndicator.tsx` | `components/PasswordStrengthIndicator.test.tsx` |
 | `components/NotificationToast.tsx` | `components/NotificationToast.test.tsx` |
 | `components/DateRangePicker.tsx` | `components/DateRangePicker.test.tsx` |
-| `components/EpicProgressPage.tsx` | `components/EpicProgressPage.test.tsx` *(amorce Phase 4, extension prévue)* |
+| `components/EpicProgressPage.tsx` | `components/EpicProgressPage.test.tsx` |
+| `components/ResolvedByDayChart.tsx` | `components/ResolvedByDayChart.test.tsx` |
+| `components/UserTicketsChart.tsx` | `components/UserTicketsChart.test.tsx` |
+| `components/UserWorkloadChart.tsx` | `components/UserWorkloadChart.test.tsx` |
+| `components/UserDetailPage.tsx` | `components/UserDetailPage.test.tsx` |
 
 ### Restants ⏳
 
 | Fichier source | Phase prévue | Priorité |
 |----------------|--------------|----------|
-| `components/EpicProgressPage.tsx` | 4 | Haute *(tests partiels existants)* |
-| `components/UserWorkloadChart.tsx` | 4 | Moyenne |
-| `components/UserTicketsChart.tsx` | 4 | Moyenne |
-| `components/ResolvedByDayChart.tsx` | 4 | Moyenne |
 | `components/SprintDashboard.tsx` | 5 | Haute |
 | `components/SupportDashboard.tsx` | 5 | Haute |
 | `components/MarketingDashboard.tsx` | 5 | Moyenne |
 | `components/ProduitDashboard.tsx` | 5 | Moyenne |
-| `components/UserDetailPage.tsx` | 5 | Moyenne |
 | `components/UserManagementPage.tsx` | 5 | Moyenne |
 | `components/MicrosoftCallback.tsx` | 6 | Basse |
 | `components/index.ts` | — | Ignoré (barrel) |
