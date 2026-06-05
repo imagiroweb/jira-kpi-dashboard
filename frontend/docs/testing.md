@@ -29,7 +29,7 @@ npx vitest run --coverage # Rapport de couverture détaillé
 npx vitest run src/hooks/useSocket.test.ts  # Fichier précis
 ```
 
-La couverture exclut `src/test/**` (voir `vitest.config.ts`).
+La couverture exclut `src/test/**`, `src/main.tsx`, `src/vite-env.d.ts` et `src/types/**` (voir `vitest.config.ts`).
 
 ---
 
@@ -79,7 +79,7 @@ Quick wins sur la logique pure et les appels API mockés (axios).
 
 | Fichier source | Fichier test | Cas principaux | Couverture lignes |
 |----------------|--------------|----------------|-------------------|
-| `src/services/api.ts` | `api.test.ts` | jiraApi, epicApi, syncApi, snapshots, brevoApi, mondayApi | ~94 % |
+| `services/api.ts` | `services/api.test.ts` | jiraApi, epicApi, syncApi, snapshots, brevoApi, mondayApi, **intercepteurs 401** | ~100 % |
 | `src/services/authApi.ts` | `authApi.test.ts` | login, register, verifyToken, reset password | ~81 % |
 | `src/services/mondayProduitCache.ts` | `mondayProduitCache.test.ts` | TTL mémoire, sessionStorage, invalidation | ~95 % |
 | `src/utils/dateUtils.ts` | `dateUtils.test.ts` | `formatDate`, `getDefaultDateRange` (fake timers) | 100 % |
@@ -269,20 +269,65 @@ Dernière phase optionnelle : SSO Microsoft, modales snapshots/détails, navigat
 | `ProduitDashboard` | repli/dépli section Suivi clients ; repli section Roadmap |
 | `App` | navigation sidebar dashboard → support → produit → dashboard ; `recordPageView` |
 
-### Non couvert (hors périmètre)
+### Non couvert en Phase 6 (comblé en passe Plafond sauf mention)
 
-| Élément | Raison |
-|---------|--------|
-| Intercepteurs axios 401 (`api.ts` L22-41) | mock axios sans chaîne interceptors — faible ROI |
+| Élément | Raison / statut |
+|---------|-----------------|
+| Intercepteurs axios 401 (`api.ts`) | ✅ Comblé en passe Plafond |
 | E2E Playwright | hors Vitest |
-| `main.tsx` | exclu volontairement |
-| Word cloud Produit (pixels SVG) | smoke métier uniquement |
+| `main.tsx` | exclu volontairement (`vitest.config.ts`) |
+| Word cloud Produit (pixels SVG) | smoke métier + domaine `produitSuiviKpi` |
 
 `ForgotPasswordPage` (~98 %) et `ResetPasswordPage` (~98 %) : déjà couverts en Phase 2 — non retouchés.
 
 **Couverture globale après Phase 6** : ~74,6 % lignes (310 tests frontend, +18 ; 705 tests monorepo).
 
 **Plan frontend terminé** — objectif ~70–75 %+ atteint.
+
+---
+
+## Plafond — passe finale ✅
+
+Dernière passe pour combler les gaps restants identifiés en fin de Phase 6.
+
+| Fichier source | Fichier test | Tests ajoutés | Couverture lignes (après) |
+|----------------|--------------|---------------|---------------------------|
+| `services/api.ts` (intercepteurs) | `api.test.ts` | +4 | **100 %** |
+| `UserManagementPage.tsx` | `UserManagementPage.test.tsx` | +7 | **~89 %** |
+| `ProduitDashboard.tsx` | `ProduitDashboard.test.tsx` | +3 | **~53 %** |
+
+### Cas testés (passe plafond)
+
+| Composant / module | Scénarios |
+|--------------------|-----------|
+| Intercepteurs axios | token `Authorization` si `auth_token` en localStorage ; pas de header sans token ; 401 → suppression token + redirect `/login` ; autres erreurs → reject sans redirect |
+| `UserManagementPage` | erreur chargement API ; changement de rôle (select) ; erreur mise à jour rôle ; drawer activité (logs connexion + stats navigation) ; modale toutes les connexions ; édition rôle ; création rôle |
+| `ProduitDashboard` | erreur réseau bootstrap Monday ; modale détail KPI sites actifs ; modale délai mise en prod par client |
+
+### Couverture avant / après
+
+| Métrique | Avant (Phase 6) | Après (plafond) |
+|----------|-----------------|-----------------|
+| Tests frontend | 310 | **324** (+14) |
+| Lignes (périmètre Vitest) | 74,56 % | **79,21 %** |
+| Tests monorepo | 705 | **718** |
+
+Le périmètre Vitest exclut désormais explicitement `main.tsx`, `vite-env.d.ts` et `src/types/**` (voir `vitest.config.ts`) — bootstrap et déclarations pures, sans logique testable unitairement.
+
+### Exclusions permanentes (hors périmètre)
+
+| Élément | Raison |
+|---------|--------|
+| `main.tsx` | Bootstrap React (`createRoot`, `StrictMode`) — smoke E2E ou exclusion config |
+| `src/types/**` | Types TypeScript uniquement |
+| `components/index.ts` | Barrel re-exports |
+| Word cloud Produit (`SystemeCaisseWordCloud`) | Rendu SVG/pixels — logique métier couverte via `produitSuiviKpi.test.ts` |
+| OAuth redirect externe (Azure AD) | Flux navigateur hors jsdom — `MicrosoftCallback` couvert à ~99 % |
+| E2E Playwright | Hors Vitest / RTL |
+| Branches profondes `ProduitDashboard` (roadmap charts, filtres trimestre, modales indicateurs) | ROI faible vs. domaine extrait ; smoke + modales KPI suffisants |
+| `UserWorkloadChart` (~62 %), `MarketingDashboard` (~60 %) | Graphiques / fetch lourds — smoke existant |
+
+**Couverture globale finale frontend** : **~79,2 % lignes** (324 tests ; plafond RTL atteint pour ce projet).
 
 ---
 
@@ -297,6 +342,7 @@ Dernière phase optionnelle : SSO Microsoft, modales snapshots/détails, navigat
 | 4 | EpicProgress, charts, UserDetail | 263 | ~39,7 % |
 | 5 | Dashboards smoke + domaine Suivi | 292 | ~69,6 % |
 | 6 | SSO, modales avancées, navigation App | 310 | ~74,6 % |
+| **Plafond** | Intercepteurs API, UserManagement, Produit KPI | **324** | **~79,2 %** |
 
 ---
 
@@ -344,11 +390,13 @@ Dernière phase optionnelle : SSO Microsoft, modales snapshots/détails, navigat
 
 ### Restants ⏳
 
-| Fichier source | Phase prévue | Priorité |
-|----------------|--------------|----------|
-| `components/index.ts` | — | Ignoré (barrel) |
-| `types/index.ts` | — | Ignoré (types) |
-| `main.tsx` | — | Exclu (bootstrap) |
+Aucun fichier source prioritaire restant — voir section **Plafond — exclusions permanentes** pour les éléments volontairement hors périmètre.
+
+| Fichier source | Statut |
+|----------------|--------|
+| `components/index.ts` | Ignoré (barrel) |
+| `types/index.ts` | Exclu (types) — `vitest.config.ts` |
+| `main.tsx` | Exclu (bootstrap) — `vitest.config.ts` |
 
 ---
 

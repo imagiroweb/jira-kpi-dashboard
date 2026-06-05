@@ -33,6 +33,42 @@ const mockGetBoard = vi.mocked(mondayApi.getBoard);
 const ROADMAP_BOARD_ID = '5191064770';
 const SUIVI_BOARD_ID = '475358061';
 
+const SUIVI_COLUMNS = [
+  { id: 'sites', title: 'Sites actifs', type: 'numbers' },
+  { id: 'target', title: 'Target', type: 'numbers' },
+  { id: 'caisse', title: 'Système de caisse actif', type: 'text' },
+  { id: 'prod', title: 'Date mise en production', type: 'date' },
+  { id: 'start', title: 'Project start date', type: 'date' },
+  { id: 'projets', title: 'Total projets', type: 'numbers' },
+];
+
+const SUIVI_ITEMS = [
+  {
+    id: 'suivi-1',
+    name: 'Client Alpha',
+    column_values: [
+      { id: 'sites', text: '4', type: 'numbers' },
+      { id: 'target', text: '10', type: 'numbers' },
+      { id: 'caisse', text: 'Caisse Pro', type: 'text' },
+      { id: 'prod', text: '2026-05-01', type: 'date' },
+      { id: 'start', text: '2026-04-01', type: 'date' },
+      { id: 'projets', text: '2', type: 'numbers' },
+    ],
+  },
+  {
+    id: 'suivi-2',
+    name: 'Client Beta',
+    column_values: [
+      { id: 'sites', text: '1', type: 'numbers' },
+      { id: 'target', text: '5', type: 'numbers' },
+      { id: 'caisse', text: '-', type: 'text' },
+      { id: 'prod', text: '2026-06-10', type: 'date' },
+      { id: 'start', text: '2026-05-01', type: 'date' },
+      { id: 'projets', text: '1', type: 'numbers' },
+    ],
+  },
+];
+
 function setupMondayMocks() {
   mockGetStatus.mockResolvedValue({ success: true, configured: true });
   mockGetMe.mockResolvedValue({ success: true, me: TEST_MONDAY_USER });
@@ -44,12 +80,22 @@ function setupMondayMocks() {
     success: true,
     boards: [{ id: ROADMAP_BOARD_ID, name: 'Roadmap Adoria 2026', state: 'active', boardKind: 'public', itemCount: 2, workspaceId: 'ws-roadmap' }],
   });
-  mockGetBoard.mockImplementation(async (boardId: string) => ({
-    success: true,
-    columns: TEST_MONDAY_COLUMNS,
-    items: TEST_MONDAY_ITEMS,
-    board: { id: boardId, name: 'Board', state: 'active', boardKind: 'public', itemCount: 2 },
-  }));
+  mockGetBoard.mockImplementation(async (boardId: string) => {
+    if (boardId === SUIVI_BOARD_ID) {
+      return {
+        success: true,
+        columns: SUIVI_COLUMNS,
+        items: SUIVI_ITEMS,
+        board: { id: boardId, name: 'Suivi clients', state: 'active', boardKind: 'public', itemCount: 2 },
+      };
+    }
+    return {
+      success: true,
+      columns: TEST_MONDAY_COLUMNS,
+      items: TEST_MONDAY_ITEMS,
+      board: { id: boardId, name: 'Board', state: 'active', boardKind: 'public', itemCount: 2 },
+    };
+  });
 }
 
 describe('ProduitDashboard', () => {
@@ -146,6 +192,47 @@ describe('ProduitDashboard', () => {
 
     await waitFor(() => {
       expect(screen.queryByText(/Chargement du board Roadmap/i)).not.toBeInTheDocument();
+    });
+  });
+
+  it('affiche une erreur réseau au bootstrap Monday', async () => {
+    mockGetStatus.mockRejectedValueOnce(new Error('Réseau indisponible'));
+
+    renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
+
+    await waitFor(() => {
+      expect(screen.getByText('Réseau indisponible')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: /Réessayer/i })).toBeInTheDocument();
+  });
+
+  it('ouvre la modale détail KPI sites actifs', async () => {
+    renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
+
+    await waitFor(() => {
+      expect(screen.getByText('5')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('Sites actifs').closest('button')!);
+
+    await waitFor(() => {
+      expect(screen.getByText('Client Alpha')).toBeInTheDocument();
+      expect(screen.getByText('Client Beta')).toBeInTheDocument();
+    });
+  });
+
+  it('ouvre la modale délai moyen de mise en production', async () => {
+    renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Délai moy\. mise en prod\./i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText(/Délai moy\. mise en prod\./i).closest('button')!);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Délai mise en prod. par client' })).toBeInTheDocument();
+      expect(screen.getByText('Client Alpha')).toBeInTheDocument();
     });
   });
 });

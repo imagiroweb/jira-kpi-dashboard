@@ -8,9 +8,15 @@ const axiosMocks = vi.hoisted(() => ({
   mockDelete: vi.fn(),
   mockPut: vi.fn(),
 }));
+const interceptorCapture = vi.hoisted(() => ({
+  requestOnFulfilled: null as
+    | ((config: { headers: Record<string, string> }) => { headers: Record<string, string> })
+    | null,
+  responseOnRejected: null as ((error: unknown) => unknown) | null,
+}));
 const { mockGet, mockPost, mockDelete } = axiosMocks;
 
-vi.mock('axios', () => axiosModuleMock(axiosMocks));
+vi.mock('axios', () => axiosModuleMock(axiosMocks, interceptorCapture));
 
 import {
   brevoApi,
@@ -21,6 +27,57 @@ import {
   supportSnapshotApi,
   syncApi,
 } from './api';
+
+describe('intercepteurs axios', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('ajoute le token Authorization si présent dans localStorage', () => {
+    localStorage.setItem('auth_token', 'jwt-test');
+    const config = { headers: {} as Record<string, string> };
+
+    const result = interceptorCapture.requestOnFulfilled!(config);
+
+    expect(result.headers.Authorization).toBe('Bearer jwt-test');
+  });
+
+  it('n’ajoute pas Authorization sans token', () => {
+    const config = { headers: {} as Record<string, string> };
+
+    const result = interceptorCapture.requestOnFulfilled!(config);
+
+    expect(result.headers.Authorization).toBeUndefined();
+  });
+
+  it('supprime le token et redirige vers /login sur une réponse 401', async () => {
+    localStorage.setItem('auth_token', 'jwt-expired');
+    const location = { href: '' };
+    vi.stubGlobal('location', location);
+
+    const error = { response: { status: 401 } };
+    await expect(interceptorCapture.responseOnRejected!(error)).rejects.toEqual(error);
+
+    expect(localStorage.getItem('auth_token')).toBeNull();
+    expect(location.href).toBe('/login');
+  });
+
+  it('rejette sans redirection pour les autres codes d’erreur', async () => {
+    localStorage.setItem('auth_token', 'jwt-valid');
+    const location = { href: '' };
+    vi.stubGlobal('location', location);
+
+    const error = { response: { status: 500 } };
+    await expect(interceptorCapture.responseOnRejected!(error)).rejects.toEqual(error);
+
+    expect(localStorage.getItem('auth_token')).toBe('jwt-valid');
+    expect(location.href).toBe('');
+  });
+});
 
 describe('jiraApi', () => {
   beforeEach(() => {
