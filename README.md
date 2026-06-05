@@ -109,7 +109,7 @@ L'application sera accessible sur :
 
 ### Tests
 
-À la racine du monorepo, `npm run test` exécute les tests backend (Jest) et frontend (Vitest), puis affiche un **tableau récapitulatif** (passés / échoués / ignorés, erreurs, avertissements, durée, statut).
+À la racine du monorepo, `npm run test` exécute les tests backend (Jest) et frontend (Vitest) **avec couverture de code**, puis affiche un **tableau récapitulatif** (passés / échoués / ignorés, erreurs, avertissements, durée, couverture lignes, statut). Le hook Husky pre-commit utilise le même script.
 
 ```bash
 npm run test              # Backend + frontend + récap

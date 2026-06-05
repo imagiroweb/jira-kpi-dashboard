@@ -1,19 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { axiosModuleMock } from '@/test/mocks/api';
 
-const mockGet = vi.hoisted(() => vi.fn());
-const mockPost = vi.hoisted(() => vi.fn());
-const mockPatch = vi.hoisted(() => vi.fn());
-
-vi.mock('axios', () => ({
-  default: {
-    create: () => ({
-      get: mockGet,
-      post: mockPost,
-      patch: mockPatch,
-      interceptors: { request: { use: vi.fn() } },
-    }),
-  },
+const axiosMocks = vi.hoisted(() => ({
+  mockGet: vi.fn(),
+  mockPost: vi.fn(),
+  mockPatch: vi.fn(),
+  mockDelete: vi.fn(),
+  mockPut: vi.fn(),
 }));
+const { mockGet, mockPost } = axiosMocks;
+
+vi.mock('axios', () => axiosModuleMock(axiosMocks));
 
 import { authApi } from './authApi';
 

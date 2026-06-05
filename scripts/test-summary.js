@@ -24,18 +24,31 @@ const c = {
   dim: useColor ? '\x1b[2m' : '',
 };
 
-/** @typedef {{ label: string, prefix: string, buildArgs: (jsonPath: string) => string[] }} TestPackage */
+/** @typedef {{ label: string, prefix: string, coverageSummaryPath: string, buildArgs: (jsonPath: string) => string[] }} TestPackage */
 
 /** @type {TestPackage[]} */
 const PACKAGES = [
   {
     label: 'backend',
     prefix: 'backend',
-    buildArgs: (jsonPath) => ['run', 'test', '--prefix', 'backend', '--', '--json', `--outputFile=${jsonPath}`],
+    coverageSummaryPath: path.join(ROOT, 'backend', 'coverage', 'coverage-summary.json'),
+    buildArgs: (jsonPath) => [
+      'run',
+      'test',
+      '--prefix',
+      'backend',
+      '--',
+      '--json',
+      `--outputFile=${jsonPath}`,
+      '--coverage',
+      '--coverageReporters=json-summary',
+      '--coverageReporters=text',
+    ],
   },
   {
     label: 'frontend',
     prefix: 'frontend',
+    coverageSummaryPath: path.join(ROOT, 'frontend', 'coverage', 'coverage-summary.json'),
     buildArgs: (jsonPath) => [
       'run',
       'test',
@@ -45,6 +58,7 @@ const PACKAGES = [
       '--reporter=default',
       '--reporter=json',
       `--outputFile.json=${jsonPath}`,
+      '--coverage',
     ],
   },
 ];
@@ -98,6 +112,69 @@ function parseJsonReport(filePath) {
   } catch {
     return null;
   }
+}
+
+/**
+ * @param {string} filePath
+ * @returns {{ pct: number, total: number, covered: number } | null}
+ */
+function parseCoverageSummary(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return null;
+  }
+
+  try {
+    const raw = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    const lines = raw?.total?.lines;
+    if (!lines || typeof lines.pct !== 'number') {
+      return null;
+    }
+
+    return {
+      pct: lines.pct,
+      total: lines.total ?? 0,
+      covered: lines.covered ?? 0,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {{ pct: number } | null | undefined} coverage
+ * @returns {string}
+ */
+function formatCoverage(coverage) {
+  if (!coverage) {
+    return '—';
+  }
+  return `${coverage.pct.toFixed(1)}%`;
+}
+
+/**
+ * @param {Array<{ coverage: { total: number, covered: number } | null }>} rows
+ * @returns {{ pct: number, total: number, covered: number } | null}
+ */
+function computeWeightedCoverage(rows) {
+  let total = 0;
+  let covered = 0;
+
+  for (const row of rows) {
+    if (row.coverage) {
+      total += row.coverage.total;
+      covered += row.coverage.covered;
+    }
+  }
+
+  if (total === 0) {
+    return null;
+  }
+
+  return {
+    pct: (covered / total) * 100,
+    total,
+    covered,
+  };
 }
 
 /**
@@ -159,14 +236,27 @@ function runCommand(cmd, args, cwd) {
 }
 
 /**
- * @typedef {{ label: string, passed: number, failed: number, skipped: number, errors: number, warnings: number, timeMs: number, status: string, ok: boolean }} Row
+ * @typedef {{ label: string, passed: number, failed: number, skipped: number, errors: number, warnings: number, timeMs: number, coverage: { pct: number, total: number, covered: number } | null, status: string, ok: boolean }} Row
  */
+
+/** Index de la colonne Status dans le tableau (0-based). */
+const STATUS_COLUMN_INDEX = 8;
 
 /**
  * @param {Row[]} rows
  */
 function printSummaryTable(rows) {
-  const headers = ['Package', 'Passed', 'Failed', 'Skipped', 'Errors', 'Warnings', 'Time', 'Status'];
+  const headers = [
+    'Package',
+    'Passed',
+    'Failed',
+    'Skipped',
+    'Errors',
+    'Warnings',
+    'Time',
+    'Coverage',
+    'Status',
+  ];
 
   const data = rows.map((row) => [
     row.label,
@@ -176,6 +266,7 @@ function printSummaryTable(rows) {
     String(row.errors),
     String(row.warnings),
     formatDuration(row.timeMs),
+    formatCoverage(row.coverage),
     row.status,
   ]);
 
@@ -186,11 +277,13 @@ function printSummaryTable(rows) {
   const pad = (value, width, alignRight = false) =>
     alignRight ? value.padStart(width) : value.padEnd(width);
 
+  const isNumericColumn = (index) => index > 0 && index < STATUS_COLUMN_INDEX;
+
   const hLine = (left, mid, right) =>
     `${left}${widths.map((w) => '─'.repeat(w + 2)).join(mid)}${right}`;
 
   const headerLine = headers
-    .map((header, index) => ` ${pad(header, widths[index], index > 0 && index < 7)} `)
+    .map((header, index) => ` ${pad(header, widths[index], isNumericColumn(index))} `)
     .join('│');
 
   console.log('');
@@ -203,18 +296,18 @@ function printSummaryTable(rows) {
 
   for (const row of data) {
     const isTotal = row[0] === 'TOTAL';
-    const status = row[7];
+    const status = row[STATUS_COLUMN_INDEX];
     const statusColor =
       status === 'OK' ? c.green : status === 'ÉCHEC' ? c.red : c.yellow;
     const line = row
       .map((cell, index) => {
-        if (index === 7) {
+        if (index === STATUS_COLUMN_INDEX) {
           return ` ${statusColor}${pad(cell, widths[index])}${c.reset} `;
         }
         if (isTotal) {
-          return ` ${c.bold}${pad(cell, widths[index], index > 0 && index < 7)}${c.reset} `;
+          return ` ${c.bold}${pad(cell, widths[index], isNumericColumn(index))}${c.reset} `;
         }
-        return ` ${pad(cell, widths[index], index > 0 && index < 7)} `;
+        return ` ${pad(cell, widths[index], isNumericColumn(index))} `;
       })
       .join('│');
     console.log(`│${line}│`);
@@ -244,6 +337,7 @@ async function main() {
     const skipped = parsed?.skipped ?? 0;
     const errors = parsed?.errors ?? (result.exitCode !== 0 ? 1 : 0);
     const timeMs = result.elapsedMs;
+    const coverage = parseCoverageSummary(pkg.coverageSummaryPath);
     const ok = result.exitCode === 0 && (parsed?.success ?? result.exitCode === 0);
 
     if (!ok) {
@@ -258,6 +352,7 @@ async function main() {
       errors: typeof errors === 'number' ? errors : 0,
       warnings,
       timeMs: typeof timeMs === 'number' ? timeMs : result.elapsedMs,
+      coverage,
       status: ok ? 'OK' : 'ÉCHEC',
       ok,
     });
@@ -280,6 +375,7 @@ async function main() {
   rows.push({
     label: 'TOTAL',
     ...total,
+    coverage: computeWeightedCoverage(rows),
     status: globalExitCode === 0 ? 'OK' : 'ÉCHEC',
     ok: globalExitCode === 0,
   });

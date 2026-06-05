@@ -1,4 +1,6 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { TEST_VISIBLE_PAGES_DASHBOARD_ONLY } from '@/test/fixtures/users';
+import { resetStore } from '@/test/mocks/store';
 import { getFirstVisiblePage, useStore, type User, type VisiblePages } from './useStore';
 
 describe('getFirstVisiblePage', () => {
@@ -65,33 +67,11 @@ describe('useStore (auth)', () => {
     id: '1',
     email: 'u@test.com',
     provider: 'local',
-    visiblePages: {
-      dashboard: true,
-      users: false,
-      support: false,
-      epics: false,
-      marketing: false,
-      produit: false,
-      gestionUtilisateurs: false,
-    },
+    visiblePages: TEST_VISIBLE_PAGES_DASHBOARD_ONLY,
   };
 
   beforeEach(() => {
-    vi.stubGlobal('localStorage', {
-      getItem: vi.fn(),
-      setItem: vi.fn(),
-      removeItem: vi.fn(),
-      clear: vi.fn(),
-      length: 0,
-      key: vi.fn(),
-    });
-    useStore.setState({
-      isAuthenticated: false,
-      user: null,
-      token: null,
-      pendingRoleSelection: false,
-      currentPage: 'dashboard',
-    });
+    resetStore();
   });
 
   it('login met à jour isAuthenticated, token, user et currentPage', () => {
