@@ -2,12 +2,8 @@ import type { PropsWithChildren, ReactNode } from 'react';
 
 type RechartsProps = PropsWithChildren<Record<string, unknown>>;
 
-function ChartShell({ children, 'data-testid': testId = 'recharts-chart', ...rest }: RechartsProps) {
-  return (
-    <div data-testid={testId} {...rest}>
-      {children}
-    </div>
-  );
+function ChartShell({ 'data-testid': testId = 'recharts-chart', ...rest }: RechartsProps) {
+  return <div data-testid={testId} {...rest} />;
 }
 
 function Passthrough({ children }: { children?: ReactNode }) {
@@ -17,9 +13,7 @@ function Passthrough({ children }: { children?: ReactNode }) {
 /** Stub recharts pour éviter les crashs jsdom (ResponsiveContainer, SVG, layout) */
 export function createRechartsMock() {
   return {
-    ResponsiveContainer: ({ children }: { children?: ReactNode }) => (
-      <div data-testid="recharts-responsive-container">{children}</div>
-    ),
+    ResponsiveContainer: () => <div data-testid="recharts-responsive-container" />,
     BarChart: ChartShell,
     LineChart: ChartShell,
     AreaChart: ChartShell,

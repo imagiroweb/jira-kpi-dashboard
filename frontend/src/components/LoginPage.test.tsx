@@ -91,10 +91,12 @@ describe('LoginPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /créer un compte/i }));
 
-    expect(screen.getByText(/créez votre compte/i)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Jean')).toBeInTheDocument();
-    expect(screen.getByPlaceholderText('Dupont')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /créer mon compte/i })).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(/créez votre compte/i)).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('Jean')).toBeInTheDocument();
+      expect(screen.getByPlaceholderText('Dupont')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /créer mon compte/i })).toBeInTheDocument();
+    });
   });
 
   it('n’affiche pas le bouton Microsoft quand le SSO est désactivé', async () => {

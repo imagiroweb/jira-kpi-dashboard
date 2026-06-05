@@ -194,21 +194,56 @@ Fixtures : `TEST_EPIC_PROGRESS_ITEM`, `TEST_EPIC_DETAILS_RESPONSE` depuis `src/t
 
 ---
 
-## Phase 5 — Dashboards & smoke tests (planifiée)
+## Phase 5 — Dashboards & smoke tests ✅
 
-**Non implémentée.** Extraction de la logique testable des gros dashboards :
+Extraction de la logique testable des gros dashboards + smoke tests par page.
 
-| Cible | Approche |
-|-------|----------|
-| `SprintDashboard.tsx` | smoke : rendu avec store seedé + mocks API |
-| `SupportDashboard.tsx` | smoke + filtres sprint |
-| `MarketingDashboard.tsx` | smoke + chargement données |
-| `ProduitDashboard.tsx` | smoke + cache Monday |
-| `UserManagementPage.tsx` | liste rôles / CRUD admin mocké |
+### Part A — Extraction domaine / utilitaires
 
-**Pattern** : `renderWithProviders` + `seedAuthenticatedUser` + stubs composants charts ; assert sur titres, états loading/erreur, pas sur le SVG recharts.
+| Fichier source | Fichier extrait | Tests | Couverture lignes |
+|----------------|-----------------|-------|-------------------|
+| `ProduitDashboard.tsx` (`computeSuiviKpis`, helpers) | `domain/produitSuiviKpi.ts` | `produitSuiviKpi.test.ts` (8) | ~93 % |
+| `SupportDashboard.tsx` (`formatHours`) | `utils/timeFormat.ts` | `timeFormat.test.ts` (3) | 100 % |
 
-**Objectif couverture** : ~48–55 % lignes.
+Fonctions extraites vers `produitSuiviKpi.ts` : `computeSuiviKpis`, `mondayMacroEstimateDiffPct`, `isDefinedCaisseLabel`, `parseDate`, `parseNum`, `isRoadmapAdoria2026Workspace`, `getItemColumnLabelText` + constantes colonnes Suivi Monday.
+
+### Part B — Smoke tests dashboards
+
+| Fichier source | Fichier test | Tests | Couverture lignes |
+|----------------|--------------|-------|-------------------|
+| `SprintDashboard.tsx` | `SprintDashboard.test.tsx` | 4 | ~69 % |
+| `SupportDashboard.tsx` | `SupportDashboard.test.tsx` | 4 | ~63 % |
+| `MarketingDashboard.tsx` | `MarketingDashboard.test.tsx` | 3 | ~60 % |
+| `ProduitDashboard.tsx` | `ProduitDashboard.test.tsx` | 4 | ~46 % |
+| `UserManagementPage.tsx` | `UserManagementPage.test.tsx` | 3 | ~30 % |
+
+### Cas testés Phase 5
+
+| Composant | Scénarios |
+|-----------|-----------|
+| `SprintDashboard` | chargement → KPI SP ; toggle sprint actif / période ; sauvegarde snapshot mockée ; cache `filtersKey` |
+| `SupportDashboard` | skeleton chargement ; KPI ratio support/build ; cache `filtersKey` ; toggle sprint actif |
+| `MarketingDashboard` | Brevo non configuré ; campagnes récentes/manuelles ; auth Brevo invalide (401) |
+| `ProduitDashboard` | bootstrap Monday mock ; section Roadmap visible ; refresh ; board suivi par défaut |
+| `UserManagementPage` | gating super_admin ; liste utilisateurs ; accès via `visiblePages.gestionUtilisateurs` |
+
+### Mocks Phase 5
+
+| Module | Approche |
+|--------|----------|
+| `fetch` (Sprint, Support) | `vi.stubGlobal('fetch', …)` — `/jira/configured-boards`, `/jira/dashboard/sprint-issues-all`, `/worklog/support-kpi` |
+| `mondayApi` (Produit) | `vi.mock('../services/api')` — `getStatus`, `getMe`, `getWorkspaces`, `getBoards`, `getBoard` |
+| `brevoApi` (Marketing) | mock `getStatus`, `getStats`, `getTransactionalEvents` |
+| `authApi` (UserManagement) | `createAuthApiMock()` — `getUsersAndRoles` |
+| `dashboardSnapshotApi` / `supportSnapshotApi` | mock module `api` |
+| `DateRangePicker` | stub bouton « Changer dates » (Sprint, Support, Marketing) |
+| `ResolvedByDayChart` | stub null (Sprint) |
+| Cache store | `useStore.setState` — `supportLastFiltersKey`, `dashboardLastFiltersKey` + payloads |
+| recharts | mock global — `ResponsiveContainer` sans enfants (évite warnings SVG `linearGradient`) |
+
+Fixtures : `TEST_SUPPORT_KPI_PAYLOAD`, `TEST_MONDAY_*`, `TEST_USER` / rôle `super_admin`.
+
+**Couverture globale après Phase 5** : ~69,6 % lignes (292 tests, +29).
 
 ---
 
@@ -235,7 +270,7 @@ Fixtures : `TEST_EPIC_PROGRESS_ITEM`, `TEST_EPIC_DETAILS_RESPONSE` depuis `src/t
 | 2 | Auth shell, petits composants | 218 | ~26,8 % |
 | 3 | Hooks socket, App routing | 246 | ~30,1 % |
 | 4 | EpicProgress, charts, UserDetail | 263 | ~39,7 % |
-| 5 | Dashboards smoke | ~320 (est.) | ~52 % |
+| 5 | Dashboards smoke + domaine Suivi | 292 | ~69,6 % |
 | 6 | SSO, intercepteurs, E2E | ~350+ (est.) | ~60 %+ |
 
 ---
@@ -273,16 +308,18 @@ Fixtures : `TEST_EPIC_PROGRESS_ITEM`, `TEST_EPIC_DETAILS_RESPONSE` depuis `src/t
 | `components/UserTicketsChart.tsx` | `components/UserTicketsChart.test.tsx` |
 | `components/UserWorkloadChart.tsx` | `components/UserWorkloadChart.test.tsx` |
 | `components/UserDetailPage.tsx` | `components/UserDetailPage.test.tsx` |
+| `domain/produitSuiviKpi.ts` | `domain/produitSuiviKpi.test.ts` |
+| `utils/timeFormat.ts` | `utils/timeFormat.test.ts` |
+| `components/SprintDashboard.tsx` | `components/SprintDashboard.test.tsx` |
+| `components/SupportDashboard.tsx` | `components/SupportDashboard.test.tsx` |
+| `components/MarketingDashboard.tsx` | `components/MarketingDashboard.test.tsx` |
+| `components/ProduitDashboard.tsx` | `components/ProduitDashboard.test.tsx` |
+| `components/UserManagementPage.tsx` | `components/UserManagementPage.test.tsx` |
 
 ### Restants ⏳
 
 | Fichier source | Phase prévue | Priorité |
 |----------------|--------------|----------|
-| `components/SprintDashboard.tsx` | 5 | Haute |
-| `components/SupportDashboard.tsx` | 5 | Haute |
-| `components/MarketingDashboard.tsx` | 5 | Moyenne |
-| `components/ProduitDashboard.tsx` | 5 | Moyenne |
-| `components/UserManagementPage.tsx` | 5 | Moyenne |
 | `components/MicrosoftCallback.tsx` | 6 | Basse |
 | `components/index.ts` | — | Ignoré (barrel) |
 | `types/index.ts` | — | Ignoré (types) |

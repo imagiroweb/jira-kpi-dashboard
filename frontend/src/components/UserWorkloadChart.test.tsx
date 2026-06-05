@@ -48,7 +48,7 @@ describe('UserWorkloadChart', () => {
     vi.unstubAllGlobals();
   });
 
-  it('affiche le squelette de chargement quand le rapport partagé est en cours', () => {
+  it('affiche le squelette de chargement quand le rapport partagé est en cours', async () => {
     render(
       <UserWorkloadChart
         dateRange={TEST_DATE_RANGE}
@@ -59,6 +59,12 @@ describe('UserWorkloadChart', () => {
     );
 
     expect(document.querySelector('.animate-pulse')).toBeTruthy();
+
+    await waitFor(() => {
+      expect(mockFetch).toHaveBeenCalledWith(
+        expect.stringContaining('/worklog/saved-reports')
+      );
+    });
   });
 
   it('affiche les utilisateurs quand le rapport partagé est disponible', async () => {

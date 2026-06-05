@@ -9,6 +9,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip, Legend, AreaChart, A
 import { DateRangePicker } from './DateRangePicker';
 import { useStore } from '../store/useStore';
 import { supportSnapshotApi, SupportSnapshotSummary, SupportSnapshotFull } from '../services/api';
+import { formatHours } from '../utils/timeFormat';
 
 interface SupportIssue {
   issueKey: string;
@@ -102,15 +103,6 @@ interface SupportKPIData {
 }
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
-
-// Format hours to working days (8h = 1 working day)
-function formatHours(hours: number): string {
-  if (hours < 1) return `${Math.round(hours * 60)}min`;
-  if (hours < 8) return `${hours.toFixed(1)}h`;
-  // Convert to working days (8h per day)
-  const workingDays = hours / 8;
-  return `${workingDays.toFixed(1)}j`;
-}
 
 export function SupportDashboard() {
   const dateRange = useStore((state) => state.dateRange);
