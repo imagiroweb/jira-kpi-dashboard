@@ -34,9 +34,10 @@ jest.mock('../utils/logger', () => ({
 }));
 
 import { schedulerService } from './schedulerService';
+import type { Server } from 'socket.io';
 
 describe('schedulerService', () => {
-  const io = { emit: jest.fn(), to: jest.fn() } as any;
+  const io = { emit: jest.fn(), to: jest.fn() } as unknown as Server;
   const initialSupportKey = process.env.JIRA_SUPPORT_PROJECT_KEY;
 
   beforeEach(() => {

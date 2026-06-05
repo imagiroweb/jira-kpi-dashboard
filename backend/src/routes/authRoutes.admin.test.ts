@@ -3,7 +3,7 @@
  */
 import request from 'supertest';
 import { createTestApp } from '../test/createTestApp';
-import { TEST_USER, TEST_USER_ID } from '../test/fixtures/users';
+import { TEST_USER_ID } from '../test/fixtures/users';
 
 const mockBuildUserWithPermissions = jest.fn();
 const mockUserFindById = jest.fn();

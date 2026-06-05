@@ -1,4 +1,5 @@
 import { SprintMapper } from './SprintMapper';
+import type { JiraIssue, JiraSprint } from '../JiraClient';
 
 describe('SprintMapper', () => {
   it('mappe un sprint Jira vers entité Sprint', () => {
@@ -11,7 +12,7 @@ describe('SprintMapper', () => {
         endDate: '2026-04-15',
         completeDate: undefined,
         goal: 'Goal'
-      } as any,
+      } satisfies JiraSprint,
       42
     );
 
@@ -23,6 +24,7 @@ describe('SprintMapper', () => {
   it('issueToDomin mappe les champs Jira en SprintIssue', () => {
     const issue = SprintMapper.issueToDomin(
       {
+        id: '10001',
         key: 'ABC-1',
         fields: {
           summary: 'Issue',
@@ -31,7 +33,7 @@ describe('SprintMapper', () => {
           customfield_story: 8,
           timeoriginalestimate: 3600
         }
-      } as any,
+      } satisfies JiraIssue,
       'customfield_story'
     );
 
@@ -44,9 +46,9 @@ describe('SprintMapper', () => {
   it('issuesToDomain mappe plusieurs issues', () => {
     const result = SprintMapper.issuesToDomain(
       [
-        { key: 'A-1', fields: { summary: 'A', status: { name: 'Done', statusCategory: { key: 'done' } } } },
-        { key: 'A-2', fields: { summary: 'B', status: { name: 'To Do', statusCategory: { key: 'new' } } } }
-      ] as any,
+        { id: '1', key: 'A-1', fields: { summary: 'A', status: { name: 'Done', statusCategory: { key: 'done' } } } },
+        { id: '2', key: 'A-2', fields: { summary: 'B', status: { name: 'To Do', statusCategory: { key: 'new' } } } }
+      ] satisfies JiraIssue[],
       'sp'
     );
     expect(result).toHaveLength(2);
@@ -57,9 +59,9 @@ describe('SprintMapper', () => {
   it('toDomainList mappe chaque sprint', () => {
     const list = SprintMapper.toDomainList(
       [
-        { id: 1, name: 'A', state: 'active', boardId: 1 } as any,
-        { id: 2, name: 'B', state: 'future', boardId: 1 } as any
-      ],
+        { id: 1, name: 'A', state: 'active' },
+        { id: 2, name: 'B', state: 'future' }
+      ] satisfies JiraSprint[],
       7
     );
     expect(list).toHaveLength(2);
@@ -70,12 +72,13 @@ describe('SprintMapper', () => {
   it('issueToDomin gère summary et status absents', () => {
     const issue = SprintMapper.issueToDomin(
       {
+        id: '99',
         key: 'Z-1',
         fields: {
           customfield_sp: null,
           timeoriginalestimate: null
         }
-      } as any,
+      } satisfies JiraIssue,
       'customfield_sp'
     );
     expect(issue.summary).toBe('');

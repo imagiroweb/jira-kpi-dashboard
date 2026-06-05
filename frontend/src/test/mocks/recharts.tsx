@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components -- mock recharts pour les tests */
 import type { PropsWithChildren, ReactNode } from 'react';
 
 type RechartsProps = PropsWithChildren<Record<string, unknown>>;

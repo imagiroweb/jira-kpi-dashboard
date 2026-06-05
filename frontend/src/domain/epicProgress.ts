@@ -10,8 +10,8 @@ export type TicketStatusBreakdown = { done: number; todo: number; inProgress: nu
 export function ticketStatusPercents(b: TicketStatusBreakdown): { done: number; todo: number; inProgress: number } {
   const t = b.done + b.todo + b.inProgress;
   if (t <= 0) return { done: 0, todo: 0, inProgress: 0 };
-  let done = Math.round((100 * b.done) / t);
-  let todo = Math.round((100 * b.todo) / t);
+  const done = Math.round((100 * b.done) / t);
+  const todo = Math.round((100 * b.todo) / t);
   let ip = Math.round((100 * b.inProgress) / t);
   const sum = done + todo + ip;
   if (sum !== 100) ip += 100 - sum;

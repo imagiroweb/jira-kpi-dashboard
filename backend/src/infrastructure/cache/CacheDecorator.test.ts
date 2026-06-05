@@ -4,6 +4,9 @@ import {
   globalCache
 } from './CacheDecorator';
 import { DateRange } from '../../domain/worklog/value-objects/DateRange';
+import { IWorklogRepository } from '../../domain/worklog/repositories/IWorklogRepository';
+import { ISprintRepository } from '../../domain/sprint/repositories/ISprintRepository';
+import { Sprint } from '../../domain/sprint/entities/Sprint';
 
 describe('CacheDecorator', () => {
   beforeEach(() => {
@@ -23,7 +26,7 @@ describe('CacheDecorator', () => {
       findByProject: jest.fn(),
       findByOpenSprints: jest.fn(),
       search: jest.fn()
-    } as any;
+    } as jest.Mocked<IWorklogRepository>;
     const repo = new CachedWorklogRepository(inner);
 
     await repo.findByIssue('ABC-1');
@@ -39,7 +42,7 @@ describe('CacheDecorator', () => {
       findByProject: jest.fn(),
       findByOpenSprints: jest.fn(),
       search: jest.fn().mockResolvedValue([{ id: 'w1' }])
-    } as any;
+    } as jest.Mocked<IWorklogRepository>;
     const repo = new CachedWorklogRepository(inner);
 
     await repo.search({ projectKey: 'ABC' });
@@ -57,7 +60,7 @@ describe('CacheDecorator', () => {
       findSprintIssues: jest.fn(),
       findOpenSprintIssues: jest.fn(),
       findBacklogIssues: jest.fn()
-    } as any;
+    } as jest.Mocked<ISprintRepository>;
     const repo = new CachedSprintRepository(inner);
 
     await repo.findByBoard(42);
@@ -76,7 +79,7 @@ describe('CacheDecorator', () => {
       findByProject: jest.fn(),
       findByOpenSprints: jest.fn(),
       search: jest.fn()
-    } as any;
+    } as jest.Mocked<IWorklogRepository>;
     const repo = new CachedWorklogRepository(inner);
     const range = DateRange.create('2026-04-01', '2026-04-15');
 
@@ -127,7 +130,7 @@ describe('CacheDecorator', () => {
       findByProject: jest.fn().mockResolvedValue([{ id: 'p1' }]),
       findByOpenSprints: jest.fn().mockResolvedValue([{ id: 'o1' }]),
       search: jest.fn()
-    } as any;
+    } as jest.Mocked<IWorklogRepository>;
     const repo = new CachedWorklogRepository(inner);
     const range = DateRange.create('2026-04-01', '2026-04-15');
 
@@ -153,7 +156,7 @@ describe('CacheDecorator', () => {
       findSprintIssues: jest.fn().mockResolvedValue([]),
       findOpenSprintIssues: jest.fn().mockResolvedValue([]),
       findBacklogIssues: jest.fn().mockResolvedValue([])
-    } as any;
+    } as jest.Mocked<ISprintRepository>;
     const repo = new CachedSprintRepository(inner);
 
     await repo.findOpenSprints('P');
@@ -179,7 +182,7 @@ describe('CacheDecorator', () => {
   });
 
   it('CachedSprintRepository met en cache findById quand le sprint existe', async () => {
-    const sprint = { id: 5, equals: () => false };
+    const sprint = Sprint.create({ id: 5, name: 'Sprint 5', state: 'active', boardId: 1 });
     const inner = {
       findByBoard: jest.fn(),
       findOpenSprints: jest.fn(),
@@ -188,7 +191,7 @@ describe('CacheDecorator', () => {
       findSprintIssues: jest.fn(),
       findOpenSprintIssues: jest.fn(),
       findBacklogIssues: jest.fn()
-    } as any;
+    } as jest.Mocked<ISprintRepository>;
     const repo = new CachedSprintRepository(inner);
     await repo.findById(5);
     await repo.findById(5);
