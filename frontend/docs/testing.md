@@ -247,17 +247,42 @@ Fixtures : `TEST_SUPPORT_KPI_PAYLOAD`, `TEST_MONDAY_*`, `TEST_USER` / rôle `sup
 
 ---
 
-## Phase 6 — Couverture avancée (optionnelle)
+## Phase 6 — Couverture avancée ✅
 
-**Non implémentée.** Cibles secondaires :
+Dernière phase optionnelle : SSO Microsoft, modales snapshots/détails, navigation App, sections Produit.
 
-- `MicrosoftCallback.tsx` — flux SSO hash/query, erreurs Azure
-- Intercepteurs axios 401 (`api.ts`) — redirect `/login`
-- Tests E2E Playwright (hors Vitest) si besoin QA
-- Hooks restants dans les dashboards (extraction custom hooks)
-- `index.ts` barrel — ignoré ou smoke minimal
+| Fichier source | Fichier test | Tests | Couverture lignes |
+|----------------|--------------|-------|-------------------|
+| `MicrosoftCallback.tsx` | `MicrosoftCallback.test.tsx` | 8 | ~99 % |
+| `SprintDashboard.tsx` | `SprintDashboard.test.tsx` | 7 (+3) | ~88 % |
+| `SupportDashboard.tsx` | `SupportDashboard.test.tsx` | 8 (+4) | ~85 % |
+| `ProduitDashboard.tsx` | `ProduitDashboard.test.tsx` | 6 (+2) | ~46 % |
+| `App.tsx` | `App.test.tsx` | 8 (+1) | ~96 % |
 
-**Objectif couverture** : ~60 %+ lignes (diminishing returns).
+### Cas testés Phase 6
+
+| Composant | Scénarios |
+|-----------|-----------|
+| `MicrosoftCallback` | loader ; erreur hash/query Azure ; token absent ; succès + login store + redirect `/` ; erreur backend ; exception réseau ; bouton retour connexion |
+| `SprintDashboard` | modale historique (liste + état vide) ; chargement snapshot depuis historique (`getSnapshot`) |
+| `SupportDashboard` | modale historique snapshots ; sauvegarde snapshot ; modale détail résolution ; modale première prise en charge |
+| `ProduitDashboard` | repli/dépli section Suivi clients ; repli section Roadmap |
+| `App` | navigation sidebar dashboard → support → produit → dashboard ; `recordPageView` |
+
+### Non couvert (hors périmètre)
+
+| Élément | Raison |
+|---------|--------|
+| Intercepteurs axios 401 (`api.ts` L22-41) | mock axios sans chaîne interceptors — faible ROI |
+| E2E Playwright | hors Vitest |
+| `main.tsx` | exclu volontairement |
+| Word cloud Produit (pixels SVG) | smoke métier uniquement |
+
+`ForgotPasswordPage` (~98 %) et `ResetPasswordPage` (~98 %) : déjà couverts en Phase 2 — non retouchés.
+
+**Couverture globale après Phase 6** : ~74,6 % lignes (310 tests frontend, +18 ; 705 tests monorepo).
+
+**Plan frontend terminé** — objectif ~70–75 %+ atteint.
 
 ---
 
@@ -271,7 +296,7 @@ Fixtures : `TEST_SUPPORT_KPI_PAYLOAD`, `TEST_MONDAY_*`, `TEST_USER` / rôle `sup
 | 3 | Hooks socket, App routing | 246 | ~30,1 % |
 | 4 | EpicProgress, charts, UserDetail | 263 | ~39,7 % |
 | 5 | Dashboards smoke + domaine Suivi | 292 | ~69,6 % |
-| 6 | SSO, intercepteurs, E2E | ~350+ (est.) | ~60 %+ |
+| 6 | SSO, modales avancées, navigation App | 310 | ~74,6 % |
 
 ---
 
@@ -315,14 +340,15 @@ Fixtures : `TEST_SUPPORT_KPI_PAYLOAD`, `TEST_MONDAY_*`, `TEST_USER` / rôle `sup
 | `components/MarketingDashboard.tsx` | `components/MarketingDashboard.test.tsx` |
 | `components/ProduitDashboard.tsx` | `components/ProduitDashboard.test.tsx` |
 | `components/UserManagementPage.tsx` | `components/UserManagementPage.test.tsx` |
+| `components/MicrosoftCallback.tsx` | `components/MicrosoftCallback.test.tsx` |
 
 ### Restants ⏳
 
 | Fichier source | Phase prévue | Priorité |
 |----------------|--------------|----------|
-| `components/MicrosoftCallback.tsx` | 6 | Basse |
 | `components/index.ts` | — | Ignoré (barrel) |
 | `types/index.ts` | — | Ignoré (types) |
+| `main.tsx` | — | Exclu (bootstrap) |
 
 ---
 

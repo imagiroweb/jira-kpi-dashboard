@@ -36,6 +36,7 @@ import { SprintDashboard } from './SprintDashboard';
 
 const mockGetSnapshots = vi.mocked(dashboardSnapshotApi.getSnapshots);
 const mockSaveSnapshot = vi.mocked(dashboardSnapshotApi.saveSnapshot);
+const mockGetSnapshot = vi.mocked(dashboardSnapshotApi.getSnapshot);
 
 const BOARD_ID = 10;
 
@@ -179,5 +180,127 @@ describe('SprintDashboard', () => {
       String(url).includes('/jira/dashboard/sprint-issues-all')
     );
     expect(sprintCalls).toHaveLength(0);
+  });
+
+  it('ouvre la modale historique et liste les snapshots enregistrés', async () => {
+    mockGetSnapshots.mockResolvedValue({
+      success: true,
+      snapshots: [
+        {
+          id: 'snap-1',
+          sprintName: 'Sprint 42',
+          savedAt: '2026-01-15T10:00:00.000Z',
+          savedBy: { id: 'user-1', name: 'Admin Test', email: 'admin@test.com' },
+          dateRange: { from: '2026-01-01', to: '2026-01-07' },
+          notes: 'Note smoke test',
+          summary: {
+            totalTickets: 10,
+            resolvedTickets: 5,
+            totalPoints: 20,
+            resolvedPoints: 12,
+            totalTimeHours: 8,
+          },
+        },
+      ],
+    });
+
+    renderWithProviders(<SprintDashboard />, { user: TEST_USER });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Historique/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Historique/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Historique des Sprints')).toBeInTheDocument();
+      expect(screen.getByText('Sprint 42')).toBeInTheDocument();
+      expect(screen.getByText(/Note smoke test/i)).toBeInTheDocument();
+    });
+
+    expect(mockGetSnapshots).toHaveBeenCalled();
+  });
+
+  it('affiche un état vide dans la modale historique sans snapshot', async () => {
+    mockGetSnapshots.mockResolvedValue({ success: true, snapshots: [] });
+
+    renderWithProviders(<SprintDashboard />, { user: TEST_USER });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Historique/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Historique/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Aucun snapshot enregistré/i)).toBeInTheDocument();
+    });
+  });
+
+  it('charge un snapshot depuis la modale historique', async () => {
+    mockGetSnapshots.mockResolvedValue({
+      success: true,
+      snapshots: [
+        {
+          id: 'snap-view',
+          sprintName: 'Sprint archivé',
+          savedAt: '2026-01-10T08:00:00.000Z',
+          savedBy: { id: 'user-1', name: 'Admin', email: 'admin@test.com' },
+          dateRange: { from: '2026-01-01', to: '2026-01-07' },
+          summary: {
+            totalTickets: 4,
+            resolvedTickets: 2,
+            totalPoints: 12,
+            resolvedPoints: 12,
+            totalTimeHours: 0,
+          },
+        },
+      ],
+    });
+    mockGetSnapshot.mockResolvedValue({
+      success: true,
+      snapshot: {
+        id: 'snap-view',
+        sprintName: 'Sprint archivé',
+        savedAt: '2026-01-10T08:00:00.000Z',
+        savedBy: { id: 'user-1', name: 'Admin', email: 'admin@test.com' },
+        projectsStats: [],
+        totals: {
+          totalPoints: 12,
+          todoPoints: 0,
+          inProgressPoints: 0,
+          qaPoints: 0,
+          resolvedPoints: 12,
+          estimatedPoints: 0,
+          totalTickets: 4,
+          todoTickets: 0,
+          inProgressTickets: 0,
+          qaTickets: 0,
+          resolvedTickets: 4,
+          totalTimeHours: 0,
+          backlogTickets: 0,
+          backlogPoints: 0,
+        },
+        dateRange: { from: '2026-01-01', to: '2026-01-07' },
+      },
+    });
+
+    renderWithProviders(<SprintDashboard />, { user: TEST_USER });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Historique/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Historique/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Sprint archivé')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('Voir les détails'));
+
+    await waitFor(() => {
+      expect(mockGetSnapshot).toHaveBeenCalledWith('snap-view');
+    });
   });
 });

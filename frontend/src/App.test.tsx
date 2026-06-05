@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAuthApiMock } from '@/test/mocks/authApi';
 import { resetStore, seedAuthenticatedUser } from '@/test/mocks/store';
@@ -15,7 +15,7 @@ vi.mock('./components/SprintDashboard', () => ({
   SprintDashboard: () => <div data-testid="sprint-dashboard">Dashboard</div>,
 }));
 vi.mock('./components/SupportDashboard', () => ({
-  SupportDashboard: () => null,
+  SupportDashboard: () => <div data-testid="support-dashboard">Support</div>,
 }));
 vi.mock('./components/UserDetailPage', () => ({
   UserDetailPage: () => null,
@@ -27,13 +27,32 @@ vi.mock('./components/MarketingDashboard', () => ({
   MarketingDashboard: () => null,
 }));
 vi.mock('./components/ProduitDashboard', () => ({
-  ProduitDashboard: () => null,
+  ProduitDashboard: () => <div data-testid="produit-dashboard">Produit</div>,
 }));
 vi.mock('./components/UserManagementPage', () => ({
   UserManagementPage: () => null,
 }));
 vi.mock('./components/Sidebar', () => ({
-  Sidebar: () => <nav data-testid="sidebar">Sidebar</nav>,
+  Sidebar: ({
+    currentPage,
+    onNavigate,
+  }: {
+    currentPage: string;
+    onNavigate: (page: 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'gestionUtilisateurs') => void;
+  }) => (
+    <nav data-testid="sidebar">
+      <span data-testid="current-page">{currentPage}</span>
+      <button type="button" onClick={() => onNavigate('dashboard')}>
+        Nav Dashboard
+      </button>
+      <button type="button" onClick={() => onNavigate('support')}>
+        Nav Support
+      </button>
+      <button type="button" onClick={() => onNavigate('produit')}>
+        Nav Produit
+      </button>
+    </nav>
+  ),
 }));
 
 vi.mock('./contexts/SocketContext', () => ({
@@ -47,6 +66,7 @@ const mockVerifyToken = vi.mocked(authApi.verifyToken);
 const mockGetCurrentUser = vi.mocked(authApi.getCurrentUser);
 const mockGetMicrosoftConfig = vi.mocked(authApi.getMicrosoftConfig);
 const mockGetRolesForSignup = vi.mocked(authApi.getRolesForSignup);
+const mockRecordPageView = vi.mocked(authApi.recordPageView);
 
 function stubWindowLocation(pathname: string, search = '') {
   vi.stubGlobal('location', {
@@ -113,9 +133,7 @@ describe('App', () => {
 
     expect(screen.getByText('Chargement...')).toBeInTheDocument();
 
-    await act(async () => {
-      resolveVerify(true);
-    });
+    resolveVerify(true);
 
     await waitFor(() => {
       expect(screen.queryByText('Chargement...')).not.toBeInTheDocument();
@@ -172,5 +190,40 @@ describe('App', () => {
 
     expect(mockVerifyToken).toHaveBeenCalled();
     expect(mockGetCurrentUser).toHaveBeenCalled();
+  });
+
+  it('navigue entre les pages via la sidebar', async () => {
+    seedAuthenticatedUser();
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('sprint-dashboard')).toBeInTheDocument();
+      expect(screen.getByTestId('current-page')).toHaveTextContent('dashboard');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Nav Support' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('support-dashboard')).toBeInTheDocument();
+      expect(screen.queryByTestId('sprint-dashboard')).not.toBeInTheDocument();
+      expect(screen.getByTestId('current-page')).toHaveTextContent('support');
+    });
+
+    expect(mockRecordPageView).toHaveBeenCalledWith('support');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Nav Produit' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('produit-dashboard')).toBeInTheDocument();
+      expect(useStore.getState().currentPage).toBe('produit');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Nav Dashboard' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('sprint-dashboard')).toBeInTheDocument();
+      expect(useStore.getState().currentPage).toBe('dashboard');
+    });
   });
 });

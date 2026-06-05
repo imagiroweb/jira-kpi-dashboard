@@ -112,4 +112,40 @@ describe('ProduitDashboard', () => {
       expect(mockGetBoard).toHaveBeenCalledWith(SUIVI_BOARD_ID, 500);
     });
   });
+
+  it('replie et déplie la section Suivi clients', async () => {
+    renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
+
+    await waitFor(() => {
+      expect(screen.getByText('Sites actifs')).toBeInTheDocument();
+    });
+
+    const suiviHeading = screen.getByRole('heading', { name: 'Suivi clients par cp' });
+    fireEvent.click(suiviHeading.closest('button')!);
+
+    await waitFor(() => {
+      expect(screen.queryByText('Sites actifs')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(suiviHeading.closest('button')!);
+
+    await waitFor(() => {
+      expect(screen.getByText('Sites actifs')).toBeInTheDocument();
+    });
+  });
+
+  it('replie la section Roadmap Adoria 2026', async () => {
+    renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
+
+    await waitFor(() => {
+      expect(screen.getByText('Connecté à Monday.com')).toBeInTheDocument();
+    });
+
+    const roadmapHeadings = screen.getAllByRole('heading', { name: /Roadmap Adoria 2026/i });
+    fireEvent.click(roadmapHeadings[0].closest('button')!);
+
+    await waitFor(() => {
+      expect(screen.queryByText(/Chargement du board Roadmap/i)).not.toBeInTheDocument();
+    });
+  });
 });

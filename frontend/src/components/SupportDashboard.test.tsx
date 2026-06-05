@@ -22,12 +22,17 @@ vi.mock('./DateRangePicker', () => ({
 
 vi.mock('../services/api', () => ({
   supportSnapshotApi: {
-    getSnapshots: vi.fn().mockResolvedValue({ success: true, snapshots: [] }),
+    getSnapshots: vi.fn(),
     saveSnapshot: vi.fn(),
     getSnapshot: vi.fn(),
     deleteSnapshot: vi.fn(),
   },
 }));
+
+import { supportSnapshotApi } from '../services/api';
+
+const mockGetSnapshots = vi.mocked(supportSnapshotApi.getSnapshots);
+const mockSaveSnapshot = vi.mocked(supportSnapshotApi.saveSnapshot);
 
 function makeSupportFetchMock(delayMs = 0) {
   return vi.fn(async (input: RequestInfo | URL) => {
@@ -49,6 +54,8 @@ describe('SupportDashboard', () => {
   beforeEach(() => {
     resetStore();
     vi.clearAllMocks();
+    mockGetSnapshots.mockResolvedValue({ success: true, snapshots: [] });
+    mockSaveSnapshot.mockResolvedValue({ success: true, snapshot: { id: 'snap-support-1' } });
   });
 
   it('affiche un skeleton pendant le chargement initial', async () => {
@@ -112,6 +119,102 @@ describe('SupportDashboard', () => {
 
     await waitFor(() => {
       expect(screen.getByText(/Mode: Période personnalisée/i)).toBeInTheDocument();
+    });
+  });
+
+  it('ouvre la modale historique et affiche les snapshots support', async () => {
+    vi.stubGlobal('fetch', makeSupportFetchMock());
+    mockGetSnapshots.mockResolvedValue({
+      success: true,
+      snapshots: [
+        {
+          id: 'support-snap-1',
+          sprintName: 'Support S12',
+          savedAt: '2026-02-01T12:00:00.000Z',
+          savedBy: { id: 'user-1', name: 'Support Admin', email: 'support@test.com' },
+          dateRange: { from: '2026-01-01', to: '2026-01-07' },
+          notes: 'Snapshot support',
+          summary: {
+            totalTickets: 8,
+            resolvedTickets: 4,
+            totalPonderation: 40,
+            resolvedPonderation: 20,
+          },
+        },
+      ],
+    });
+
+    renderWithProviders(<SupportDashboard />, { user: TEST_USER });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Historique/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Historique/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Historique des Sprints')).toBeInTheDocument();
+      expect(screen.getByText('Support S12')).toBeInTheDocument();
+    });
+
+    expect(mockGetSnapshots).toHaveBeenCalled();
+  });
+
+  it('enregistre un snapshot support depuis la modale', async () => {
+    vi.stubGlobal('fetch', makeSupportFetchMock());
+
+    renderWithProviders(<SupportDashboard />, { user: TEST_USER });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Sauvegarder$/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /^Sauvegarder$/i }));
+    expect(screen.getByText('Sauvegarder le Sprint')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText(/Sprint 42/i), {
+      target: { value: 'Support snapshot smoke' },
+    });
+
+    const saveButtons = screen.getAllByRole('button', { name: /^Sauvegarder$/i });
+    fireEvent.click(saveButtons[saveButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(mockSaveSnapshot).toHaveBeenCalledWith('Support snapshot smoke', undefined);
+    });
+  });
+
+  it('ouvre la modale de détail des temps de résolution', async () => {
+    vi.stubGlobal('fetch', makeSupportFetchMock());
+
+    renderWithProviders(<SupportDashboard />, { user: TEST_USER });
+
+    await waitFor(() => {
+      expect(screen.getByTitle('Cliquez pour voir le détail des tickets')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('Cliquez pour voir le détail des tickets'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Détail des temps de résolution')).toBeInTheDocument();
+      expect(screen.getByText('SUP-1')).toBeInTheDocument();
+    });
+  });
+
+  it('ouvre la modale de détail de première prise en charge', async () => {
+    vi.stubGlobal('fetch', makeSupportFetchMock());
+
+    renderWithProviders(<SupportDashboard />, { user: TEST_USER });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /1ère Prise/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /1ère Prise/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Détail temps moyen de première prise en charge')).toBeInTheDocument();
+      expect(screen.getByText('SUP-1')).toBeInTheDocument();
     });
   });
 });
