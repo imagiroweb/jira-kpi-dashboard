@@ -172,6 +172,20 @@ describe('MaPage', () => {
 - **Démarrer socket.io réel** — utiliser `socketContextModuleMock()` ou `renderWithProviders({ socket: true })`.
 - **Dupliquer les fixtures utilisateur** — importer `TEST_USER` depuis `fixtures/users.ts`.
 
+## Phase 1 — services & utilitaires (couverture ciblée)
+
+Fichiers couverts en priorité (quick wins) :
+
+| Fichier | Tests | Couverture lignes (indicatif) |
+|---------|-------|-------------------------------|
+| `src/services/api.test.ts` | jiraApi, epicApi, syncApi, snapshots, brevoApi, mondayApi | ~94 % (`api.ts`) |
+| `src/services/mondayProduitCache.test.ts` | TTL mémoire, sessionStorage, invalidation, clés workspace | ~95 % |
+| `src/utils/dateUtils.test.ts` | `formatDate`, `getDefaultDateRange` (fake timers) | 100 % |
+| `src/constants/transactionalEvents.test.ts` | `getTransactionalEventBadgeClass` par type d’événement | 100 % |
+| `src/store/useStore.test.ts` (étendu) | `updateUser`, `logout` (caches), `triggerKpiRefresh`, persist merge ISO | 100 % |
+
+Les intercepteurs axios 401 de `api.ts` (redirect `/login`) ne sont pas testés ici — ils seront couverts en Phase 2+ si nécessaire via tests d’intégration composant.
+
 ## Liens
 
 - Tests backend : [backend/docs/testing-routes.md](../../backend/docs/testing-routes.md)
