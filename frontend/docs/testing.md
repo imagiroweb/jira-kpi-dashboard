@@ -4,7 +4,7 @@ Guide pour écrire et maintenir les tests unitaires, hooks et composants React d
 
 ## Vue d'ensemble
 
-**Objectif** : couvrir progressivement la logique métier, les services API, les hooks temps réel et le shell d’authentification sans dépendre du backend réel, de MongoDB ni de socket.io en environnement jsdom.
+**Objectif** : couvrir progressivement la logique métier, les services API, les hooks temps réel et le shell d’authentification sans dépendre du backend réel, de MongoDB ni de socket.io en environnement jsdom. **Objectif 80 %** de couverture lignes (seuil CI) — lancer `npx vitest run --coverage` pour vérifier.
 
 **Stack** :
 

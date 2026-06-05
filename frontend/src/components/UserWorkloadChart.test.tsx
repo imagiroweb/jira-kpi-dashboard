@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { UserWorkloadChart } from './UserWorkloadChart';
 
@@ -84,5 +84,108 @@ describe('UserWorkloadChart', () => {
     expect(screen.getByText('Bob Dupont')).toBeInTheDocument();
     expect(screen.getByText(/utilisateurs/)).toBeInTheDocument();
     expect(screen.getByText(/total/)).toBeInTheDocument();
+  });
+
+  it('affiche une erreur quand le rapport partagé échoue', async () => {
+    render(
+      <UserWorkloadChart
+        dateRange={TEST_DATE_RANGE}
+        selectedProjects={['PROJ']}
+        sharedReportPayload={{ success: false, message: 'Erreur WorklogPro' }}
+        isSharedReportLoading={false}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Erreur WorklogPro')).toBeInTheDocument();
+    });
+  });
+
+  it('affiche l’état vide quand aucun worklog n’est trouvé', async () => {
+    render(
+      <UserWorkloadChart
+        dateRange={TEST_DATE_RANGE}
+        selectedProjects={['PROJ']}
+        sharedReportPayload={{ success: true, data: [], summary: { totalHours: 0, worklogCount: 0, uniqueUsers: 0 } }}
+        isSharedReportLoading={false}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Aucun worklog trouvé pour cette période')).toBeInTheDocument();
+    });
+  });
+
+  it('bascule vers un rapport sauvegardé et affiche les données', async () => {
+    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/worklog/saved-reports/report-1/execute')) {
+        return jsonResponse(TEST_REPORT_PAYLOAD);
+      }
+      if (url.includes('/worklog/saved-reports')) {
+        return jsonResponse({
+          success: true,
+          reports: [{ id: 'report-1', name: 'Rapport hebdo', description: 'Temps équipe' }],
+        });
+      }
+      return jsonResponse({ success: false });
+    });
+
+    render(
+      <UserWorkloadChart
+        dateRange={TEST_DATE_RANGE}
+        selectedProjects={['PROJ']}
+        sharedReportPayload={null}
+        isSharedReportLoading={false}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Temps réel/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Temps réel/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Rapport hebdo/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Alice/)).toBeInTheDocument();
+      expect(screen.getByText(/Bob/)).toBeInTheDocument();
+    });
+  });
+
+  it('affiche une erreur serveur lors de l’exécution d’un rapport sauvegardé', async () => {
+    mockFetch.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/worklog/saved-reports/report-1/execute')) {
+        return Promise.resolve({ ok: false, status: 500, json: () => Promise.resolve({}) });
+      }
+      if (url.includes('/worklog/saved-reports')) {
+        return jsonResponse({
+          success: true,
+          reports: [{ id: 'report-1', name: 'Rapport hebdo' }],
+        });
+      }
+      return jsonResponse({ success: false });
+    });
+
+    render(
+      <UserWorkloadChart
+        dateRange={TEST_DATE_RANGE}
+        selectedProjects={['PROJ']}
+        sharedReportPayload={null}
+        isSharedReportLoading={false}
+      />
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Temps réel/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Temps réel/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /Rapport hebdo/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Erreur serveur: 500')).toBeInTheDocument();
+    });
   });
 });

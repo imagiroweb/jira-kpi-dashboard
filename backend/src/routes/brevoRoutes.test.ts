@@ -250,4 +250,42 @@ describe('brevoRoutes (TI)', () => {
       expect(client.getCampaignRecipientEmails).toHaveBeenCalledWith(456, 'clickers');
     });
   });
+
+  describe('branches 503 et erreurs serveur', () => {
+    it('GET /stats retourne 503 si Brevo non configuré', async () => {
+      client.isConfigured.mockReturnValue(false);
+      const res = await request(app).get('/api/brevo/stats');
+      expect(res.status).toBe(503);
+      expect(res.body.message).toMatch(/BREVO_API_KEY/);
+      expect(client.getContactsCount).not.toHaveBeenCalled();
+    });
+
+    it('GET /transactional/events retourne 503 si Brevo non configuré', async () => {
+      client.isConfigured.mockReturnValue(false);
+      const res = await request(app).get('/api/brevo/transactional/events');
+      expect(res.status).toBe(503);
+      expect(client.getTransactionalEvents).not.toHaveBeenCalled();
+    });
+
+    it('GET /campaigns/:id/recipients retourne 503 si Brevo non configuré', async () => {
+      client.isConfigured.mockReturnValue(false);
+      const res = await request(app).get('/api/brevo/campaigns/1/recipients').query({ type: 'clickers' });
+      expect(res.status).toBe(503);
+      expect(client.getCampaignRecipientEmails).not.toHaveBeenCalled();
+    });
+
+    it('GET /account retourne 500 si le client lève une exception', async () => {
+      client.getAccount.mockRejectedValue(new Error('boom'));
+      const res = await request(app).get('/api/brevo/account');
+      expect(res.status).toBe(500);
+      expect(res.body.success).toBe(false);
+    });
+
+    it('GET /stats retourne 500 si une dépendance échoue', async () => {
+      client.getContactsCount.mockRejectedValue(new Error('boom'));
+      const res = await request(app).get('/api/brevo/stats');
+      expect(res.status).toBe(500);
+      expect(res.body.message).toMatch(/statistiques Brevo/);
+    });
+  });
 });

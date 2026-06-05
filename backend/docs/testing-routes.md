@@ -4,7 +4,7 @@ Guide pour écrire et maintenir les tests d’intégration (TI) et unitaires de 
 
 ## Objectif
 
-Couvrir les routes HTTP (`src/routes/`) de bout en bout via **supertest**, sans démarrer le serveur ni toucher à MongoDB / APIs externes réelles. Les dépendances (auth, services, clients, modèles) sont mockées de façon reproductible grâce à l’infrastructure partagée dans `src/test/`.
+Couvrir les routes HTTP (`src/routes/`) de bout en bout via **supertest**, sans démarrer le serveur ni toucher à MongoDB / APIs externes réelles. Les dépendances (auth, services, clients, modèles) sont mockées de façon reproductible grâce à l’infrastructure partagée dans `src/test/`. **Objectif 80 %** de couverture lignes — vérifier avec `yarn test:coverage`.
 
 ## Stack
 

@@ -33,6 +33,8 @@ import { supportSnapshotApi } from '../services/api';
 
 const mockGetSnapshots = vi.mocked(supportSnapshotApi.getSnapshots);
 const mockSaveSnapshot = vi.mocked(supportSnapshotApi.saveSnapshot);
+const mockGetSnapshot = vi.mocked(supportSnapshotApi.getSnapshot);
+const mockDeleteSnapshot = vi.mocked(supportSnapshotApi.deleteSnapshot);
 
 function makeSupportFetchMock(delayMs = 0) {
   return vi.fn(async (input: RequestInfo | URL) => {
@@ -216,5 +218,146 @@ describe('SupportDashboard', () => {
       expect(screen.getByText('Détail temps moyen de première prise en charge')).toBeInTheDocument();
       expect(screen.getByText('SUP-1')).toBeInTheDocument();
     });
+  });
+
+  it('affiche l’historique vide quand aucun snapshot n’existe', async () => {
+    vi.stubGlobal('fetch', makeSupportFetchMock());
+    mockGetSnapshots.mockResolvedValue({ success: true, snapshots: [] });
+
+    renderWithProviders(<SupportDashboard />, { user: TEST_USER });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Historique/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Historique/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Aucun snapshot enregistré')).toBeInTheDocument();
+    });
+  });
+
+  it('ouvre la vue détail d’un snapshot depuis l’historique', async () => {
+    vi.stubGlobal('fetch', makeSupportFetchMock());
+    mockGetSnapshots.mockResolvedValue({
+      success: true,
+      snapshots: [
+        {
+          id: 'support-snap-1',
+          sprintName: 'Support S12',
+          savedAt: '2026-02-01T12:00:00.000Z',
+          savedBy: { id: 'user-1', name: 'Support Admin', email: 'support@test.com' },
+          dateRange: { from: '2026-01-01', to: '2026-01-07' },
+          summary: {
+            totalTickets: 8,
+            resolvedTickets: 4,
+            totalPonderation: 40,
+            resolvedPonderation: 20,
+          },
+        },
+      ],
+    });
+    mockGetSnapshot.mockResolvedValue({
+      success: true,
+      snapshot: {
+        id: 'support-snap-1',
+        sprintName: 'Support S12',
+        savedAt: '2026-02-01T12:00:00.000Z',
+        savedBy: { id: 'user-1', name: 'Support Admin', email: 'support@test.com' },
+        dateRange: { from: '2026-01-01', to: '2026-01-07' },
+        ...TEST_SUPPORT_KPI_PAYLOAD,
+      },
+    });
+
+    renderWithProviders(<SupportDashboard />, { user: TEST_USER });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Historique/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Historique/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Support S12')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('Voir les détails'));
+
+    await waitFor(() => {
+      expect(mockGetSnapshot).toHaveBeenCalledWith('support-snap-1');
+      expect(screen.getByText('Total tickets')).toBeInTheDocument();
+    });
+  });
+
+  it('supprime un snapshot après confirmation', async () => {
+    vi.stubGlobal('fetch', makeSupportFetchMock());
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    mockGetSnapshots
+      .mockResolvedValueOnce({
+        success: true,
+        snapshots: [
+          {
+            id: 'support-snap-del',
+            sprintName: 'Sprint à supprimer',
+            savedAt: '2026-02-01T12:00:00.000Z',
+            savedBy: { id: 'user-1', name: 'Admin', email: 'admin@test.com' },
+            dateRange: { from: '2026-01-01', to: '2026-01-07' },
+            summary: {
+              totalTickets: 2,
+              resolvedTickets: 1,
+              totalPonderation: 10,
+              resolvedPonderation: 5,
+            },
+          },
+        ],
+      })
+      .mockResolvedValueOnce({ success: true, snapshots: [] });
+    mockDeleteSnapshot.mockResolvedValue({ success: true });
+
+    renderWithProviders(<SupportDashboard />, { user: TEST_USER });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Historique/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Historique/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Sprint à supprimer')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('Supprimer'));
+
+    await waitFor(() => {
+      expect(confirmSpy).toHaveBeenCalled();
+      expect(mockDeleteSnapshot).toHaveBeenCalledWith('support-snap-del');
+    });
+
+    confirmSpy.mockRestore();
+  });
+
+  it('gère l’échec silencieux de l’enregistrement snapshot', async () => {
+    vi.stubGlobal('fetch', makeSupportFetchMock());
+    mockSaveSnapshot.mockRejectedValue(new Error('Save failed'));
+
+    renderWithProviders(<SupportDashboard />, { user: TEST_USER });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^Sauvegarder$/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /^Sauvegarder$/i }));
+    fireEvent.change(screen.getByPlaceholderText(/Sprint 42/i), {
+      target: { value: 'Snapshot erreur' },
+    });
+
+    const saveButtons = screen.getAllByRole('button', { name: /^Sauvegarder$/i });
+    fireEvent.click(saveButtons[saveButtons.length - 1]);
+
+    await waitFor(() => {
+      expect(mockSaveSnapshot).toHaveBeenCalled();
+    });
+
+    expect(screen.getByText('Sauvegarder le Sprint')).toBeInTheDocument();
   });
 });

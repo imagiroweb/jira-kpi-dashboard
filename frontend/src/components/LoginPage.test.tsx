@@ -12,6 +12,7 @@ import { authApi } from '../services/authApi';
 import { LoginPage } from './LoginPage';
 
 const mockLogin = vi.mocked(authApi.login);
+const mockRegister = vi.mocked(authApi.register);
 const mockGetMicrosoftConfig = vi.mocked(authApi.getMicrosoftConfig);
 const mockGetRolesForSignup = vi.mocked(authApi.getRolesForSignup);
 
@@ -127,5 +128,91 @@ describe('LoginPage', () => {
 
     expect(screen.getByRole('button', { name: /envoyer le lien/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /se connecter/i })).not.toBeInTheDocument();
+  });
+
+  it('affiche le bouton Microsoft quand le SSO est activé', async () => {
+    mockGetMicrosoftConfig.mockResolvedValue({
+      enabled: true,
+      clientId: 'ms-client-id',
+      tenantId: 'ms-tenant-id',
+      redirectUri: 'http://localhost:3001/auth/microsoft/callback',
+    });
+
+    renderWithProviders(<LoginPage />, { user: null });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /microsoft/i })).toBeInTheDocument();
+    });
+  });
+
+  it('affiche une erreur lors de l’inscription échouée', async () => {
+    mockGetRolesForSignup.mockResolvedValue([{ id: 'role-1', name: 'Développeur' }]);
+    mockRegister.mockResolvedValue({ success: false, error: 'Email déjà utilisé' });
+
+    renderWithProviders(<LoginPage />, { user: null });
+
+    await waitFor(() => {
+      expect(screen.getByText(/connectez-vous à votre compte/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /créer un compte/i }));
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Jean')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText('Jean'), { target: { value: 'Jean' } });
+    fireEvent.change(screen.getByPlaceholderText('Dupont'), { target: { value: 'Dupont' } });
+    fireEvent.change(screen.getByPlaceholderText('votre@email.com'), {
+      target: { value: 'new@test.com' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Min. 12 caractères'), {
+      target: { value: 'ValidPass123!' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Confirmer le mot de passe'), {
+      target: { value: 'ValidPass123!' },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /créer mon compte/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Email déjà utilisé')).toBeInTheDocument();
+    });
+    expect(useStore.getState().isAuthenticated).toBe(false);
+  });
+
+  it('refuse un mot de passe faible à l’inscription', async () => {
+    mockGetRolesForSignup.mockResolvedValue([{ id: 'role-1', name: 'Développeur' }]);
+
+    renderWithProviders(<LoginPage />, { user: null });
+
+    await waitFor(() => {
+      expect(screen.getByText(/connectez-vous à votre compte/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /créer un compte/i }));
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText('Min. 12 caractères')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByPlaceholderText('Jean'), { target: { value: 'Jean' } });
+    fireEvent.change(screen.getByPlaceholderText('Dupont'), { target: { value: 'Dupont' } });
+    fireEvent.change(screen.getByPlaceholderText('votre@email.com'), {
+      target: { value: 'new@test.com' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Min. 12 caractères'), {
+      target: { value: 'short' },
+    });
+    fireEvent.change(screen.getByPlaceholderText('Confirmer le mot de passe'), {
+      target: { value: 'short' },
+    });
+
+    const submitBtn = screen.getByRole('button', { name: /créer mon compte/i });
+    expect(submitBtn).toBeDisabled();
+
+    fireEvent.click(submitBtn);
+
+    expect(mockRegister).not.toHaveBeenCalled();
   });
 });
