@@ -59,7 +59,7 @@ git clone <repository-url>
 cd jira-kpi-dashboard
 ```
 
-**Hooks Git (Husky)** : à la racine, exécuter `npm install` une fois pour installer Husky. Les commits déclencheront alors le lint backend + frontend automatiquement.
+**Hooks Git (Husky)** : à la racine, exécuter `npm install` une fois pour installer Husky. Chaque commit exécute le lint (backend + frontend), le typecheck frontend, puis les tests backend + frontend avec un **tableau récapitulatif** (même script que `npm run test`).
 
 ### 2. Configuration
 Créez un fichier `.env` à la racine du projet :
@@ -192,7 +192,7 @@ Deux options, contrôlées par la **variable de dépôt** `DEPLOY_METHOD` (Setti
 ```
 jira-kpi-dashboard/
 ├── .github/workflows/        # CI/CD (ci.yml, cd.yml)
-├── .husky/                   # Hooks Git (pre-commit = lint backend + frontend)
+├── .husky/                   # Hooks Git (pre-commit = lint, typecheck, tests + récap)
 ├── docs/
 │   ├── DEPLOIEMENT.md        # Guide détaillé secrets + Portainer
 │   └── SUIVI_EPICS.md        # Suivi épics (UI, SP, tests)
