@@ -107,6 +107,29 @@ L'application sera accessible sur :
 - Backend API : http://localhost:3001
 - MongoDB Admin : http://localhost:8081
 
+### Tests
+
+À la racine du monorepo, `npm run test` exécute les tests backend (Jest) et frontend (Vitest), puis affiche un **tableau récapitulatif** (passés / échoués / ignorés, erreurs, avertissements, durée, statut).
+
+```bash
+npm run test              # Backend + frontend + récap
+npm run test:backend      # Backend uniquement
+npm run test:frontend     # Frontend uniquement
+```
+
+### Tests backend
+
+Les tests de routes API (Jest + supertest) et l’infrastructure partagée (`src/test/`) sont documentés ici :
+
+- **[Guide tests de routes](backend/docs/testing-routes.md)**
+
+```bash
+cd backend
+yarn test              # Tous les tests backend
+yarn test:routes       # Routes uniquement
+yarn test:coverage     # Couverture
+```
+
 ### 4. Production avec Docker
 ```bash
 docker-compose up -d

@@ -2,28 +2,24 @@
  * TI — Routes d’activité (logs) : POST /me/page-view, GET /users/:id/logs, GET /users/:id/page-stats
  */
 import request from 'supertest';
-import express, { Express, Request } from 'express';
+import { createTestApp } from '../test/createTestApp';
+import { TEST_USER_ID } from '../test/fixtures/users';
 
 const mockLogFindOne = jest.fn();
 const mockLogCreate = jest.fn();
 const mockLogFind = jest.fn();
 
-jest.mock('mongoose', () => {
-  const actual = jest.requireActual<typeof import('mongoose')>('mongoose');
-  return { ...actual, connection: { readyState: 1 } };
-});
+jest.mock('mongoose', () =>
+  jest.requireActual('../test/mocks/mongoose').mockMongoConnected()
+);
 
-jest.mock('../middleware/authMiddleware', () => ({
-  authenticate: (req: Request, _res: unknown, next: () => void) => {
-    (req as Request & { user?: { userId: string; email: string; provider: string } }).user = {
-      userId: '507f1f77bcf86cd799439011',
-      email: 'admin@test.com',
-      provider: 'local'
-    };
-    next();
-  },
-  requireSuperAdmin: (_req: unknown, _res: unknown, next: () => void) => next()
-}));
+jest.mock('../middleware/authMiddleware', () => {
+  const auth = jest.requireActual<typeof import('../test/mocks/authMiddleware')>('../test/mocks/authMiddleware');
+  return {
+    authenticate: auth.mockAuthenticate(),
+    requireSuperAdmin: auth.mockRequireSuperAdmin,
+  };
+});
 
 jest.mock('../domain/user/entities/User', () => ({
   User: {
@@ -47,21 +43,14 @@ jest.mock('../domain/user/entities/UserActivityLog', () => ({
   }
 }));
 
-jest.mock('../utils/logger', () => ({
-  logger: { info: jest.fn(), error: jest.fn(), warn: jest.fn() }
-}));
+jest.mock('../utils/logger', () =>
+  jest.requireActual('../test/mocks/logger').loggerMockFactory()
+);
 
 import { authRoutes } from './authRoutes';
 
-function createApp(): Express {
-  const app = express();
-  app.use(express.json());
-  app.use('/api/auth', authRoutes);
-  return app;
-}
-
 describe('Routes activité / logs (TI)', () => {
-  const app = createApp();
+  const app = createTestApp({ mountPath: '/api/auth', router: authRoutes });
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -148,7 +137,7 @@ describe('Routes activité / logs (TI)', () => {
         })
       });
 
-      const res = await request(app).get('/api/auth/users/507f1f77bcf86cd799439011/logs');
+      const res = await request(app).get(`/api/auth/users/${TEST_USER_ID}/logs`);
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -160,17 +149,17 @@ describe('Routes activité / logs (TI)', () => {
 
     it('accepte le paramètre limit', async () => {
       await request(app)
-        .get('/api/auth/users/507f1f77bcf86cd799439011/logs')
+        .get(`/api/auth/users/${TEST_USER_ID}/logs`)
         .query({ limit: 50 });
 
-      expect(mockLogFind).toHaveBeenCalledWith({ userId: '507f1f77bcf86cd799439011' });
+      expect(mockLogFind).toHaveBeenCalledWith({ userId: TEST_USER_ID });
     });
 
     it('retourne 500 si la récupération des logs échoue', async () => {
       mockLogFind.mockImplementationOnce(() => {
         throw new Error('db fail');
       });
-      const res = await request(app).get('/api/auth/users/507f1f77bcf86cd799439011/logs');
+      const res = await request(app).get(`/api/auth/users/${TEST_USER_ID}/logs`);
       expect(res.status).toBe(500);
       expect(res.body.success).toBe(false);
     });
@@ -187,7 +176,7 @@ describe('Routes activité / logs (TI)', () => {
         lean: () => Promise.resolve(pageViewLogs)
       });
 
-      const res = await request(app).get('/api/auth/users/507f1f77bcf86cd799439011/page-stats');
+      const res = await request(app).get(`/api/auth/users/${TEST_USER_ID}/page-stats`);
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
@@ -206,12 +195,12 @@ describe('Routes activité / logs (TI)', () => {
       mockLogFind.mockReturnValue({ lean: () => Promise.resolve([]) });
 
       await request(app)
-        .get('/api/auth/users/507f1f77bcf86cd799439011/page-stats')
+        .get(`/api/auth/users/${TEST_USER_ID}/page-stats`)
         .query({ days: 7 });
 
       expect(mockLogFind).toHaveBeenCalledWith(
         expect.objectContaining({
-          userId: '507f1f77bcf86cd799439011',
+          userId: TEST_USER_ID,
           type: 'page_view'
         })
       );
@@ -221,7 +210,7 @@ describe('Routes activité / logs (TI)', () => {
       mockLogFind.mockImplementationOnce(() => {
         throw new Error('db fail');
       });
-      const res = await request(app).get('/api/auth/users/507f1f77bcf86cd799439011/page-stats');
+      const res = await request(app).get(`/api/auth/users/${TEST_USER_ID}/page-stats`);
       expect(res.status).toBe(500);
       expect(res.body.success).toBe(false);
     });

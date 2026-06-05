@@ -1,93 +1,136 @@
+/**
+ * TI — Routes Health : GET /, /live, /ready, /detailed
+ */
 import request from 'supertest';
-import express, { Express } from 'express';
+import { createTestApp } from '../test/createTestApp';
+import { createWorklogAppServiceMock } from '../test/mocks/worklogAppService';
 
-const mockTestConnection = jest.fn();
-const mockGetConnectedClientsCount = jest.fn();
+jest.mock('../utils/logger', () =>
+  jest.requireActual('../test/mocks/logger').loggerMockFactory()
+);
 
+const mockWorklogAppService = createWorklogAppServiceMock();
 jest.mock('../application/services/WorklogApplicationService', () => ({
-  worklogAppService: {
-    testConnection: mockTestConnection
-  }
+  worklogAppService: mockWorklogAppService,
 }));
 
 jest.mock('../websocket/socketHandler', () => ({
-  getConnectedClientsCount: mockGetConnectedClientsCount
+  getConnectedClientsCount: jest.fn(),
 }));
 
+import { getConnectedClientsCount } from '../websocket/socketHandler';
 import { healthRoutes } from './healthRoutes';
 
-function createApp(): Express {
-  const app = express();
-  app.use('/api/health', healthRoutes);
-  return app;
-}
+const mockGetConnectedClientsCount = getConnectedClientsCount as jest.MockedFunction<
+  typeof getConnectedClientsCount
+>;
 
-describe('healthRoutes', () => {
-  const app = createApp();
+describe('healthRoutes (TI)', () => {
+  const app = createTestApp({ mountPath: '/api/health', router: healthRoutes });
 
   beforeEach(() => {
     jest.clearAllMocks();
-    mockGetConnectedClientsCount.mockReturnValue(3);
-    mockTestConnection.mockResolvedValue({ success: true });
+    mockWorklogAppService.testConnection.mockResolvedValue({ success: true });
+    mockGetConnectedClientsCount.mockReturnValue(0);
   });
 
-  it('GET /api/health retourne un statut ok', async () => {
-    const res = await request(app).get('/api/health');
-    expect(res.status).toBe(200);
-    expect(res.body.status).toBe('ok');
-    expect(typeof res.body.timestamp).toBe('string');
+  describe('GET /api/health/', () => {
+    it('retourne 200 avec status ok, timestamp ISO et uptime', async () => {
+      const res = await request(app).get('/api/health/');
+
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('ok');
+      expect(res.body.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+      expect(typeof res.body.uptime).toBe('number');
+      expect(res.body.uptime).toBeGreaterThanOrEqual(0);
+    });
   });
 
-  it('GET /api/health/detailed retourne 200 si Jira est connecté', async () => {
-    const res = await request(app).get('/api/health/detailed');
-    expect(res.status).toBe(200);
-    expect(res.body.status).toBe('ok');
-    expect(res.body.services.jira.status).toBe('ok');
-    expect(res.body.services.websocket.connectedClients).toBe(3);
+  describe('GET /api/health/live', () => {
+    it('retourne 200 avec status alive', async () => {
+      const res = await request(app).get('/api/health/live');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ status: 'alive' });
+    });
   });
 
-  it('GET /api/health/detailed retourne 503 si Jira est en erreur', async () => {
-    mockTestConnection.mockResolvedValue({ success: false });
-    const res = await request(app).get('/api/health/detailed');
-    expect(res.status).toBe(503);
-    expect(res.body.status).toBe('degraded');
-    expect(res.body.services.jira.status).toBe('error');
+  describe('GET /api/health/ready', () => {
+    it('retourne 200 avec status ready si Jira est connecté', async () => {
+      mockWorklogAppService.testConnection.mockResolvedValue({ success: true });
+
+      const res = await request(app).get('/api/health/ready');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ status: 'ready' });
+      expect(mockWorklogAppService.testConnection).toHaveBeenCalled();
+    });
+
+    it('retourne 503 si la connexion Jira échoue', async () => {
+      mockWorklogAppService.testConnection.mockResolvedValue({ success: false });
+
+      const res = await request(app).get('/api/health/ready');
+
+      expect(res.status).toBe(503);
+      expect(res.body).toEqual({ status: 'not ready', reason: 'Jira not connected' });
+    });
+
+    it('retourne 503 si testConnection lève une erreur', async () => {
+      mockWorklogAppService.testConnection.mockRejectedValue(new Error('network'));
+
+      const res = await request(app).get('/api/health/ready');
+
+      expect(res.status).toBe(503);
+      expect(res.body).toEqual({ status: 'not ready', reason: 'Health check failed' });
+    });
   });
 
-  it('GET /api/health/ready retourne 200 quand prêt', async () => {
-    mockTestConnection.mockResolvedValue({ success: true });
-    const res = await request(app).get('/api/health/ready');
-    expect(res.status).toBe(200);
-    expect(res.body).toEqual({ status: 'ready' });
-  });
+  describe('GET /api/health/detailed', () => {
+    it('retourne 200 avec status ok et connectedClients mocké si Jira est connecté', async () => {
+      mockWorklogAppService.testConnection.mockResolvedValue({ success: true });
+      mockGetConnectedClientsCount.mockReturnValue(7);
 
-  it('GET /api/health/ready retourne 503 quand non prêt', async () => {
-    mockTestConnection.mockResolvedValue({ success: false });
-    const res = await request(app).get('/api/health/ready');
-    expect(res.status).toBe(503);
-    expect(res.body.status).toBe('not ready');
-  });
+      const res = await request(app).get('/api/health/detailed');
 
-  it('GET /api/health/live retourne alive', async () => {
-    const res = await request(app).get('/api/health/live');
-    expect(res.status).toBe(200);
-    expect(res.body.status).toBe('alive');
-  });
+      expect(res.status).toBe(200);
+      expect(res.body.status).toBe('ok');
+      expect(res.body.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+      expect(typeof res.body.uptime).toBe('number');
+      expect(res.body.services.jira).toEqual({ status: 'ok', message: 'Connected' });
+      expect(res.body.services.websocket).toEqual({ status: 'ok', connectedClients: 7 });
+      expect(res.body.memory).toEqual(
+        expect.objectContaining({
+          used: expect.any(Number),
+          total: expect.any(Number),
+          unit: 'MB',
+        })
+      );
+      expect(mockGetConnectedClientsCount).toHaveBeenCalled();
+    });
 
-  it('GET /api/health/detailed retourne 503 si testConnection lève', async () => {
-    mockTestConnection.mockRejectedValueOnce(new Error('boom'));
-    const res = await request(app).get('/api/health/detailed');
-    expect(res.status).toBe(503);
-    expect(res.body.status).toBe('degraded');
-    expect(res.body.services.jira.status).toBe('error');
-    expect(res.body.services.jira.message).toBe('Connection check failed');
-  });
+    it('retourne 503 avec status degraded si Jira n’est pas connecté', async () => {
+      mockWorklogAppService.testConnection.mockResolvedValue({ success: false });
+      mockGetConnectedClientsCount.mockReturnValue(2);
 
-  it('GET /api/health/ready retourne 503 si testConnection lève', async () => {
-    mockTestConnection.mockRejectedValueOnce(new Error('boom'));
-    const res = await request(app).get('/api/health/ready');
-    expect(res.status).toBe(503);
-    expect(res.body.status).toBe('not ready');
-    expect(res.body.reason).toBe('Health check failed');
+      const res = await request(app).get('/api/health/detailed');
+
+      expect(res.status).toBe(503);
+      expect(res.body.status).toBe('degraded');
+      expect(res.body.services.jira).toEqual({ status: 'error', message: 'Connection failed' });
+      expect(res.body.services.websocket).toEqual({ status: 'ok', connectedClients: 2 });
+    });
+
+    it('retourne 503 avec status degraded si testConnection lève une erreur', async () => {
+      mockWorklogAppService.testConnection.mockRejectedValue(new Error('timeout'));
+
+      const res = await request(app).get('/api/health/detailed');
+
+      expect(res.status).toBe(503);
+      expect(res.body.status).toBe('degraded');
+      expect(res.body.services.jira).toEqual({
+        status: 'error',
+        message: 'Connection check failed',
+      });
+    });
   });
 });

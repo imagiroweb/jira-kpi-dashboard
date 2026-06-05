@@ -2,18 +2,21 @@
  * TU — Routes Monday : /api/monday/status, /me, /workspaces, /boards, /boards/:id, /boards/:id/views
  */
 import request from 'supertest';
-import express, { Express, Request, Response } from 'express';
 import { getMondayClient } from '../infrastructure/monday/MondayClient';
+import { createTestApp } from '../test/createTestApp';
+import { createMondayClientMock } from '../test/mocks/externalClients';
 
-jest.mock('../middleware/authMiddleware', () => ({
-  authenticate: (_req: Request, _res: Response, next: () => void) => {
-    next();
-  },
-}));
+jest.mock('../middleware/authMiddleware', () => {
+  const auth = jest.requireActual<typeof import('../test/mocks/authMiddleware')>('../test/mocks/authMiddleware');
+  return {
+    authenticate: auth.bypassAuth,
+    requireSuperAdmin: auth.mockRequireSuperAdmin,
+  };
+});
 
-jest.mock('../utils/logger', () => ({
-  logger: { error: jest.fn(), warn: jest.fn(), info: jest.fn() },
-}));
+jest.mock('../utils/logger', () =>
+  jest.requireActual('../test/mocks/logger').loggerMockFactory()
+);
 
 jest.mock('../infrastructure/monday/MondayClient', () => ({
   getMondayClient: jest.fn(),
@@ -23,25 +26,8 @@ import { mondayRoutes } from './mondayRoutes';
 
 const mockGetMondayClient = getMondayClient as jest.MockedFunction<typeof getMondayClient>;
 
-function createMondayClientMock() {
-  return {
-    isConfigured: jest.fn().mockReturnValue(true),
-    getMe: jest.fn(),
-    getWorkspaces: jest.fn(),
-    getBoards: jest.fn(),
-    getBoardWithItems: jest.fn(),
-    getBoardViews: jest.fn(),
-  };
-}
-
-function createApp(): Express {
-  const app = express();
-  app.use('/api/monday', mondayRoutes);
-  return app;
-}
-
 describe('mondayRoutes', () => {
-  const app = createApp();
+  const app = createTestApp({ mountPath: '/api/monday', router: mondayRoutes, json: false });
   let client: ReturnType<typeof createMondayClientMock>;
 
   beforeEach(() => {

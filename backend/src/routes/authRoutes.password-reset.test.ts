@@ -2,15 +2,15 @@
  * TI — Routes POST /api/auth/forgot-password et POST /api/auth/reset-password
  */
 import request from 'supertest';
-import express, { Express, Request } from 'express';
+import { Request } from 'express';
+import { createTestApp } from '../test/createTestApp';
 
 const mockRequestPasswordReset = jest.fn();
 const mockResetPassword = jest.fn();
 
-jest.mock('mongoose', () => {
-  const actual = jest.requireActual<typeof import('mongoose')>('mongoose');
-  return { ...actual, connection: { readyState: 1 } };
-});
+jest.mock('mongoose', () =>
+  jest.requireActual('../test/mocks/mongoose').mockMongoConnected()
+);
 
 jest.mock('express-rate-limit', () =>
   () => (_req: Request, _res: unknown, next: () => void) => next()
@@ -30,17 +30,13 @@ jest.mock('../application/services/AuthService', () => ({
   }
 }));
 
-jest.mock('../middleware/authMiddleware', () => ({
-  authenticate: (req: Request, _res: unknown, next: () => void) => {
-    (req as Request & { user?: { userId: string; email: string; provider: string } }).user = {
-      userId: '507f1f77bcf86cd799439011',
-      email: 'admin@test.com',
-      provider: 'local'
-    };
-    next();
-  },
-  requireSuperAdmin: (_req: unknown, _res: unknown, next: () => void) => next()
-}));
+jest.mock('../middleware/authMiddleware', () => {
+  const auth = jest.requireActual<typeof import('../test/mocks/authMiddleware')>('../test/mocks/authMiddleware');
+  return {
+    authenticate: auth.mockAuthenticate(),
+    requireSuperAdmin: auth.mockRequireSuperAdmin,
+  };
+});
 
 jest.mock('../domain/user/entities/User', () => ({
   User: {
@@ -73,21 +69,14 @@ jest.mock('../domain/user/entities/UserActivityLog', () => ({
   }
 }));
 
-jest.mock('../utils/logger', () => ({
-  logger: { info: jest.fn(), error: jest.fn(), warn: jest.fn() }
-}));
+jest.mock('../utils/logger', () =>
+  jest.requireActual('../test/mocks/logger').loggerMockFactory()
+);
 
 import { authRoutes } from './authRoutes';
 
-function createApp(): Express {
-  const app = express();
-  app.use(express.json());
-  app.use('/api/auth', authRoutes);
-  return app;
-}
-
 describe("Routes reinitialisation de mot de passe (TI)", () => {
-  const app = createApp();
+  const app = createTestApp({ mountPath: '/api/auth', router: authRoutes });
 
   beforeEach(() => {
     jest.clearAllMocks();
