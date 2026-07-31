@@ -264,8 +264,27 @@ export type IntegrationEnCours = {
 export type SuiviKpiResult = {
   sitesActifs: number;
   target: number;
+  /**
+   * Progression sites actifs / target global (0–100).
+   * null si target = 0.
+   */
+  sitesProgressionPct: number | null;
+  /** Somme des sites CDC déployés (colonne Monday). */
   cdcDeploye: number;
+  /** Somme des commandes générées via le CDC. */
   totalCommandesViaCdc: number;
+  /**
+   * Somme des Target sites des projets ayant au moins 1 site CDC déployé.
+   * Sert à projeter le potentiel de déploiement CDC.
+   */
+  cdcTargetSites: number;
+  /** Nombre de projets avec CDC déployé (> 0). */
+  cdcProjetsCount: number;
+  /**
+   * Progression sites CDC / target des projets CDC (0–100).
+   * null si cdcTargetSites = 0.
+   */
+  cdcProgressionPct: number | null;
   systemeCaisseWordCloud: { label: string; count: number }[];
   projetsAnneeEnCours: number;
   projectsByYear: { year: number; count: number; dureeMoyenneJours: number }[];
@@ -282,6 +301,11 @@ export type SuiviKpiResult = {
   byPays: { name: string; value: number }[];
   totalUtilisateursActifs: number;
   totalUtilisateursBruts: number;
+  /**
+   * Progression utilisateurs actifs / total bruts (0–100).
+   * null si totalUtilisateursBruts = 0.
+   */
+  utilisateursProgressionPct: number | null;
   totalReferencesMercurial: number;
   totalFichesTechniquesActives: number;
   totalFichesTechniquesBrut: number;
@@ -560,6 +584,8 @@ export function computeSuiviKpis(items: MondayItem[], columns: MondayColumn[]): 
   let target = 0;
   let cdcDeploye = 0;
   let totalCommandesViaCdc = 0;
+  let cdcTargetSites = 0;
+  let cdcProjetsCount = 0;
   let totalUtilisateursActifs = 0;
   let totalUtilisateursBruts = 0;
   let totalReferencesMercurial = 0;
@@ -581,10 +607,20 @@ export function computeSuiviKpis(items: MondayItem[], columns: MondayColumn[]): 
     if (colSitesActifs)
       sitesActifs += getItemNumericValue(item, colSitesActifs.id) || parseNum(getItemValue(item, colSitesActifs.id));
     if (colTarget) target += getItemNumericValue(item, colTarget.id) || parseNum(getItemValue(item, colTarget.id));
-    if (colCdc) cdcDeploye += getItemNumericValue(item, colCdc.id) || parseNum(getItemValue(item, colCdc.id));
+    const cdcVal = colCdc
+      ? getItemNumericValue(item, colCdc.id) || parseNum(getItemValue(item, colCdc.id))
+      : 0;
+    if (colCdc) cdcDeploye += cdcVal;
     if (colCommandesViaCdc)
       totalCommandesViaCdc +=
         getItemNumericValue(item, colCommandesViaCdc.id) || parseNum(getItemValue(item, colCommandesViaCdc.id));
+    if (cdcVal > 0) {
+      cdcProjetsCount += 1;
+      if (colTarget) {
+        cdcTargetSites +=
+          getItemNumericValue(item, colTarget.id) || parseNum(getItemValue(item, colTarget.id));
+      }
+    }
     if (colSystemeCaisse) {
       const label = getItemColumnLabelText(item, colSystemeCaisse.id);
       if (label && isDefinedCaisseLabel(label)) {
@@ -663,11 +699,18 @@ export function computeSuiviKpis(items: MondayItem[], columns: MondayColumn[]): 
   const integrationsEnCoursAgeMoyenJours =
     agesEnCours.length > 0 ? Math.round(agesEnCours.reduce((a, b) => a + b, 0) / agesEnCours.length) : 0;
 
+  const cdcProgressionPct =
+    cdcTargetSites > 0 ? Math.min(100, Math.round((cdcDeploye / cdcTargetSites) * 100)) : null;
+
   return {
     sitesActifs,
     target,
+    sitesProgressionPct: integrationSitesProgressionPct(sitesActifs, target),
     cdcDeploye,
     totalCommandesViaCdc,
+    cdcTargetSites,
+    cdcProjetsCount,
+    cdcProgressionPct,
     systemeCaisseWordCloud,
     projetsAnneeEnCours,
     projectsByYear,
@@ -683,6 +726,10 @@ export function computeSuiviKpis(items: MondayItem[], columns: MondayColumn[]): 
     byPays,
     totalUtilisateursActifs,
     totalUtilisateursBruts,
+    utilisateursProgressionPct: integrationSitesProgressionPct(
+      totalUtilisateursActifs,
+      totalUtilisateursBruts
+    ),
     totalReferencesMercurial,
     totalFichesTechniquesActives,
     totalFichesTechniquesBrut,
