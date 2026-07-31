@@ -133,7 +133,7 @@ describe('ProduitDashboard', () => {
     invalidateMondayProduitCache();
     vi.clearAllMocks();
     setupMondayMocks();
-    mockGetDefaultFilters.mockResolvedValue({ trimestre: 'all', statut: [] });
+    mockGetDefaultFilters.mockResolvedValue({ trimestre: 'all', statut: [], team: [] });
     mockSaveDefaultFilters.mockImplementation(async (filters) => filters);
   });
 
@@ -271,6 +271,7 @@ describe('ProduitDashboard', () => {
     mockGetDefaultFilters.mockResolvedValue({
       trimestre: 'Q1',
       statut: ['En cours'],
+      team: ['Team Cook'],
     });
 
     renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
@@ -286,6 +287,9 @@ describe('ProduitDashboard', () => {
 
     const statusCheckbox = await screen.findByRole('checkbox', { name: /En cours/i });
     expect(statusCheckbox).toBeChecked();
+
+    const teamCheckbox = await screen.findByRole('checkbox', { name: /Team Cook/i });
+    expect(teamCheckbox).toBeChecked();
   });
 
   it('enregistre les filtres par défaut et notifie le succès', async () => {
@@ -314,12 +318,13 @@ describe('ProduitDashboard', () => {
       expect(mockSaveDefaultFilters).toHaveBeenCalledWith({
         trimestre: 'Q2',
         statut: [],
+        team: [],
       });
     });
 
     expect(notify.success).toHaveBeenCalledWith(
       'Filtres enregistrés',
-      expect.stringContaining('filtres trimestre et statut')
+      expect.stringContaining('filtres trimestre, statut et team')
     );
   });
 

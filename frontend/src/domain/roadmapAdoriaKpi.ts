@@ -9,6 +9,26 @@ export const CP_REFERENT_KEYS = ['cp référent', 'cp referent', 'cp réf', 'ré
 /** Colonne « SOLUTION DOC » (Monday) — manquant si valeur vide ou « - ». */
 export const SOLUTION_DOC_KEYS = ['solution doc', 'solutiondoc', 'doc solution'];
 export const STATUS_KEYS = ['status', 'statut', 'état', 'state'];
+/** Colonne Monday « Team » (statut équipes). */
+export const TEAM_KEYS = ['team', 'équipe', 'equipe'];
+
+/**
+ * Libellés Team connus sur Roadmap Adoria 2026 (colonne status Monday).
+ * Utilisés pour proposer toutes les options de filtre même si absentes des items chargés.
+ */
+export const ROADMAP_ADORIA_KNOWN_TEAMS = [
+  'To define',
+  'Team Calson',
+  'Softcam',
+  'Team Cook',
+  'IA',
+  'UI / UX',
+  'Team SRE',
+  'IT',
+  'DBA / PBI',
+  'Team QA',
+  'Quenteam',
+] as const;
 
 /** Détection colonne « macro chiffrage » (même règles que le diagramme Roadmap). */
 export const ROADMAP_MACRO_CHIFFRAGE_KEYS = [
@@ -250,6 +270,26 @@ export function getRoadmapDateColumnRaw(item: MondayItem, columnId: string): str
 export function getRoadmapItemStatusLabel(item: MondayItem, col: MondayColumn): string {
   const statusVal = getItemValue(item, col.id);
   return statusVal || 'Non renseigné';
+}
+
+export function getRoadmapItemTeamLabel(item: MondayItem, col: MondayColumn): string {
+  const teamVal = getItemValue(item, col.id);
+  return teamVal || 'Non renseigné';
+}
+
+/** Options de filtre Team : équipes connues ∪ valeurs présentes sur le board. */
+export function buildRoadmapTeamFilterOptions(
+  items: MondayItem[],
+  teamColumn: MondayColumn | null,
+  knownTeams: readonly string[] = ROADMAP_ADORIA_KNOWN_TEAMS
+): string[] {
+  const labels = new Set<string>(knownTeams);
+  if (teamColumn) {
+    for (const item of items) {
+      labels.add(getRoadmapItemTeamLabel(item, teamColumn));
+    }
+  }
+  return Array.from(labels).sort((a, b) => a.localeCompare(b, 'fr'));
 }
 
 export function isRoadmapStatusDone(statusLabel: string): boolean {

@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MondayColumn, MondayItem } from '../services/api';
 import {
   EMPTY_ROADMAP_KPIS,
+  ROADMAP_ADORIA_KNOWN_TEAMS,
+  buildRoadmapTeamFilterOptions,
   calendarDaysInclusiveFromTodayToQuarterEnd,
   calendarQuarterFromDate,
   classifyRoadmapKanbanBucket,
@@ -13,6 +15,7 @@ import {
   getMondayItemNumericValue,
   getQuarterEndDate,
   getRoadmapDateColumnRaw,
+  getRoadmapItemTeamLabel,
   isRoadmapNumericKpiValueMissing,
   isRoadmapSolutionDocValueMissing,
   isRoadmapStatusDone,
@@ -455,6 +458,42 @@ describe('roadmapAdoriaKpi', () => {
       expect(EMPTY_ROADMAP_KPIS.missingEstimation).toBe(0);
       expect(EMPTY_ROADMAP_KPIS.hasMacroChiffrageColumn).toBe(false);
       expect(EMPTY_ROADMAP_KPIS.hasEstimationColumn).toBe(false);
+    });
+  });
+
+  describe('getRoadmapItemTeamLabel / buildRoadmapTeamFilterOptions', () => {
+    const teamCol: MondayColumn = { id: 'team', title: 'Team', type: 'status' };
+
+    it('lit le libellé Team ou Non renseigné', () => {
+      expect(
+        getRoadmapItemTeamLabel(
+          { id: '1', name: 'A', column_values: [{ id: 'team', text: 'Team Cook', type: 'status' }] },
+          teamCol
+        )
+      ).toBe('Team Cook');
+      expect(
+        getRoadmapItemTeamLabel({ id: '2', name: 'B', column_values: [] }, teamCol)
+      ).toBe('Non renseigné');
+    });
+
+    it('fusionne les équipes connues et les valeurs du board', () => {
+      const items: MondayItem[] = [
+        {
+          id: '1',
+          name: 'A',
+          column_values: [{ id: 'team', text: 'Team Cook', type: 'status' }],
+        },
+        {
+          id: '2',
+          name: 'B',
+          column_values: [{ id: 'team', text: 'Custom Team', type: 'status' }],
+        },
+      ];
+      const options = buildRoadmapTeamFilterOptions(items, teamCol);
+      expect(options).toEqual(
+        expect.arrayContaining([...ROADMAP_ADORIA_KNOWN_TEAMS, 'Custom Team', 'Team Cook'])
+      );
+      expect(options).toEqual([...options].sort((a, b) => a.localeCompare(b, 'fr')));
     });
   });
 });

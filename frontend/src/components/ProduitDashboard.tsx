@@ -85,6 +85,8 @@ import {
   EMPTY_ROADMAP_KPIS,
   SOLUTION_DOC_KEYS,
   STATUS_KEYS,
+  TEAM_KEYS,
+  buildRoadmapTeamFilterOptions,
   calendarDaysInclusiveFromTodayToQuarterEnd,
   calendarQuarterFromDate,
   classifyRoadmapKanbanBucket,
@@ -98,6 +100,7 @@ import {
   resolveRoadmapMacroEstimationColumns,
   getRoadmapDateColumnRaw,
   getRoadmapItemStatusLabel,
+  getRoadmapItemTeamLabel,
   isRoadmapSolutionDocValueMissing,
   isRoadmapStatusDone,
   parseRoadmapDateColumnEndDate,
@@ -287,6 +290,8 @@ export function ProduitDashboard() {
   const [roadmapQuarterFilter, setRoadmapQuarterFilter] = useState<RoadmapAdoriaQuarterFilter>('all');
   /** Statuts cochés ; vide = pas de filtre sur le statut (tous). */
   const [roadmapStatusSelected, setRoadmapStatusSelected] = useState<string[]>([]);
+  /** Teams cochées ; vide = pas de filtre team (toutes). */
+  const [roadmapTeamSelected, setRoadmapTeamSelected] = useState<string[]>([]);
   /** Préférences filtres chargées depuis l’API (appliquées après reset board). */
   const roadmapDefaultFiltersRef = useRef<RoadmapAdoria2026DefaultFilters | null>(null);
   const [roadmapDefaultsReady, setRoadmapDefaultsReady] = useState(false);
@@ -574,6 +579,11 @@ export function ProduitDashboard() {
     [roadmapData?.columns]
   );
 
+  const roadmapTeamColumn = useMemo(
+    () => (roadmapData?.columns ? findColumn(roadmapData.columns, TEAM_KEYS) : null),
+    [roadmapData?.columns]
+  );
+
   const roadmapStatusOptions = useMemo(() => {
     if (!roadmapData?.items?.length || !roadmapStatusColumn) return [];
     const labels = new Set<string>();
@@ -582,6 +592,11 @@ export function ProduitDashboard() {
     }
     return Array.from(labels).sort((a, b) => a.localeCompare(b, 'fr'));
   }, [roadmapData?.items, roadmapStatusColumn]);
+
+  const roadmapTeamOptions = useMemo(
+    () => buildRoadmapTeamFilterOptions(roadmapData?.items ?? [], roadmapTeamColumn),
+    [roadmapData?.items, roadmapTeamColumn]
+  );
 
   const roadmapItemsForKpis = useMemo(() => {
     if (!roadmapData?.items?.length) return [];
@@ -601,6 +616,10 @@ export function ProduitDashboard() {
       const allowed = new Set(roadmapStatusSelected);
       items = items.filter((item) => allowed.has(getRoadmapItemStatusLabel(item, roadmapStatusColumn)));
     }
+    if (roadmapTeamSelected.length > 0 && roadmapTeamColumn) {
+      const allowed = new Set(roadmapTeamSelected);
+      items = items.filter((item) => allowed.has(getRoadmapItemTeamLabel(item, roadmapTeamColumn)));
+    }
     return items;
   }, [
     roadmapData?.items,
@@ -608,6 +627,8 @@ export function ProduitDashboard() {
     roadmapQuarterFilter,
     roadmapStatusColumn,
     roadmapStatusSelected,
+    roadmapTeamColumn,
+    roadmapTeamSelected,
   ]);
 
   const roadmapKpis = useMemo(() => {
@@ -810,9 +831,10 @@ export function ProduitDashboard() {
           roadmapDefaultFiltersRef.current = filters;
           setRoadmapQuarterFilter(filters.trimestre);
           setRoadmapStatusSelected(filters.statut);
+          setRoadmapTeamSelected(filters.team ?? []);
         }
       } catch {
-        // Non bloquant : on garde les filtres UI par défaut (tous / aucun statut)
+        // Non bloquant : on garde les filtres UI par défaut (tous / aucun statut / aucune team)
       } finally {
         if (!cancelled) setRoadmapDefaultsReady(true);
       }
@@ -827,6 +849,7 @@ export function ProduitDashboard() {
     const d = roadmapDefaultFiltersRef.current;
     setRoadmapQuarterFilter(d?.trimestre ?? 'all');
     setRoadmapStatusSelected(d?.statut ?? []);
+    setRoadmapTeamSelected(d?.team ?? []);
   }, [roadmapBoardId, roadmapDefaultsReady]);
 
   useEffect(() => {
@@ -838,18 +861,28 @@ export function ProduitDashboard() {
     });
   }, [roadmapStatusOptions]);
 
+  useEffect(() => {
+    if (roadmapTeamOptions.length === 0) return;
+    setRoadmapTeamSelected((prev) => {
+      const next = prev.filter((t) => roadmapTeamOptions.includes(t));
+      if (next.length === prev.length && next.every((t, i) => t === prev[i])) return prev;
+      return next;
+    });
+  }, [roadmapTeamOptions]);
+
   const handleSaveRoadmapDefaultFilters = useCallback(async () => {
     setSavingRoadmapDefaults(true);
     try {
       const filters: RoadmapAdoria2026DefaultFilters = {
         trimestre: roadmapQuarterFilter,
         statut: [...roadmapStatusSelected],
+        team: [...roadmapTeamSelected],
       };
       const saved = await authApi.saveRoadmapAdoria2026DefaultFilters(filters);
       roadmapDefaultFiltersRef.current = saved;
       socket?.notify?.success(
         'Filtres enregistrés',
-        'Ces filtres trimestre et statut seront appliqués par défaut à chaque visite.'
+        'Ces filtres trimestre, statut et team seront appliqués par défaut à chaque visite.'
       );
     } catch {
       socket?.notify?.error(
@@ -859,7 +892,7 @@ export function ProduitDashboard() {
     } finally {
       setSavingRoadmapDefaults(false);
     }
-  }, [roadmapQuarterFilter, roadmapStatusSelected, socket]);
+  }, [roadmapQuarterFilter, roadmapStatusSelected, roadmapTeamSelected, socket]);
 
   /** Liste de boards pour la section Roadmap : espace dédié si détecté, sinon tous les boards visibles (ex. "Roadmap Adoria 2026" peut être un board, pas un espace). */
   const boardsForRoadmapSection = roadmapWorkspace ? roadmapBoards : boards;
@@ -1002,7 +1035,7 @@ export function ProduitDashboard() {
           )}
           {!roadmapLoading && roadmapDefaultsReady && roadmapKpis && (
             <div className="p-6 space-y-6">
-              {(roadmapDateColumn || roadmapStatusColumn) && (
+              {(roadmapDateColumn || roadmapStatusColumn || roadmapTeamColumn) && (
                 <div className="flex flex-wrap items-start gap-x-8 gap-y-3 pb-1 border-b border-surface-700/40">
                   {roadmapDateColumn && (
                     <div className="flex flex-wrap items-center gap-3 min-w-0">
@@ -1080,13 +1113,62 @@ export function ProduitDashboard() {
                       </div>
                     </div>
                   )}
+                  {roadmapTeamColumn && roadmapTeamOptions.length > 0 && (
+                    <div className="flex flex-col gap-2 min-w-0 max-w-full sm:max-w-[36rem]">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-xs font-medium text-surface-500 uppercase tracking-wide shrink-0">
+                          Team
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setRoadmapTeamSelected([])}
+                          className="text-xs text-amber-400/90 hover:text-amber-300 underline-offset-2 hover:underline"
+                        >
+                          Toutes les teams
+                        </button>
+                        <span className="text-xs text-surface-500 hidden sm:inline">
+                          (aucune case = tout afficher)
+                        </span>
+                      </div>
+                      <div
+                        className="flex flex-wrap gap-x-4 gap-y-2 max-h-36 overflow-y-auto rounded-lg border border-surface-700/40 bg-surface-900/40 px-3 py-2"
+                        role="group"
+                        aria-label="Filtrer par une ou plusieurs teams"
+                      >
+                        {roadmapTeamOptions.map((t) => {
+                          const checked = roadmapTeamSelected.includes(t);
+                          return (
+                            <label
+                              key={t}
+                              className="inline-flex items-center gap-2 cursor-pointer select-none text-sm text-surface-200"
+                            >
+                              <input
+                                type="checkbox"
+                                className="rounded border-surface-600 bg-surface-900 text-amber-500 focus:ring-amber-500/40"
+                                checked={checked}
+                                onChange={() => {
+                                  setRoadmapTeamSelected((prev) => {
+                                    if (prev.includes(t)) return prev.filter((x) => x !== t);
+                                    return [...prev, t].sort((a, b) => a.localeCompare(b, 'fr'));
+                                  });
+                                }}
+                              />
+                              <span className="truncate max-w-[14rem]" title={t}>
+                                {t}
+                              </span>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                   <div className="flex items-end ml-auto">
                     <button
                       type="button"
                       onClick={handleSaveRoadmapDefaultFilters}
                       disabled={savingRoadmapDefaults || !roadmapDefaultsReady}
                       className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border border-surface-700/50 bg-surface-800/50 text-surface-300 hover:text-amber-200 hover:border-amber-500/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                      title="Enregistrer le trimestre et les statuts sélectionnés comme filtres par défaut"
+                      title="Enregistrer le trimestre, les statuts et les teams sélectionnés comme filtres par défaut"
                     >
                       {savingRoadmapDefaults ? (
                         <Loader2 className="w-4 h-4 animate-spin" />
@@ -1098,12 +1180,14 @@ export function ProduitDashboard() {
                   </div>
                 </div>
               )}
-              {(roadmapQuarterFilter !== 'all' || roadmapStatusSelected.length > 0) &&
+              {(roadmapQuarterFilter !== 'all' ||
+                roadmapStatusSelected.length > 0 ||
+                roadmapTeamSelected.length > 0) &&
                 roadmapItemsForKpis.length === 0 &&
                 (roadmapData?.items?.length ?? 0) > 0 && (
                   <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100/90">
                     Aucune ligne ne correspond aux filtres sélectionnés (trimestre : année en cours, plage dans le trimestre ;
-                    et/ou statut).
+                    et/ou statut ; et/ou team).
                   </div>
                 )}
               {/* Vue projets : 4 colonnes (filtres actifs) — replié par défaut */}
@@ -1556,7 +1640,7 @@ export function ProduitDashboard() {
                   {macroEstimateChartOpen && (
                     <div className="px-4 pb-4 sm:px-5 sm:pb-5 border-t border-surface-700/40">
                       <p className="text-xs text-surface-500 mb-3 mt-3">
-                        Valeurs numériques sur les lignes filtrées (trimestre Q1–Q4 / année en cours + statuts), comme les KPI
+                        Valeurs numériques sur les lignes filtrées (trimestre Q1–Q4 / année en cours + statuts + teams), comme les KPI
                         Roadmap au-dessus — pas le détail board brut.
                         {roadmapMacroEstColumns.macro && roadmapMacroEstColumns.est && (
                           <>
@@ -1575,7 +1659,7 @@ export function ProduitDashboard() {
                         </p>
                       ) : roadmapItemsForKpis.length === 0 && (roadmapData?.items?.length ?? 0) > 0 ? (
                         <p className="text-sm text-amber-200/90">
-                          Aucune ligne ne correspond aux filtres trimestre / statut — le diagramme est vide.
+                          Aucune ligne ne correspond aux filtres trimestre / statut / team — le diagramme est vide.
                         </p>
                       ) : roadmapMacroEstimateChartData.length === 0 ? (
                         <p className="text-sm text-surface-500">
@@ -2423,7 +2507,7 @@ export function ProduitDashboard() {
               </button>
             </div>
             <p className="px-4 pt-3 text-xs text-surface-500">
-              Projets / lignes correspondant à l&apos;indicateur, avec les mêmes filtres KPI (trimestre / statut) que la
+              Projets / lignes correspondant à l&apos;indicateur, avec les mêmes filtres KPI (trimestre / statut / team) que la
               section Roadmap.
             </p>
             <div className="p-4 overflow-auto flex-1 min-h-0">

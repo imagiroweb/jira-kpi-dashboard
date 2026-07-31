@@ -588,7 +588,7 @@ router.post(
  *       - bearerAuth: []
  *     responses:
  *       200:
- *         description: Filtres (trimestre + statut) ; valeurs par défaut si aucune préférence
+ *         description: Filtres (trimestre + statut + team) ; valeurs par défaut si aucune préférence
  *       401:
  *         description: Non authentifié
  */
@@ -607,14 +607,16 @@ router.get(
       const candidate = {
         trimestre: saved?.trimestre ?? DEFAULT_ROADMAP_ADORIA_2026_FILTERS.trimestre,
         statut: Array.isArray(saved?.statut) ? saved.statut : [],
+        team: Array.isArray(saved?.team) ? saved.team : [],
       };
       const filters: IRoadmapAdoria2026Filters =
         parseRoadmapAdoria2026Filters(candidate) ??
         parseRoadmapAdoria2026Filters({
           trimestre: DEFAULT_ROADMAP_ADORIA_2026_FILTERS.trimestre,
           statut: candidate.statut,
+          team: candidate.team,
         }) ??
-        { ...DEFAULT_ROADMAP_ADORIA_2026_FILTERS, statut: [] };
+        { ...DEFAULT_ROADMAP_ADORIA_2026_FILTERS };
       res.json({ success: true, filters });
     } catch (error) {
       logger.error('Get roadmap Adoria default filters error:', error);
@@ -637,12 +639,15 @@ router.get(
  *         application/json:
  *           schema:
  *             type: object
- *             required: [trimestre, statut]
+ *             required: [trimestre, statut, team]
  *             properties:
  *               trimestre:
  *                 type: string
  *                 enum: [all, Q1, Q2, Q3, Q4]
  *               statut:
+ *                 type: array
+ *                 items: { type: string }
+ *               team:
  *                 type: array
  *                 items: { type: string }
  *     responses:
@@ -662,7 +667,8 @@ router.put(
       if (!filters) {
         return res.status(400).json({
           success: false,
-          error: 'Filtres invalides (trimestre: all|Q1|Q2|Q3|Q4, statut: tableau de chaînes)',
+          error:
+            'Filtres invalides (trimestre: all|Q1|Q2|Q3|Q4, statut/team: tableaux de chaînes)',
         });
       }
       const updated = await User.findByIdAndUpdate(

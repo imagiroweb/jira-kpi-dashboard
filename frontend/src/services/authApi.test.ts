@@ -386,7 +386,7 @@ describe('authApi', () => {
 
   describe('getRoadmapAdoria2026DefaultFilters', () => {
     it('retourne les filtres par défaut Roadmap Adoria 2026', async () => {
-      const filters = { trimestre: 'Q2' as const, statut: ['En cours', 'Done'] };
+      const filters = { trimestre: 'Q2' as const, statut: ['En cours', 'Done'], team: ['Team Cook'] };
       mockGet.mockResolvedValueOnce({ data: { success: true, filters } });
 
       const result = await authApi.getRoadmapAdoria2026DefaultFilters();
@@ -410,7 +410,7 @@ describe('authApi', () => {
 
   describe('saveRoadmapAdoria2026DefaultFilters', () => {
     it('enregistre et retourne les filtres', async () => {
-      const filters = { trimestre: 'Q1' as const, statut: ['To do'] };
+      const filters = { trimestre: 'Q1' as const, statut: ['To do'], team: ['IA'] };
       mockPut.mockResolvedValueOnce({ data: { success: true, filters } });
 
       const result = await authApi.saveRoadmapAdoria2026DefaultFilters(filters);
@@ -428,7 +428,7 @@ describe('authApi', () => {
       });
 
       await expect(
-        authApi.saveRoadmapAdoria2026DefaultFilters({ trimestre: 'all', statut: [] })
+        authApi.saveRoadmapAdoria2026DefaultFilters({ trimestre: 'all', statut: [], team: [] })
       ).rejects.toThrow("Impossible d'enregistrer les filtres");
     });
   });
