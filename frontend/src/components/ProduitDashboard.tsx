@@ -74,6 +74,8 @@ import {
   getItemColumnLabelText,
   INTEGRATION_EN_COURS_TONE_UI,
   integrationEnCoursAgeTone,
+  buildIntegrationTimelineEvents,
+  type IntegrationEnCours,
   isRoadmapAdoria2026Workspace,
   mondayMacroEstimateDiffPct,
   parseNum,
@@ -127,6 +129,17 @@ const ROADMAP_MACRO_ESTIMATE_CHART_COLORS = {
 const getItemNumericValue = getMondayItemNumericValue;
 
 const DONUT_COLORS = ['#f59e0b', '#06b6d4', '#22c55e', '#8b5cf6', '#ec4899', '#6366f1', '#14b8a6', '#f97316'];
+
+function formatYmdFr(ymd: string | null | undefined): string {
+  if (!ymd) return '—';
+  const [y, m, d] = ymd.split('-').map(Number);
+  if (!y || !m || !d) return ymd;
+  return new Date(y, m - 1, d).toLocaleDateString('fr-FR', {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+}
 
 /** Courbe > 1 : les libellés les plus fréquents grossissent nettement plus que les rares. */
 const WORDCLOUD_SIZE_EXPONENT = 1.45;
@@ -245,6 +258,7 @@ export function ProduitDashboard() {
   const [showSystemeCaisseModal, setShowSystemeCaisseModal] = useState(false);
   const [showDelaiModal, setShowDelaiModal] = useState(false);
   const [showIntegrationsEnCoursModal, setShowIntegrationsEnCoursModal] = useState(false);
+  const [integrationTimelineRow, setIntegrationTimelineRow] = useState<IntegrationEnCours | null>(null);
   const [roadmapBoardId, setRoadmapBoardId] = useState(() =>
     initialBootstrap?.configured ? ROADMAP_ADORIA_2026_BOARD_ID : ''
   );
@@ -2118,10 +2132,10 @@ export function ProduitDashboard() {
                         ancien au plus récent
                       </p>
                       <p className="text-[10px] text-surface-600 mt-1">
-                        <span className="text-emerald-400">●</span> &lt;90 j{' '}
+                        Contour : <span className="text-emerald-400">●</span> &lt;90 j{' '}
                         <span className="text-yellow-400">●</span> 90–180 j{' '}
                         <span className="text-orange-400">●</span> &gt;180 j{' '}
-                        <span className="text-amber-800">●</span> Stuck
+                        <span className="text-amber-800">●</span> Stuck — barre : sites actifs / target
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-3 text-xs text-surface-400">
@@ -2160,57 +2174,94 @@ export function ProduitDashboard() {
                   </div>
                   <ul className="space-y-2.5" aria-label="Liste des intégrations en cours">
                     {suiviKpis.integrationsEnCours.map((row) => {
-                      const maxAge = Math.max(
-                        ...suiviKpis.integrationsEnCours.map((r) => r.ageJours),
-                        1
-                      );
-                      const pct = Math.min(100, Math.round((row.ageJours / maxAge) * 100));
                       const tone = INTEGRATION_EN_COURS_TONE_UI[integrationEnCoursAgeTone(row.ageJours, row.stuck)];
-                      const [y, m, d] = row.startDate.split('-').map(Number);
-                      const startLabel =
-                        y && m && d
-                          ? new Date(y, m - 1, d).toLocaleDateString('fr-FR', {
-                              day: 'numeric',
-                              month: 'short',
-                              year: 'numeric',
-                            })
-                          : row.startDate;
+                      const pct = row.progressionSitesPct;
+                      const barWidth = pct ?? 0;
+                      const startLabel = formatYmdFr(row.startDate);
+                      const rollOutLabel = formatYmdFr(row.rollOutStartDate);
                       return (
-                        <li
-                          key={row.itemId}
-                          className={`rounded-lg border px-3 py-2.5 ${tone.row}`}
-                        >
-                          <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="text-sm text-surface-100 font-medium truncate">
-                                {row.clientName}
-                              </span>
-                              {row.stuck && (
-                                <span
-                                  className={`shrink-0 inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${tone.badge} ${tone.badgeText}`}
-                                >
-                                  <AlertTriangle className="w-3 h-3" />
-                                  Stuck
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-baseline gap-3 shrink-0 text-xs">
-                              <span className="text-surface-500">début {startLabel}</span>
-                              <span className={`font-semibold tabular-nums ${tone.text}`}>
-                                {row.ageJours} j
-                              </span>
-                            </div>
-                          </div>
-                          <div
-                            className="h-1.5 rounded-full bg-surface-700/60 overflow-hidden"
-                            role="presentation"
-                            title={`${row.ageJours} jours depuis le début`}
+                        <li key={row.itemId}>
+                          <button
+                            type="button"
+                            onClick={() => setIntegrationTimelineRow(row)}
+                            className={`w-full text-left rounded-lg border px-3 py-2.5 transition-colors hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50 ${tone.row}`}
                           >
-                            <div
-                              className={`h-full rounded-full ${tone.bar}`}
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
+                            <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                              <div className="flex items-center gap-2 min-w-0">
+                                <span className="text-sm text-surface-100 font-medium truncate">
+                                  {row.clientName}
+                                </span>
+                                <span
+                                  className="shrink-0 text-[11px] text-surface-400 tabular-nums"
+                                  title="Sites actifs / target"
+                                >
+                                  {row.sitesActifs}
+                                  {row.targetSites > 0 ? ` / ${row.targetSites}` : ''} site
+                                  {row.sitesActifs === 1 && row.targetSites <= 1 ? '' : 's'}
+                                </span>
+                                {row.stuck && (
+                                  <span
+                                    className={`shrink-0 inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${tone.badge} ${tone.badgeText}`}
+                                  >
+                                    <AlertTriangle className="w-3 h-3" />
+                                    Stuck
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex flex-col items-end gap-0.5 shrink-0 text-xs">
+                                <div className="flex items-baseline gap-3">
+                                  <span className="text-surface-500">début {startLabel}</span>
+                                  <span className={`font-semibold tabular-nums ${tone.text}`}>
+                                    {row.ageJours} j
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-surface-500">
+                                  roll-out {rollOutLabel}
+                                  {row.joursDebutToRollOut != null && (
+                                    <span className="text-surface-400 tabular-nums">
+                                      {' '}
+                                      · {row.joursDebutToRollOut >= 0 ? '+' : ''}
+                                      {row.joursDebutToRollOut} j depuis début
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-[11px] text-surface-500">
+                                  formation {formatYmdFr(row.formationStartDate)}
+                                  {' → '}
+                                  {formatYmdFr(row.formationEndDate)}
+                                  {row.joursFormation != null && (
+                                    <span className="text-surface-400 tabular-nums">
+                                      {' '}
+                                      · {row.joursFormation} j
+                                    </span>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <div
+                                className="h-1.5 flex-1 rounded-full bg-surface-700/60 overflow-hidden"
+                                role="progressbar"
+                                aria-valuemin={0}
+                                aria-valuemax={100}
+                                aria-valuenow={pct ?? undefined}
+                                aria-label="Progression sites actifs sur target"
+                                title={
+                                  pct != null
+                                    ? `${row.sitesActifs} / ${row.targetSites} sites (${pct} %)`
+                                    : 'Target non renseignée'
+                                }
+                              >
+                                <div
+                                  className={`h-full rounded-full ${tone.bar}`}
+                                  style={{ width: `${barWidth}%` }}
+                                />
+                              </div>
+                              <span className={`shrink-0 text-[11px] font-semibold tabular-nums ${tone.text}`}>
+                                {pct != null ? `${pct} %` : '—'}
+                              </span>
+                            </div>
+                          </button>
                         </li>
                       );
                     })}
@@ -2880,33 +2931,212 @@ export function ProduitDashboard() {
                 <ul className="space-y-2">
                   {suiviKpis.integrationsEnCours.map((row) => {
                     const tone = INTEGRATION_EN_COURS_TONE_UI[integrationEnCoursAgeTone(row.ageJours, row.stuck)];
+                    const pct = row.progressionSitesPct;
                     return (
-                      <li
-                        key={row.itemId}
-                        className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 ${tone.row}`}
-                      >
-                        <div className="min-w-0 flex items-center gap-2">
-                          <span className="text-surface-200 truncate">{row.clientName}</span>
-                          {row.stuck && (
-                            <span
-                              className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide ${tone.badgeText}`}
-                            >
-                              Stuck
-                            </span>
-                          )}
-                        </div>
-                        <div className="shrink-0 text-right">
-                          <div className={`font-semibold tabular-nums ${tone.text}`}>
-                            {row.ageJours} j
+                      <li key={row.itemId}>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setShowIntegrationsEnCoursModal(false);
+                            setIntegrationTimelineRow(row);
+                          }}
+                          className={`w-full text-left rounded-lg border px-3 py-2 space-y-1.5 transition-colors hover:brightness-110 focus:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400/50 ${tone.row}`}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0 flex items-center gap-2">
+                              <span className="text-surface-200 truncate">{row.clientName}</span>
+                              <span className="shrink-0 text-[11px] text-surface-400 tabular-nums">
+                                {row.sitesActifs}
+                                {row.targetSites > 0 ? ` / ${row.targetSites}` : ''}
+                              </span>
+                              {row.stuck && (
+                                <span
+                                  className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide ${tone.badgeText}`}
+                                >
+                                  Stuck
+                                </span>
+                              )}
+                            </div>
+                            <div className="shrink-0 text-right">
+                              <div className={`font-semibold tabular-nums ${tone.text}`}>
+                                {row.ageJours} j
+                              </div>
+                              <div className="text-[10px] text-surface-500">début {row.startDate}</div>
+                              <div className="text-[10px] text-surface-500">
+                                RO {row.rollOutStartDate ?? '—'}
+                                {row.joursDebutToRollOut != null
+                                  ? ` · ${row.joursDebutToRollOut >= 0 ? '+' : ''}${row.joursDebutToRollOut} j`
+                                  : ''}
+                              </div>
+                              <div className="text-[10px] text-surface-500">
+                                form. {row.formationStartDate ?? '—'} → {row.formationEndDate ?? '—'}
+                                {row.joursFormation != null ? ` · ${row.joursFormation} j` : ''}
+                              </div>
+                            </div>
                           </div>
-                          <div className="text-[10px] text-surface-500">{row.startDate}</div>
-                        </div>
+                          <div className="flex items-center gap-2">
+                            <div className="h-1.5 flex-1 rounded-full bg-surface-700/60 overflow-hidden">
+                              <div
+                                className={`h-full rounded-full ${tone.bar}`}
+                                style={{ width: `${pct ?? 0}%` }}
+                              />
+                            </div>
+                            <span className={`shrink-0 text-[11px] font-semibold tabular-nums ${tone.text}`}>
+                              {pct != null ? `${pct} %` : '—'}
+                            </span>
+                          </div>
+                        </button>
                       </li>
                     );
                   })}
                 </ul>
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal timeline détail d’une intégration */}
+      {integrationTimelineRow && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          onClick={() => setIntegrationTimelineRow(null)}
+        >
+          <div
+            className="bg-surface-900 border border-surface-700 rounded-2xl shadow-xl max-w-lg w-full max-h-[90vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+            role="dialog"
+            aria-labelledby="integration-timeline-title"
+          >
+            {(() => {
+              const row = integrationTimelineRow;
+              const tone = INTEGRATION_EN_COURS_TONE_UI[integrationEnCoursAgeTone(row.ageJours, row.stuck)];
+              const events = buildIntegrationTimelineEvents(row);
+              const kindDot: Record<string, string> = {
+                start: 'bg-emerald-400',
+                rollout: 'bg-sky-400',
+                formationStart: 'bg-violet-400',
+                formationEnd: 'bg-violet-300',
+                today: 'bg-amber-500',
+              };
+              /** Hauteur du connecteur entre deux évènements (px), proportionnelle à l’écart en jours. */
+              const gapPx = (deltaJours: number) =>
+                Math.max(12, Math.min(96, Math.round(Math.sqrt(Math.max(0, deltaJours)) * 10)));
+              return (
+                <>
+                  <div className="flex items-center justify-between p-4 border-b border-surface-700">
+                    <div className="min-w-0">
+                      <h3
+                        id="integration-timeline-title"
+                        className="text-lg font-semibold text-surface-100 truncate"
+                      >
+                        {row.clientName}
+                      </h3>
+                      <p className="text-xs text-surface-500 mt-0.5">
+                        Timeline depuis le début · {row.ageJours} j
+                        {row.stuck ? ' · Stuck' : ''}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setIntegrationTimelineRow(null)}
+                      className="p-2 rounded-lg hover:bg-surface-800 text-surface-400 hover:text-surface-200 shrink-0"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+                  </div>
+                  <div className="px-5 pt-4 pb-1">
+                    <div
+                      className="rounded-lg border border-surface-700/60 bg-surface-800/30 px-3 py-2.5 space-y-2"
+                      aria-label="Progression des sites"
+                    >
+                      <div className="flex items-baseline justify-between gap-3">
+                        <span className="text-sm text-surface-200">
+                          Sites actifs{' '}
+                          <span className="font-semibold tabular-nums text-surface-100">
+                            {row.sitesActifs}
+                          </span>
+                          {row.targetSites > 0 && (
+                            <>
+                              <span className="text-surface-500"> / target </span>
+                              <span className="font-semibold tabular-nums text-surface-100">
+                                {row.targetSites}
+                              </span>
+                            </>
+                          )}
+                        </span>
+                        <span className={`text-sm font-semibold tabular-nums ${tone.text}`}>
+                          {row.progressionSitesPct != null ? `${row.progressionSitesPct} %` : '—'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div
+                          className="h-2 flex-1 rounded-full bg-surface-700/60 overflow-hidden"
+                          role="progressbar"
+                          aria-valuenow={row.progressionSitesPct ?? 0}
+                          aria-valuemin={0}
+                          aria-valuemax={100}
+                          aria-label="Pourcentage de sites activés"
+                        >
+                          <div
+                            className={`h-full rounded-full ${tone.bar}`}
+                            style={{ width: `${row.progressionSitesPct ?? 0}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="p-5 overflow-y-auto flex-1">
+                    <ol className="relative" aria-label="Timeline des événements">
+                      {events.map((ev, idx) => {
+                        const prev = idx > 0 ? events[idx - 1] : null;
+                        const delta = prev != null ? ev.offsetJours - prev.offsetJours : 0;
+                        return (
+                          <li key={ev.id}>
+                            {prev != null && (
+                              <div
+                                className="ml-[7px] flex flex-col items-center"
+                                style={{ height: gapPx(delta) }}
+                                aria-hidden
+                              >
+                                <div className="w-px flex-1 bg-surface-600/80" />
+                                {delta > 0 && (
+                                  <span className="my-0.5 text-[10px] tabular-nums text-surface-500">
+                                    +{delta} j
+                                  </span>
+                                )}
+                                <div className="w-px flex-1 bg-surface-600/80" />
+                              </div>
+                            )}
+                            <div className="flex items-start gap-3">
+                              <span
+                                className={`mt-1.5 w-3.5 h-3.5 rounded-full border-2 border-surface-900 shrink-0 ${
+                                  kindDot[ev.kind] || 'bg-surface-400'
+                                }`}
+                                aria-hidden
+                              />
+                              <div className="min-w-0 flex-1 rounded-lg border border-surface-700/50 bg-surface-800/40 px-3 py-2">
+                                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                                  <span className="text-sm font-medium text-surface-100">{ev.label}</span>
+                                  <span className={`text-xs font-semibold tabular-nums ${tone.text}`}>
+                                    {ev.offsetJours === 0
+                                      ? 'J+0'
+                                      : `J${ev.offsetJours >= 0 ? '+' : ''}${ev.offsetJours}`}
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-surface-500 mt-0.5">
+                                  {ev.date ? formatYmdFr(ev.date) : '—'}
+                                </div>
+                              </div>
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ol>
+                  </div>
+                </>
+              );
+            })()}
           </div>
         </div>
       )}

@@ -51,6 +51,30 @@ export const PROJECT_START_DATE_KEYS = [
   'date début',
   'début',
 ];
+/** Date Monday « Roll out start date (formation admin) ». */
+export const ROLL_OUT_START_DATE_KEYS = [
+  'roll out start date',
+  'rollout start date',
+  'formation admin',
+  'date début roll out',
+  'début roll-out',
+  'debut roll out',
+];
+/** Premier jour de formation sites. */
+export const FORMATION_START_DATE_KEYS = [
+  'premiere jour date de formation',
+  'premier jour date de formation',
+  'premiere jour de formation',
+  'premier jour de formation',
+  '1er jour de formation',
+];
+/** Dernier jour de formation sites. */
+export const FORMATION_END_DATE_KEYS = [
+  'dernier jour de formation sites',
+  'dernier jour de formation',
+  'dernier jour date de formation',
+  'fin formation sites',
+];
 /** Statut Monday « Initial roll out » (Done / In progress / Stuck). */
 export const INITIAL_ROLL_OUT_KEYS = ['initial roll out', 'roll out initial'];
 export const TOTAL_PROJETS_KEYS = ['total projets', 'nb projets', 'nombre projets', 'total', 'projets'];
@@ -206,6 +230,31 @@ export type IntegrationEnCours = {
   startDate: string;
   /** Jours calendaires écoulés entre la date de début et aujourd’hui. */
   ageJours: number;
+  /** Roll out start date (YYYY-MM-DD), null si absente. */
+  rollOutStartDate: string | null;
+  /**
+   * Jours entre début projet et roll out start.
+   * null si roll out start absent.
+   */
+  joursDebutToRollOut: number | null;
+  /** Premier jour de formation sites (YYYY-MM-DD), null si absent. */
+  formationStartDate: string | null;
+  /** Dernier jour de formation sites (YYYY-MM-DD), null si absent. */
+  formationEndDate: string | null;
+  /**
+   * Jours entre premier et dernier jour de formation.
+   * null si l’une des deux dates est absente.
+   */
+  joursFormation: number | null;
+  /** Nombre de sites actifs (colonne Monday), 0 si absent. */
+  sitesActifs: number;
+  /** Target / objectif de sites (colonne Monday), 0 si absent. */
+  targetSites: number;
+  /**
+   * Progression sites actifs / target (0–100).
+   * null si target = 0 (non calculable).
+   */
+  progressionSitesPct: number | null;
   /** true si « Initial roll out » = Stuck. */
   stuck: boolean;
   /** Libellé brut du statut Initial roll out, si disponible. */
@@ -276,6 +325,107 @@ export function integrationEnCoursAgeTone(ageJours: number, stuck: boolean): Int
   return 'aging';
 }
 
+/** Progression sites actifs / target en % (null si target ≤ 0). Plafonnée à 100. */
+export function integrationSitesProgressionPct(sitesActifs: number, targetSites: number): number | null {
+  if (!(targetSites > 0)) return null;
+  const pct = (Math.max(0, sitesActifs) / targetSites) * 100;
+  return Math.min(100, Math.round(pct));
+}
+
+export type IntegrationTimelineEventKind =
+  | 'start'
+  | 'rollout'
+  | 'formationStart'
+  | 'formationEnd'
+  | 'today';
+
+export type IntegrationTimelineEvent = {
+  id: string;
+  kind: IntegrationTimelineEventKind;
+  label: string;
+  /** Date YYYY-MM-DD ; null pour « aujourd’hui » si on préfère le libellé seul. */
+  date: string | null;
+  /** Jours depuis le début projet (0 = début). */
+  offsetJours: number;
+};
+
+function parseYmdLocal(ymd: string): Date | null {
+  const [y, m, d] = ymd.split('-').map(Number);
+  if (!y || !m || !d) return null;
+  const dt = new Date(y, m - 1, d);
+  return Number.isNaN(dt.getTime()) ? null : dt;
+}
+
+/**
+ * Événements timeline d’une intégration en cours, ancrés sur la date de début projet.
+ * Triés par offset croissant.
+ */
+export function buildIntegrationTimelineEvents(row: IntegrationEnCours): IntegrationTimelineEvent[] {
+  const start = parseYmdLocal(row.startDate);
+  if (!start) return [];
+
+  const events: IntegrationTimelineEvent[] = [
+    {
+      id: 'start',
+      kind: 'start',
+      label: 'Début projet',
+      date: row.startDate,
+      offsetJours: 0,
+    },
+  ];
+
+  if (row.rollOutStartDate) {
+    const d = parseYmdLocal(row.rollOutStartDate);
+    if (d) {
+      events.push({
+        id: 'rollout',
+        kind: 'rollout',
+        label: 'Roll-out start',
+        date: row.rollOutStartDate,
+        offsetJours: calendarDaysBetween(start, d),
+      });
+    }
+  }
+
+  if (row.formationStartDate) {
+    const d = parseYmdLocal(row.formationStartDate);
+    if (d) {
+      events.push({
+        id: 'formationStart',
+        kind: 'formationStart',
+        label: '1er jour formation',
+        date: row.formationStartDate,
+        offsetJours: calendarDaysBetween(start, d),
+      });
+    }
+  }
+
+  if (row.formationEndDate) {
+    const d = parseYmdLocal(row.formationEndDate);
+    if (d) {
+      events.push({
+        id: 'formationEnd',
+        kind: 'formationEnd',
+        label: 'Dernier jour formation',
+        date: row.formationEndDate,
+        offsetJours: calendarDaysBetween(start, d),
+      });
+    }
+  }
+
+  events.push({
+    id: 'today',
+    kind: 'today',
+    label: 'Aujourd’hui',
+    date: formatDateYmd(new Date()),
+    offsetJours: row.ageJours,
+  });
+
+  return events.sort(
+    (a, b) => a.offsetJours - b.offsetJours || a.label.localeCompare(b.label, 'fr')
+  );
+}
+
 /** Classes Tailwind associées au ton d’âge (liste / modale). */
 export const INTEGRATION_EN_COURS_TONE_UI: Record<
   IntegrationEnCoursAgeTone,
@@ -331,6 +481,11 @@ export function computeIntegrationsEnCours(
   const colStart = findColumnPreferSpecific(columns, PROJECT_START_DATE_KEYS);
   const colProd = findColumnPreferSpecific(columns, DATE_MISE_EN_PROD_KEYS);
   const colRollOut = findColumnPreferSpecific(columns, INITIAL_ROLL_OUT_KEYS);
+  const colRollOutStart = findColumnPreferSpecific(columns, ROLL_OUT_START_DATE_KEYS);
+  const colFormationStart = findColumnPreferSpecific(columns, FORMATION_START_DATE_KEYS);
+  const colFormationEnd = findColumnPreferSpecific(columns, FORMATION_END_DATE_KEYS);
+  const colSites = findColumnByKeywords(columns, SITES_ACTIFS_KEYS);
+  const colTarget = findColumnByKeywords(columns, TARGET_KEYS);
   if (!colStart) return [];
 
   const yearMin = now.getFullYear() - 1;
@@ -344,11 +499,31 @@ export function computeIntegrationsEnCours(
     if (prod) continue;
 
     const rollOutStatus = colRollOut ? getItemColumnLabelText(item, colRollOut.id) || null : null;
+    const rollOutStart = colRollOutStart ? parseDate(getItemValue(item, colRollOutStart.id)) : null;
+    const formationStart = colFormationStart ? parseDate(getItemValue(item, colFormationStart.id)) : null;
+    const formationEnd = colFormationEnd ? parseDate(getItemValue(item, colFormationEnd.id)) : null;
+    const sitesActifs = colSites
+      ? getMondayItemNumericValue(item, colSites.id) || parseNum(getItemValue(item, colSites.id))
+      : 0;
+    const targetSites = colTarget
+      ? getMondayItemNumericValue(item, colTarget.id) || parseNum(getItemValue(item, colTarget.id))
+      : 0;
     out.push({
       itemId: item.id,
       clientName: item.name?.trim() || 'Sans nom',
       startDate: formatDateYmd(start),
       ageJours: calendarDaysBetween(start, now),
+      rollOutStartDate: rollOutStart ? formatDateYmd(rollOutStart) : null,
+      joursDebutToRollOut: rollOutStart != null ? calendarDaysBetween(start, rollOutStart) : null,
+      formationStartDate: formationStart ? formatDateYmd(formationStart) : null,
+      formationEndDate: formationEnd ? formatDateYmd(formationEnd) : null,
+      joursFormation:
+        formationStart != null && formationEnd != null
+          ? calendarDaysBetween(formationStart, formationEnd)
+          : null,
+      sitesActifs,
+      targetSites,
+      progressionSitesPct: integrationSitesProgressionPct(sitesActifs, targetSites),
       stuck: isStuckRollOutStatus(rollOutStatus),
       rollOutStatus,
     });
