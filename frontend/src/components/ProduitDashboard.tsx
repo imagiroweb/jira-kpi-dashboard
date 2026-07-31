@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   Package,
   Loader2,
@@ -23,6 +23,7 @@ import {
   FileText,
   Calculator,
   Hourglass,
+  Save,
 } from 'lucide-react';
 import {
   PieChart,
@@ -101,6 +102,12 @@ import {
   type CalendarQuarter,
   type RoadmapKanbanBucket,
 } from '../domain/roadmapAdoriaKpi';
+import {
+  authApi,
+  type RoadmapAdoria2026DefaultFilters,
+  type RoadmapAdoriaQuarterFilter,
+} from '../services/authApi';
+import { useSocketOptional } from '../hooks/useSocketContext';
 
 /** Board ID Roadmap Adoria 2026 (chargé par défaut dans la section KPI Roadmap). */
 const ROADMAP_ADORIA_2026_BOARD_ID = '5191064770';
@@ -211,6 +218,7 @@ function MacroEstimateYAxisTick({
 }
 
 export function ProduitDashboard() {
+  const socket = useSocketOptional();
   const initialBootstrap = readInitialMondayBootstrap();
   const initialRoadmapWorkspace =
     initialBootstrap?.workspaces?.find((w) => isRoadmapAdoria2026Workspace(w.name)) ?? null;
@@ -259,9 +267,13 @@ export function ProduitDashboard() {
   const [suiviSectionOpen, setSuiviSectionOpen] = useState(true);
   const [detailBoard, setDetailBoard] = useState<'roadmap' | 'suivi' | null>(null);
   const [detailKpi, setDetailKpi] = useState<string | null>(null);
-  const [roadmapQuarterFilter, setRoadmapQuarterFilter] = useState<'all' | 'Q1' | 'Q2' | 'Q3' | 'Q4'>('all');
+  const [roadmapQuarterFilter, setRoadmapQuarterFilter] = useState<RoadmapAdoriaQuarterFilter>('all');
   /** Statuts cochés ; vide = pas de filtre sur le statut (tous). */
   const [roadmapStatusSelected, setRoadmapStatusSelected] = useState<string[]>([]);
+  /** Préférences filtres chargées depuis l’API (appliquées après reset board). */
+  const roadmapDefaultFiltersRef = useRef<RoadmapAdoria2026DefaultFilters | null>(null);
+  const [roadmapDefaultsReady, setRoadmapDefaultsReady] = useState(false);
+  const [savingRoadmapDefaults, setSavingRoadmapDefaults] = useState(false);
   /** Incrémenté au rafraîchissement manuel pour forcer le rechargement des boards malgré le cache. */
   const [reloadToken, setReloadToken] = useState(0);
 
@@ -773,13 +785,62 @@ export function ProduitDashboard() {
   }, [roadmapMacroEstimateChartData.length]);
 
   useEffect(() => {
-    setRoadmapQuarterFilter('all');
-    setRoadmapStatusSelected([]);
-  }, [roadmapBoardId]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const filters = await authApi.getRoadmapAdoria2026DefaultFilters();
+        if (!cancelled) {
+          roadmapDefaultFiltersRef.current = filters;
+        }
+      } catch {
+        // Non bloquant : on garde les filtres UI par défaut (tous / aucun statut)
+      } finally {
+        if (!cancelled) setRoadmapDefaultsReady(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
-    setRoadmapStatusSelected((prev) => prev.filter((s) => roadmapStatusOptions.includes(s)));
+    if (!roadmapDefaultsReady) return;
+    const d = roadmapDefaultFiltersRef.current;
+    setRoadmapQuarterFilter(d?.trimestre ?? 'all');
+    setRoadmapStatusSelected(d?.statut ?? []);
+  }, [roadmapBoardId, roadmapDefaultsReady]);
+
+  useEffect(() => {
+    if (roadmapStatusOptions.length === 0) return;
+    setRoadmapStatusSelected((prev) => {
+      const next = prev.filter((s) => roadmapStatusOptions.includes(s));
+      if (next.length === prev.length && next.every((s, i) => s === prev[i])) return prev;
+      return next;
+    });
   }, [roadmapStatusOptions]);
+
+  const handleSaveRoadmapDefaultFilters = useCallback(async () => {
+    setSavingRoadmapDefaults(true);
+    try {
+      const filters: RoadmapAdoria2026DefaultFilters = {
+        trimestre: roadmapQuarterFilter,
+        statut: [...roadmapStatusSelected],
+      };
+      const saved = await authApi.saveRoadmapAdoria2026DefaultFilters(filters);
+      roadmapDefaultFiltersRef.current = saved;
+      socket?.notify?.success(
+        'Filtres enregistrés',
+        'Ces filtres trimestre et statut seront appliqués par défaut à chaque visite.'
+      );
+    } catch {
+      socket?.notify?.error(
+        'Erreur',
+        'Impossible d’enregistrer les filtres par défaut. Réessayez plus tard.'
+      );
+    } finally {
+      setSavingRoadmapDefaults(false);
+    }
+  }, [roadmapQuarterFilter, roadmapStatusSelected, socket]);
 
   /** Liste de boards pour la section Roadmap : espace dédié si détecté, sinon tous les boards visibles (ex. "Roadmap Adoria 2026" peut être un board, pas un espace). */
   const boardsForRoadmapSection = roadmapWorkspace ? roadmapBoards : boards;
@@ -1000,6 +1061,22 @@ export function ProduitDashboard() {
                       </div>
                     </div>
                   )}
+                  <div className="flex items-end ml-auto">
+                    <button
+                      type="button"
+                      onClick={handleSaveRoadmapDefaultFilters}
+                      disabled={savingRoadmapDefaults || !roadmapDefaultsReady}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border border-surface-700/50 bg-surface-800/50 text-surface-300 hover:text-amber-200 hover:border-amber-500/40 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                      title="Enregistrer le trimestre et les statuts sélectionnés comme filtres par défaut"
+                    >
+                      {savingRoadmapDefaults ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Save className="w-4 h-4" />
+                      )}
+                      Enregistrer comme filtres par défaut
+                    </button>
+                  </div>
                 </div>
               )}
               {(roadmapQuarterFilter !== 'all' || roadmapStatusSelected.length > 0) &&

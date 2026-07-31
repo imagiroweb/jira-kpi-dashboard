@@ -8,6 +8,9 @@ Documentation fonctionnelle et technique pour la section **Produit** (`ProduitDa
 - **Filtres** :
   - **Trimestre (Q1–Q4)** : la **1ʳᵉ** et la **2ᵉ** date de la colonne **`DATE`** (titre exact, insensible à la casse) doivent être entièrement dans le **même trimestre calendaire** et l’**année civile en cours**. Les plages sur années passées ou chevauchant deux trimestres sont exclues.
   - **Statut** : cases à cocher multiples ; aucune case cochée = pas de filtre.
+  - **Filtres par défaut** : bouton « Enregistrer comme filtres par défaut » (trimestre + statut) ; stockés sur le document User (`preferences.roadmapAdoria2026Filters`) via `GET/PUT /api/auth/me/preferences/roadmap-adoria-2026-filters`, réappliqués au chargement de la page pour l’utilisateur connecté.
+  - **Validation** : `parseRoadmapAdoria2026Filters` (trimestre `all|Q1–Q4`, statut tableau de chaînes normalisé : trim, unicité, tri `fr`).
+  - **Tests** : TI `authRoutes.preferences.test.ts` ; TU `parseRoadmapAdoria2026Filters.test.ts` + `User.preferences.test.ts` ; frontend `authApi.test.ts` + `ProduitDashboard.test.tsx` (chargement / CTA enregistrement).
 - **Indicateurs (encart ratio CP)** : RAF trimestre si le filtre trimestre correspond au trimestre courant et année courante ; projets non terminés avec date de fin dans ce trimestre.
 - **Encarts KPI compacts** (même périmètre filtré que les graphiques Roadmap) : **CP référent manquants**, **Solution doc manquant**, **Macro chiffrage manquant**, **Estimation manquante**, et éventuellement **RAF** (voir ci-dessus). Un **clic** sur un encart ouvre une **modale** listant les lignes concernées (nom, valeur de colonne, statut si disponible).
 - **Règle « macro / estimation manquant »** : colonne détectée par mots-clés sur le **titre** Monday (voir `ROADMAP_MACRO_CHIFFRAGE_KEYS` / `ROADMAP_ESTIMATION_KEYS` dans `roadmapAdoriaKpi.ts`). Une ligne compte comme manquante si la cellule est vide, « - », non numérique ou **≤ 0** — aligné avec le diagramme « macro vs estimation » qui n’affiche pas les paires entièrement nulles.
@@ -75,3 +78,12 @@ Le composant `ProduitDashboard.tsx` reste une couche **UI + hooks** ; les régre
 - `frontend/src/components/ProduitDashboard.tsx` — page et intégration Monday
 - `frontend/src/domain/roadmapAdoriaKpi.ts` — règles métier Roadmap Adoria
 - `frontend/src/domain/roadmapAdoriaKpi.test.ts` — tests Vitest
+- `frontend/src/services/authApi.ts` — `get/saveRoadmapAdoria2026DefaultFilters`
+- `frontend/src/services/authApi.test.ts` — TU client préférences filtres
+- `frontend/src/components/ProduitDashboard.test.tsx` — application / enregistrement des filtres par défaut
+- `backend/src/domain/user/entities/User.ts` — `preferences.roadmapAdoria2026Filters`
+- `backend/src/domain/user/parseRoadmapAdoria2026Filters.ts` — validation / normalisation
+- `backend/src/domain/user/parseRoadmapAdoria2026Filters.test.ts` — TU validation
+- `backend/src/domain/user/entities/User.preferences.test.ts` — TU schéma / constantes
+- `backend/src/routes/authRoutes.ts` — `GET/PUT /me/preferences/roadmap-adoria-2026-filters`
+- `backend/src/routes/authRoutes.preferences.test.ts` — tests TI des préférences

@@ -25,6 +25,14 @@ const mockGetStats = vi.mocked(brevoApi.getStats);
 const mockGetTransactionalEvents = vi.mocked(brevoApi.getTransactionalEvents);
 const mockGetCampaignRecipients = vi.mocked(brevoApi.getCampaignRecipients);
 
+/** Dates relatives pour rester dans le filtre « 30 derniers jours » du dashboard. */
+function daysAgoIso(days: number): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - days);
+  d.setUTCHours(10, 0, 0, 0);
+  return d.toISOString();
+}
+
 const TEST_CAMPAIGNS = [
   {
     id: 101,
@@ -32,7 +40,7 @@ const TEST_CAMPAIGNS = [
     subject: 'Actualités franchiseurs',
     type: 'classic',
     status: 'sent',
-    sentDate: '2026-06-01T10:00:00.000Z',
+    sentDate: daysAgoIso(7),
     statistics: { sent: 1200, opened: 480, clicked: 96, delivered: 1180, unsubscribed: 3 },
   },
   {
@@ -41,7 +49,7 @@ const TEST_CAMPAIGNS = [
     subject: 'Nouveautés',
     type: 'classic',
     status: 'sent',
-    sentDate: '2026-06-03T10:00:00.000Z',
+    sentDate: daysAgoIso(5),
     statistics: { sent: 800, opened: 200, clicked: 0, delivered: 790, unsubscribed: 1 },
   },
 ];
