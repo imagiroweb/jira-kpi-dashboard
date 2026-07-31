@@ -46,6 +46,7 @@ const SUIVI_COLUMNS = [
   { id: 'caisse', title: 'Système de caisse actif', type: 'text' },
   { id: 'prod', title: 'Date mise en production', type: 'date' },
   { id: 'start', title: 'Project start date', type: 'date' },
+  { id: 'rollout', title: 'Initial roll out', type: 'status' },
   { id: 'projets', title: 'Total projets', type: 'numbers' },
 ];
 
@@ -59,6 +60,7 @@ const SUIVI_ITEMS = [
       { id: 'caisse', text: 'Caisse Pro', type: 'text' },
       { id: 'prod', text: '2026-05-01', type: 'date' },
       { id: 'start', text: '2026-04-01', type: 'date' },
+      { id: 'rollout', text: 'Done', type: 'status' },
       { id: 'projets', text: '2', type: 'numbers' },
     ],
   },
@@ -71,6 +73,20 @@ const SUIVI_ITEMS = [
       { id: 'caisse', text: '-', type: 'text' },
       { id: 'prod', text: '2026-06-10', type: 'date' },
       { id: 'start', text: '2026-05-01', type: 'date' },
+      { id: 'rollout', text: 'Done', type: 'status' },
+      { id: 'projets', text: '1', type: 'numbers' },
+    ],
+  },
+  {
+    id: 'suivi-3',
+    name: 'Client WIP Stuck',
+    column_values: [
+      { id: 'sites', text: '0', type: 'numbers' },
+      { id: 'target', text: '2', type: 'numbers' },
+      { id: 'caisse', text: 'Zelty', type: 'text' },
+      { id: 'prod', text: '', type: 'date' },
+      { id: 'start', text: '2026-03-01', type: 'date' },
+      { id: 'rollout', text: 'Stuck', type: 'status' },
       { id: 'projets', text: '1', type: 'numbers' },
     ],
   },
@@ -299,5 +315,25 @@ describe('ProduitDashboard', () => {
       'Filtres enregistrés',
       expect.stringContaining('filtres trimestre et statut')
     );
+  });
+
+  it('affiche les intégrations en cours avec badge Stuck et ouvre la modale', async () => {
+    renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Intégrations en cours' })).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('Client WIP Stuck')).toBeInTheDocument();
+    expect(screen.getByLabelText('Liste des intégrations en cours')).toBeInTheDocument();
+    expect(screen.getByLabelText('Liste des intégrations en cours')).toHaveTextContent(/Stuck/i);
+
+    const kpiTile = screen.getByRole('button', { name: /Intégrations en cours/i });
+    fireEvent.click(kpiTile);
+
+    await waitFor(() => {
+      expect(screen.getAllByRole('heading', { name: 'Intégrations en cours' }).length).toBeGreaterThanOrEqual(2);
+      expect(screen.getAllByText('Client WIP Stuck').length).toBeGreaterThanOrEqual(2);
+    });
   });
 });

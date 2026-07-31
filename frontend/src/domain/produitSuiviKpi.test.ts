@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MondayColumn, MondayItem } from '../services/api';
 import {
+  calendarDaysBetween,
+  computeIntegrationsEnCours,
   computeSuiviKpis,
+  formatDateYmd,
   isDefinedCaisseLabel,
   isRoadmapAdoria2026Workspace,
+  isStuckRollOutStatus,
+  integrationEnCoursAgeTone,
   mondayMacroEstimateDiffPct,
   parseDate,
   parseNum,
@@ -49,6 +54,122 @@ describe('produitSuiviKpi', () => {
     });
   });
 
+  describe('calendarDaysBetween / formatDateYmd / isStuckRollOutStatus', () => {
+    it('compte les jours calendaires (diff midnight)', () => {
+      expect(calendarDaysBetween(new Date(2026, 0, 1), new Date(2026, 0, 11))).toBe(10);
+      expect(calendarDaysBetween(new Date(2026, 5, 1), new Date(2026, 5, 1))).toBe(0);
+    });
+
+    it('formate YYYY-MM-DD en local', () => {
+      expect(formatDateYmd(new Date(2026, 0, 5))).toBe('2026-01-05');
+    });
+
+    it('détecte Stuck insensible à la casse', () => {
+      expect(isStuckRollOutStatus('Stuck')).toBe(true);
+      expect(isStuckRollOutStatus(' stuck ')).toBe(true);
+      expect(isStuckRollOutStatus('In progress')).toBe(false);
+      expect(isStuckRollOutStatus(null)).toBe(false);
+    });
+  });
+
+  describe('integrationEnCoursAgeTone', () => {
+    it('priorise Stuck (marron) quel que soit l’âge', () => {
+      expect(integrationEnCoursAgeTone(10, true)).toBe('stuck');
+      expect(integrationEnCoursAgeTone(200, true)).toBe('stuck');
+    });
+
+    it('vert &lt; 90 j, jaune 90–180 j, orange &gt; 180 j', () => {
+      expect(integrationEnCoursAgeTone(0, false)).toBe('fresh');
+      expect(integrationEnCoursAgeTone(89, false)).toBe('fresh');
+      expect(integrationEnCoursAgeTone(90, false)).toBe('warming');
+      expect(integrationEnCoursAgeTone(180, false)).toBe('warming');
+      expect(integrationEnCoursAgeTone(181, false)).toBe('aging');
+    });
+  });
+
+  describe('computeIntegrationsEnCours', () => {
+    const columns: MondayColumn[] = [
+      { id: 'start', title: 'Project start date', type: 'date' },
+      { id: 'prod', title: 'Roll out end date (lancement en production)', type: 'date' },
+      { id: 'rollout', title: 'Initial roll out', type: 'status' },
+    ];
+
+    beforeEach(() => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date(2026, 6, 31)); // 31 juil. 2026
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('liste les WIP (début ≥ n-1, sans prod), trie par âge, marque Stuck', () => {
+      const items: MondayItem[] = [
+        {
+          id: 'old',
+          name: 'Trop ancien',
+          column_values: [
+            { id: 'start', text: '2024-06-01', type: 'date' },
+            { id: 'prod', text: '', type: 'date' },
+            { id: 'rollout', text: 'In progress', type: 'status' },
+          ],
+        },
+        {
+          id: 'done',
+          name: 'Déjà en prod',
+          column_values: [
+            { id: 'start', text: '2025-01-01', type: 'date' },
+            { id: 'prod', text: '2025-06-01', type: 'date' },
+            { id: 'rollout', text: 'Done', type: 'status' },
+          ],
+        },
+        {
+          id: 'stuck',
+          name: 'Exki',
+          column_values: [
+            { id: 'start', text: '2025-04-02', type: 'date' },
+            { id: 'prod', text: '', type: 'date' },
+            { id: 'rollout', text: 'Stuck', type: 'status' },
+          ],
+        },
+        {
+          id: 'wip',
+          name: 'Groupe DNA',
+          column_values: [
+            { id: 'start', text: '2026-05-31', type: 'date' },
+            { id: 'prod', text: '', type: 'date' },
+            { id: 'rollout', text: 'In progress', type: 'status' },
+          ],
+        },
+      ];
+
+      const rows = computeIntegrationsEnCours(items, columns);
+      expect(rows).toHaveLength(2);
+      expect(rows[0]).toMatchObject({
+        clientName: 'Exki',
+        startDate: '2025-04-02',
+        stuck: true,
+        rollOutStatus: 'Stuck',
+      });
+      expect(rows[0].ageJours).toBe(calendarDaysBetween(new Date(2025, 3, 2), new Date(2026, 6, 31)));
+      expect(rows[1]).toMatchObject({
+        clientName: 'Groupe DNA',
+        startDate: '2026-05-31',
+        stuck: false,
+        ageJours: calendarDaysBetween(new Date(2026, 4, 31), new Date(2026, 6, 31)),
+      });
+    });
+
+    it('retourne [] sans colonne de début', () => {
+      expect(
+        computeIntegrationsEnCours(
+          [{ id: '1', name: 'X', column_values: [] }],
+          [{ id: 'prod', title: 'Date mise en production', type: 'date' }]
+        )
+      ).toEqual([]);
+    });
+  });
+
   describe('computeSuiviKpis', () => {
     beforeEach(() => {
       vi.useFakeTimers();
@@ -65,6 +186,7 @@ describe('produitSuiviKpi', () => {
       { id: 'caisse', title: 'Système de caisse actif', type: 'text' },
       { id: 'prod', title: 'Date mise en production', type: 'date' },
       { id: 'start', title: 'Project start date', type: 'date' },
+      { id: 'rollout', title: 'Initial roll out', type: 'status' },
     ];
 
     const items: MondayItem[] = [
@@ -77,6 +199,7 @@ describe('produitSuiviKpi', () => {
           { id: 'caisse', text: 'Caisse X', type: 'text' },
           { id: 'prod', text: '2026-05-01', type: 'date' },
           { id: 'start', text: '2026-04-01', type: 'date' },
+          { id: 'rollout', text: 'Done', type: 'status' },
         ],
       },
       {
@@ -88,6 +211,19 @@ describe('produitSuiviKpi', () => {
           { id: 'caisse', text: '-', type: 'text' },
           { id: 'prod', text: '2026-06-10', type: 'date' },
           { id: 'start', text: '2026-05-01', type: 'date' },
+          { id: 'rollout', text: 'Done', type: 'status' },
+        ],
+      },
+      {
+        id: '3',
+        name: 'Client WIP',
+        column_values: [
+          { id: 'sites', text: '0', type: 'numbers' },
+          { id: 'pays', text: 'Belgique', type: 'text' },
+          { id: 'caisse', text: 'Zelty', type: 'text' },
+          { id: 'prod', text: '', type: 'date' },
+          { id: 'start', text: '2026-03-01', type: 'date' },
+          { id: 'rollout', text: 'Stuck', type: 'status' },
         ],
       },
     ];
@@ -95,9 +231,12 @@ describe('produitSuiviKpi', () => {
     it('agrège sites actifs, pays et nuage de caisse', () => {
       const k = computeSuiviKpis(items, columns);
       expect(k.sitesActifs).toBe(5);
-      expect(k.totalProjets).toBe(2);
+      expect(k.totalProjets).toBe(3);
       expect(k.byPays.find((p) => p.name === 'France')?.value).toBe(2);
-      expect(k.systemeCaisseWordCloud).toEqual([{ label: 'Caisse X', count: 1 }]);
+      expect(k.systemeCaisseWordCloud).toEqual([
+        { label: 'Caisse X', count: 1 },
+        { label: 'Zelty', count: 1 },
+      ]);
       expect(k.projetsAnneeEnCours).toBe(2);
     });
 
@@ -105,6 +244,19 @@ describe('produitSuiviKpi', () => {
       const k = computeSuiviKpis(items, columns);
       expect(k.delaiByClient).toHaveLength(2);
       expect(k.dureeMinMiseEnProdJours).toBeGreaterThan(0);
+    });
+
+    it('expose les intégrations en cours avec agrégats', () => {
+      const k = computeSuiviKpis(items, columns);
+      expect(k.integrationsEnCours).toHaveLength(1);
+      expect(k.integrationsEnCours[0]).toMatchObject({
+        clientName: 'Client WIP',
+        stuck: true,
+        startDate: '2026-03-01',
+      });
+      expect(k.integrationsEnCoursStuckCount).toBe(1);
+      expect(k.integrationsEnCoursAgeMedianJours).toBe(k.integrationsEnCours[0].ageJours);
+      expect(k.integrationsEnCoursAgeMoyenJours).toBe(k.integrationsEnCours[0].ageJours);
     });
   });
 });

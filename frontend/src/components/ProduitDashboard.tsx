@@ -72,6 +72,8 @@ import {
   UTILISATION_MOBILE_KEYS,
   computeSuiviKpis,
   getItemColumnLabelText,
+  INTEGRATION_EN_COURS_TONE_UI,
+  integrationEnCoursAgeTone,
   isRoadmapAdoria2026Workspace,
   mondayMacroEstimateDiffPct,
   parseNum,
@@ -242,6 +244,7 @@ export function ProduitDashboard() {
   const [suiviLoading, setSuiviLoading] = useState(false);
   const [showSystemeCaisseModal, setShowSystemeCaisseModal] = useState(false);
   const [showDelaiModal, setShowDelaiModal] = useState(false);
+  const [showIntegrationsEnCoursModal, setShowIntegrationsEnCoursModal] = useState(false);
   const [roadmapBoardId, setRoadmapBoardId] = useState(() =>
     initialBootstrap?.configured ? ROADMAP_ADORIA_2026_BOARD_ID : ''
   );
@@ -1946,6 +1949,32 @@ export function ProduitDashboard() {
                     </div>
                   )}
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setShowIntegrationsEnCoursModal(true)}
+                  className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left w-full cursor-pointer hover:border-emerald-500/40 hover:bg-surface-800/80 transition-colors"
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    <Hourglass className="w-4 h-4 text-emerald-400" />
+                    <span className="text-xs font-medium text-surface-500">Intégrations en cours</span>
+                  </div>
+                  <div className="text-xl font-bold text-surface-100 tabular-nums">
+                    {suiviKpis.integrationsEnCours.length}
+                  </div>
+                  <div className="mt-0.5 space-y-0.5">
+                    <div className="text-[10px] text-surface-500">
+                      sans prod · début ≥ {new Date().getFullYear() - 1}
+                    </div>
+                    {suiviKpis.integrationsEnCours.length > 0 && (
+                      <div className="text-[10px] text-surface-600">
+                        âge méd. {suiviKpis.integrationsEnCoursAgeMedianJours} j
+                        {suiviKpis.integrationsEnCoursStuckCount > 0
+                          ? ` · ${suiviKpis.integrationsEnCoursStuckCount} Stuck`
+                          : ''}
+                      </div>
+                    )}
+                  </div>
+                </button>
                 <button type="button" onClick={() => setDetailKpi('totalProjets')} className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer">
                   <div className="flex items-center gap-2 mb-1">
                     <Folder className="w-4 h-4 text-surface-400" />
@@ -2075,6 +2104,118 @@ export function ProduitDashboard() {
                     <span>Actifs : {suiviKpis.totalProduitsGeneriquesActifs}</span>
                   </div>
                 </button>
+              )}
+              {suiviKpis.integrationsEnCours.length > 0 && (
+                <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-surface-200 flex items-center gap-2">
+                        <Hourglass className="w-4 h-4 text-emerald-400" />
+                        Intégrations en cours
+                      </h3>
+                      <p className="text-xs text-surface-500 mt-1">
+                        Sans date de mise en prod · début projet ≥ {new Date().getFullYear() - 1} · triés du plus
+                        ancien au plus récent
+                      </p>
+                      <p className="text-[10px] text-surface-600 mt-1">
+                        <span className="text-emerald-400">●</span> &lt;90 j{' '}
+                        <span className="text-yellow-400">●</span> 90–180 j{' '}
+                        <span className="text-orange-400">●</span> &gt;180 j{' '}
+                        <span className="text-amber-800">●</span> Stuck
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-3 text-xs text-surface-400">
+                      <span>
+                        <span className="text-surface-200 font-semibold tabular-nums">
+                          {suiviKpis.integrationsEnCours.length}
+                        </span>{' '}
+                        projets
+                      </span>
+                      <span>
+                        médiane{' '}
+                        <span
+                          className={`font-semibold tabular-nums ${
+                            INTEGRATION_EN_COURS_TONE_UI[
+                              integrationEnCoursAgeTone(
+                                suiviKpis.integrationsEnCoursAgeMedianJours,
+                                false
+                              )
+                            ].text
+                          }`}
+                        >
+                          {suiviKpis.integrationsEnCoursAgeMedianJours} j
+                        </span>
+                      </span>
+                      <span>
+                        moy.{' '}
+                        <span className="tabular-nums">{suiviKpis.integrationsEnCoursAgeMoyenJours} j</span>
+                      </span>
+                      {suiviKpis.integrationsEnCoursStuckCount > 0 && (
+                        <span className="inline-flex items-center gap-1 text-amber-800">
+                          <AlertTriangle className="w-3.5 h-3.5" />
+                          {suiviKpis.integrationsEnCoursStuckCount} Stuck
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <ul className="space-y-2.5" aria-label="Liste des intégrations en cours">
+                    {suiviKpis.integrationsEnCours.map((row) => {
+                      const maxAge = Math.max(
+                        ...suiviKpis.integrationsEnCours.map((r) => r.ageJours),
+                        1
+                      );
+                      const pct = Math.min(100, Math.round((row.ageJours / maxAge) * 100));
+                      const tone = INTEGRATION_EN_COURS_TONE_UI[integrationEnCoursAgeTone(row.ageJours, row.stuck)];
+                      const [y, m, d] = row.startDate.split('-').map(Number);
+                      const startLabel =
+                        y && m && d
+                          ? new Date(y, m - 1, d).toLocaleDateString('fr-FR', {
+                              day: 'numeric',
+                              month: 'short',
+                              year: 'numeric',
+                            })
+                          : row.startDate;
+                      return (
+                        <li
+                          key={row.itemId}
+                          className={`rounded-lg border px-3 py-2.5 ${tone.row}`}
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-sm text-surface-100 font-medium truncate">
+                                {row.clientName}
+                              </span>
+                              {row.stuck && (
+                                <span
+                                  className={`shrink-0 inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${tone.badge} ${tone.badgeText}`}
+                                >
+                                  <AlertTriangle className="w-3 h-3" />
+                                  Stuck
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-baseline gap-3 shrink-0 text-xs">
+                              <span className="text-surface-500">début {startLabel}</span>
+                              <span className={`font-semibold tabular-nums ${tone.text}`}>
+                                {row.ageJours} j
+                              </span>
+                            </div>
+                          </div>
+                          <div
+                            className="h-1.5 rounded-full bg-surface-700/60 overflow-hidden"
+                            role="presentation"
+                            title={`${row.ageJours} jours depuis le début`}
+                          >
+                            <div
+                              className={`h-full rounded-full ${tone.bar}`}
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
               )}
               {suiviKpis.projectsByYear.length > 0 && (
                 <div className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4">
@@ -2692,6 +2833,77 @@ export function ProduitDashboard() {
                       <span className="text-amber-400 font-semibold tabular-nums shrink-0">{row.dureeJours} j</span>
                     </li>
                   ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Intégrations en cours */}
+      {showIntegrationsEnCoursModal && suiviKpis && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm"
+          onClick={() => setShowIntegrationsEnCoursModal(false)}
+        >
+          <div
+            className="bg-surface-900 border border-surface-700 rounded-2xl shadow-xl max-w-xl w-full max-h-[85vh] flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between p-4 border-b border-surface-700">
+              <div className="flex items-center gap-2 min-w-0">
+                <Hourglass className="w-5 h-5 text-emerald-400 shrink-0" />
+                <div className="min-w-0">
+                  <h3 className="text-lg font-semibold text-surface-100">Intégrations en cours</h3>
+                  <p className="text-xs text-surface-500">
+                    Début ≥ {new Date().getFullYear() - 1} · sans mise en prod
+                    {suiviKpis.integrationsEnCoursStuckCount > 0
+                      ? ` · ${suiviKpis.integrationsEnCoursStuckCount} Stuck`
+                      : ''}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowIntegrationsEnCoursModal(false)}
+                className="p-2 rounded-lg hover:bg-surface-800 text-surface-400 hover:text-surface-200"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-4 overflow-y-auto flex-1">
+              {suiviKpis.integrationsEnCours.length === 0 ? (
+                <p className="text-surface-500 text-sm">
+                  Aucune intégration en cours (début renseigné, pas de date de prod, année ≥ n−1).
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {suiviKpis.integrationsEnCours.map((row) => {
+                    const tone = INTEGRATION_EN_COURS_TONE_UI[integrationEnCoursAgeTone(row.ageJours, row.stuck)];
+                    return (
+                      <li
+                        key={row.itemId}
+                        className={`flex items-center justify-between gap-3 rounded-lg border px-3 py-2 ${tone.row}`}
+                      >
+                        <div className="min-w-0 flex items-center gap-2">
+                          <span className="text-surface-200 truncate">{row.clientName}</span>
+                          {row.stuck && (
+                            <span
+                              className={`shrink-0 text-[10px] font-semibold uppercase tracking-wide ${tone.badgeText}`}
+                            >
+                              Stuck
+                            </span>
+                          )}
+                        </div>
+                        <div className="shrink-0 text-right">
+                          <div className={`font-semibold tabular-nums ${tone.text}`}>
+                            {row.ageJours} j
+                          </div>
+                          <div className="text-[10px] text-surface-500">{row.startDate}</div>
+                        </div>
+                      </li>
+                    );
+                  })}
                 </ul>
               )}
             </div>

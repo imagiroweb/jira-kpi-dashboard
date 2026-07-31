@@ -30,6 +30,8 @@ export const SYSTEME_CAISSE_ACTIF_KEYS = [
   'caisse actif',
 ];
 export const DATE_MISE_EN_PROD_KEYS = [
+  'roll out end date',
+  'lancement en production',
   'date mise en production',
   'mise en production',
   'go live',
@@ -49,6 +51,8 @@ export const PROJECT_START_DATE_KEYS = [
   'date début',
   'début',
 ];
+/** Statut Monday « Initial roll out » (Done / In progress / Stuck). */
+export const INITIAL_ROLL_OUT_KEYS = ['initial roll out', 'roll out initial'];
 export const TOTAL_PROJETS_KEYS = ['total projets', 'nb projets', 'nombre projets', 'total', 'projets'];
 export const UTILISATEURS_ACTIFS_KEYS = [
   "kpi adoria - nbre d'utilisateurs actifs",
@@ -194,6 +198,20 @@ export function parseNum(value: string): number {
   return Number.isFinite(n) ? n : 0;
 }
 
+/** Intégration client sans date de mise en prod, démarrée au plus tôt en année n−1. */
+export type IntegrationEnCours = {
+  itemId: string;
+  clientName: string;
+  /** Date de début projet (YYYY-MM-DD). */
+  startDate: string;
+  /** Jours calendaires écoulés entre la date de début et aujourd’hui. */
+  ageJours: number;
+  /** true si « Initial roll out » = Stuck. */
+  stuck: boolean;
+  /** Libellé brut du statut Initial roll out, si disponible. */
+  rollOutStatus: string | null;
+};
+
 export type SuiviKpiResult = {
   sitesActifs: number;
   target: number;
@@ -206,6 +224,11 @@ export type SuiviKpiResult = {
   dureeMinMiseEnProdJours: number;
   dureeMaxMiseEnProdJours: number;
   delaiByClient: { clientName: string; dureeJours: number }[];
+  /** WIP : début renseigné, pas de prod, année début ≥ n−1 — trié par âge décroissant. */
+  integrationsEnCours: IntegrationEnCours[];
+  integrationsEnCoursStuckCount: number;
+  integrationsEnCoursAgeMedianJours: number;
+  integrationsEnCoursAgeMoyenJours: number;
   totalProjets: number;
   byPays: { name: string; value: number }[];
   totalUtilisateursActifs: number;
@@ -218,6 +241,122 @@ export type SuiviKpiResult = {
   totalUtilisationMobile: number;
 };
 
+/** Jours calendaires entre deux dates (minuit local). */
+export function calendarDaysBetween(from: Date, to: Date): number {
+  const a = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  const b = new Date(to.getFullYear(), to.getMonth(), to.getDate());
+  return Math.round((b.getTime() - a.getTime()) / (1000 * 60 * 60 * 24));
+}
+
+export function formatDateYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export function isStuckRollOutStatus(label: string | null | undefined): boolean {
+  if (!label) return false;
+  return label.trim().toLowerCase() === 'stuck';
+}
+
+/**
+ * Code couleur âge WIP :
+ * - stuck → marron
+ * - &lt; 90 j → vert
+ * - 90–180 j → jaune
+ * - &gt; 180 j → orange
+ */
+export type IntegrationEnCoursAgeTone = 'fresh' | 'warming' | 'aging' | 'stuck';
+
+export function integrationEnCoursAgeTone(ageJours: number, stuck: boolean): IntegrationEnCoursAgeTone {
+  if (stuck) return 'stuck';
+  if (ageJours < 90) return 'fresh';
+  if (ageJours <= 180) return 'warming';
+  return 'aging';
+}
+
+/** Classes Tailwind associées au ton d’âge (liste / modale). */
+export const INTEGRATION_EN_COURS_TONE_UI: Record<
+  IntegrationEnCoursAgeTone,
+  { text: string; bar: string; row: string; badge: string; badgeText: string }
+> = {
+  fresh: {
+    text: 'text-emerald-300',
+    bar: 'bg-emerald-400/80',
+    row: 'border-emerald-500/25 bg-emerald-500/5',
+    badge: 'border-emerald-500/40 bg-emerald-500/15',
+    badgeText: 'text-emerald-200',
+  },
+  warming: {
+    text: 'text-yellow-300',
+    bar: 'bg-yellow-400/80',
+    row: 'border-yellow-500/30 bg-yellow-500/5',
+    badge: 'border-yellow-500/40 bg-yellow-500/15',
+    badgeText: 'text-yellow-100',
+  },
+  aging: {
+    text: 'text-orange-300',
+    bar: 'bg-orange-400/80',
+    row: 'border-orange-500/30 bg-orange-500/5',
+    badge: 'border-orange-500/40 bg-orange-500/15',
+    badgeText: 'text-orange-100',
+  },
+  stuck: {
+    text: 'text-amber-800',
+    bar: 'bg-amber-900/80',
+    row: 'border-amber-900/45 bg-amber-950/40',
+    badge: 'border-amber-900/50 bg-amber-950/50',
+    badgeText: 'text-amber-100',
+  },
+};
+
+function medianRounded(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length % 2 === 1) return sorted[mid];
+  return Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
+
+/**
+ * Intégrations en cours : date de début renseignée, pas de date de mise en prod,
+ * année de début ≥ année courante − 1. Inclut le statut Stuck (Initial roll out) s’il existe.
+ */
+export function computeIntegrationsEnCours(
+  items: MondayItem[],
+  columns: MondayColumn[],
+  now: Date = new Date()
+): IntegrationEnCours[] {
+  const colStart = findColumnPreferSpecific(columns, PROJECT_START_DATE_KEYS);
+  const colProd = findColumnPreferSpecific(columns, DATE_MISE_EN_PROD_KEYS);
+  const colRollOut = findColumnPreferSpecific(columns, INITIAL_ROLL_OUT_KEYS);
+  if (!colStart) return [];
+
+  const yearMin = now.getFullYear() - 1;
+  const out: IntegrationEnCours[] = [];
+
+  for (const item of items) {
+    const start = parseDate(getItemValue(item, colStart.id));
+    if (!start) continue;
+    if (start.getFullYear() < yearMin) continue;
+    const prod = colProd ? parseDate(getItemValue(item, colProd.id)) : null;
+    if (prod) continue;
+
+    const rollOutStatus = colRollOut ? getItemColumnLabelText(item, colRollOut.id) || null : null;
+    out.push({
+      itemId: item.id,
+      clientName: item.name?.trim() || 'Sans nom',
+      startDate: formatDateYmd(start),
+      ageJours: calendarDaysBetween(start, now),
+      stuck: isStuckRollOutStatus(rollOutStatus),
+      rollOutStatus,
+    });
+  }
+
+  return out.sort((a, b) => b.ageJours - a.ageJours || a.clientName.localeCompare(b.clientName, 'fr'));
+}
+
 export function computeSuiviKpis(items: MondayItem[], columns: MondayColumn[]): SuiviKpiResult {
   const findColumn = findColumnByKeywords;
   const getItemNumericValue = getMondayItemNumericValue;
@@ -227,8 +366,8 @@ export function computeSuiviKpis(items: MondayItem[], columns: MondayColumn[]): 
   const colCdc = columns.find((c) => String(c.id) === SUIVI_CDC_DEPLOYE_COLUMN_ID) ?? findColumn(columns, CDC_KEYS);
   const colCommandesViaCdc = findColumn(columns, COMMANDES_VIA_CDC_KEYS);
   const colSystemeCaisse = findColumnPreferSpecific(columns, SYSTEME_CAISSE_ACTIF_KEYS);
-  const colDateProd = findColumn(columns, DATE_MISE_EN_PROD_KEYS);
-  const colStartDate = findColumn(columns, PROJECT_START_DATE_KEYS);
+  const colDateProd = findColumnPreferSpecific(columns, DATE_MISE_EN_PROD_KEYS);
+  const colStartDate = findColumnPreferSpecific(columns, PROJECT_START_DATE_KEYS);
   const colTotalProjets = findColumn(columns, TOTAL_PROJETS_KEYS);
   const colPays = findColumn(columns, PAYS_COLUMN_KEYS);
   const colUtilisateursActifs =
@@ -342,6 +481,13 @@ export function computeSuiviKpis(items: MondayItem[], columns: MondayColumn[]): 
   const dureeMaxMiseEnProdJours = dureesJours.length > 0 ? Math.max(...dureesJours) : 0;
   delaiByClient.sort((a, b) => a.dureeJours - b.dureeJours);
 
+  const integrationsEnCours = computeIntegrationsEnCours(items, columns, new Date());
+  const agesEnCours = integrationsEnCours.map((r) => r.ageJours);
+  const integrationsEnCoursStuckCount = integrationsEnCours.filter((r) => r.stuck).length;
+  const integrationsEnCoursAgeMedianJours = medianRounded(agesEnCours);
+  const integrationsEnCoursAgeMoyenJours =
+    agesEnCours.length > 0 ? Math.round(agesEnCours.reduce((a, b) => a + b, 0) / agesEnCours.length) : 0;
+
   return {
     sitesActifs,
     target,
@@ -354,6 +500,10 @@ export function computeSuiviKpis(items: MondayItem[], columns: MondayColumn[]): 
     dureeMinMiseEnProdJours,
     dureeMaxMiseEnProdJours,
     delaiByClient,
+    integrationsEnCours,
+    integrationsEnCoursStuckCount,
+    integrationsEnCoursAgeMedianJours,
+    integrationsEnCoursAgeMoyenJours,
     totalProjets,
     byPays,
     totalUtilisateursActifs,
