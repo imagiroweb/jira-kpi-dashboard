@@ -604,12 +604,17 @@ router.get(
         return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
       }
       const saved = user.preferences?.roadmapAdoria2026Filters;
-      const filters: IRoadmapAdoria2026Filters = saved
-        ? {
-            trimestre: saved.trimestre ?? DEFAULT_ROADMAP_ADORIA_2026_FILTERS.trimestre,
-            statut: Array.isArray(saved.statut) ? saved.statut : [],
-          }
-        : { ...DEFAULT_ROADMAP_ADORIA_2026_FILTERS, statut: [] };
+      const candidate = {
+        trimestre: saved?.trimestre ?? DEFAULT_ROADMAP_ADORIA_2026_FILTERS.trimestre,
+        statut: Array.isArray(saved?.statut) ? saved.statut : [],
+      };
+      const filters: IRoadmapAdoria2026Filters =
+        parseRoadmapAdoria2026Filters(candidate) ??
+        parseRoadmapAdoria2026Filters({
+          trimestre: DEFAULT_ROADMAP_ADORIA_2026_FILTERS.trimestre,
+          statut: candidate.statut,
+        }) ??
+        { ...DEFAULT_ROADMAP_ADORIA_2026_FILTERS, statut: [] };
       res.json({ success: true, filters });
     } catch (error) {
       logger.error('Get roadmap Adoria default filters error:', error);

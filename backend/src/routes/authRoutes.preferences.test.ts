@@ -111,7 +111,7 @@ describe('Préférences Roadmap Adoria 2026 (TI)', () => {
       expect(res.status).toBe(200);
       expect(res.body.filters).toEqual({
         trimestre: 'Q2',
-        statut: ['En cours', 'Done'],
+        statut: ['Done', 'En cours'],
       });
     });
 
@@ -128,6 +128,21 @@ describe('Préférences Roadmap Adoria 2026 (TI)', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.filters).toEqual({ trimestre: 'all', statut: [] });
+    });
+
+    it('ignore un trimestre hors enum et conserve un statut valide', async () => {
+      mockUserFindById.mockReturnValue(
+        leanChain({
+          preferences: {
+            roadmapAdoria2026Filters: { trimestre: 'Q5', statut: ['En cours'] },
+          },
+        })
+      );
+
+      const res = await request(app).get(path);
+
+      expect(res.status).toBe(200);
+      expect(res.body.filters).toEqual({ trimestre: 'all', statut: ['En cours'] });
     });
 
     it('retourne 404 si utilisateur introuvable', async () => {

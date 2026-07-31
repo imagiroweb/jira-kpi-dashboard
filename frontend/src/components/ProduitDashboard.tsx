@@ -791,6 +791,8 @@ export function ProduitDashboard() {
         const filters = await authApi.getRoadmapAdoria2026DefaultFilters();
         if (!cancelled) {
           roadmapDefaultFiltersRef.current = filters;
+          setRoadmapQuarterFilter(filters.trimestre);
+          setRoadmapStatusSelected(filters.statut);
         }
       } catch {
         // Non bloquant : on garde les filtres UI par défaut (tous / aucun statut)
@@ -976,12 +978,12 @@ export function ProduitDashboard() {
               Chargement du board Roadmap Adoria 2026…
             </div>
           )}
-          {roadmapLoading && (
+          {(roadmapLoading || !roadmapDefaultsReady) && (
             <div className="p-8 flex justify-center">
               <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
             </div>
           )}
-          {!roadmapLoading && roadmapKpis && (
+          {!roadmapLoading && roadmapDefaultsReady && roadmapKpis && (
             <div className="p-6 space-y-6">
               {(roadmapDateColumn || roadmapStatusColumn) && (
                 <div className="flex flex-wrap items-start gap-x-8 gap-y-3 pb-1 border-b border-surface-700/40">
