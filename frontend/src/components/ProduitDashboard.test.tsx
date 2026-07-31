@@ -7,6 +7,8 @@ import {
   TEST_MONDAY_USER,
 } from '@/test/fixtures/monday';
 import { TEST_USER } from '@/test/fixtures/users';
+import { createAuthApiMock } from '@/test/mocks/authApi';
+import { createMockSocketContextValue } from '@/test/mocks/socket';
 import { resetStore } from '@/test/mocks/store';
 import { invalidateMondayProduitCache } from '../services/mondayProduitCache';
 
@@ -21,7 +23,10 @@ vi.mock('../services/api', () => ({
   },
 }));
 
+vi.mock('../services/authApi', () => ({ authApi: createAuthApiMock() }));
+
 import { mondayApi } from '../services/api';
+import { authApi } from '../services/authApi';
 import { ProduitDashboard } from './ProduitDashboard';
 
 const mockGetStatus = vi.mocked(mondayApi.getStatus);
@@ -29,6 +34,8 @@ const mockGetMe = vi.mocked(mondayApi.getMe);
 const mockGetWorkspaces = vi.mocked(mondayApi.getWorkspaces);
 const mockGetBoards = vi.mocked(mondayApi.getBoards);
 const mockGetBoard = vi.mocked(mondayApi.getBoard);
+const mockGetDefaultFilters = vi.mocked(authApi.getRoadmapAdoria2026DefaultFilters);
+const mockSaveDefaultFilters = vi.mocked(authApi.saveRoadmapAdoria2026DefaultFilters);
 
 const ROADMAP_BOARD_ID = '5191064770';
 const SUIVI_BOARD_ID = '475358061';
@@ -104,6 +111,8 @@ describe('ProduitDashboard', () => {
     invalidateMondayProduitCache();
     vi.clearAllMocks();
     setupMondayMocks();
+    mockGetDefaultFilters.mockResolvedValue({ trimestre: 'all', statut: [] });
+    mockSaveDefaultFilters.mockImplementation(async (filters) => filters);
   });
 
   it('bootstrap Monday et affiche la section Roadmap', async () => {
@@ -234,5 +243,61 @@ describe('ProduitDashboard', () => {
       expect(screen.getByRole('heading', { name: 'Délai mise en prod. par client' })).toBeInTheDocument();
       expect(screen.getByText('Client Alpha')).toBeInTheDocument();
     });
+  });
+
+  it('charge et applique les filtres par défaut Roadmap au montage', async () => {
+    mockGetDefaultFilters.mockResolvedValue({
+      trimestre: 'Q1',
+      statut: ['En cours'],
+    });
+
+    renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
+
+    await waitFor(() => {
+      expect(mockGetDefaultFilters).toHaveBeenCalled();
+    });
+
+    await waitFor(() => {
+      const q1 = screen.getByRole('button', { name: 'Q1' });
+      expect(q1.className).toMatch(/bg-amber-500\/20/);
+    });
+
+    const statusCheckbox = await screen.findByRole('checkbox', { name: /En cours/i });
+    expect(statusCheckbox).toBeChecked();
+  });
+
+  it('enregistre les filtres par défaut et notifie le succès', async () => {
+    const notify = {
+      success: vi.fn(),
+      error: vi.fn(),
+      warning: vi.fn(),
+      info: vi.fn(),
+    };
+    const socket = createMockSocketContextValue({ notify });
+
+    renderWithProviders(<ProduitDashboard />, { user: TEST_USER, socket });
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('button', { name: /Enregistrer comme filtres par défaut/i })
+      ).not.toBeDisabled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Q2' }));
+    fireEvent.click(
+      screen.getByRole('button', { name: /Enregistrer comme filtres par défaut/i })
+    );
+
+    await waitFor(() => {
+      expect(mockSaveDefaultFilters).toHaveBeenCalledWith({
+        trimestre: 'Q2',
+        statut: [],
+      });
+    });
+
+    expect(notify.success).toHaveBeenCalledWith(
+      'Filtres enregistrés',
+      expect.stringContaining('filtres trimestre et statut')
+    );
   });
 });

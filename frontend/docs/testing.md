@@ -80,7 +80,7 @@ Quick wins sur la logique pure et les appels API mockés (axios).
 | Fichier source | Fichier test | Cas principaux | Couverture lignes |
 |----------------|--------------|----------------|-------------------|
 | `services/api.ts` | `services/api.test.ts` | jiraApi, epicApi, syncApi, snapshots, brevoApi, mondayApi, **intercepteurs 401** | ~100 % |
-| `src/services/authApi.ts` | `authApi.test.ts` | login, register, verifyToken, reset password | ~81 % |
+| `src/services/authApi.ts` | `authApi.test.ts` | login, register, verifyToken, reset password, **filtres Roadmap Adoria 2026** | ~81 % |
 | `src/services/mondayProduitCache.ts` | `mondayProduitCache.test.ts` | TTL mémoire, sessionStorage, invalidation | ~95 % |
 | `src/utils/dateUtils.ts` | `dateUtils.test.ts` | `formatDate`, `getDefaultDateRange` (fake timers) | 100 % |
 | `src/constants/transactionalEvents.ts` | `transactionalEvents.test.ts` | `getTransactionalEventBadgeClass` | 100 % |
@@ -302,7 +302,7 @@ Dernière passe pour combler les gaps restants identifiés en fin de Phase 6.
 |--------------------|-----------|
 | Intercepteurs axios | token `Authorization` si `auth_token` en localStorage ; pas de header sans token ; 401 → suppression token + redirect `/login` ; autres erreurs → reject sans redirect |
 | `UserManagementPage` | erreur chargement API ; changement de rôle (select) ; erreur mise à jour rôle ; drawer activité (logs connexion + stats navigation) ; modale toutes les connexions ; édition rôle ; création rôle |
-| `ProduitDashboard` | erreur réseau bootstrap Monday ; modale détail KPI sites actifs ; modale délai mise en prod par client |
+| `ProduitDashboard` | erreur réseau bootstrap Monday ; modale détail KPI sites actifs ; modale délai mise en prod par client ; **chargement filtres par défaut Roadmap** ; **CTA « Enregistrer comme filtres par défaut »** + notify |
 
 ### Couverture avant / après
 

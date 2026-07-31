@@ -8,7 +8,7 @@ const axiosMocks = vi.hoisted(() => ({
   mockDelete: vi.fn(),
   mockPut: vi.fn(),
 }));
-const { mockGet, mockPost } = axiosMocks;
+const { mockGet, mockPost, mockPut } = axiosMocks;
 
 vi.mock('axios', () => axiosModuleMock(axiosMocks));
 
@@ -381,6 +381,55 @@ describe('authApi', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Erreur lors de la réinitialisation du mot de passe');
+    });
+  });
+
+  describe('getRoadmapAdoria2026DefaultFilters', () => {
+    it('retourne les filtres par défaut Roadmap Adoria 2026', async () => {
+      const filters = { trimestre: 'Q2' as const, statut: ['En cours', 'Done'] };
+      mockGet.mockResolvedValueOnce({ data: { success: true, filters } });
+
+      const result = await authApi.getRoadmapAdoria2026DefaultFilters();
+
+      expect(mockGet).toHaveBeenCalledWith(
+        '/api/auth/me/preferences/roadmap-adoria-2026-filters'
+      );
+      expect(result).toEqual(filters);
+    });
+
+    it('lance une erreur si success false', async () => {
+      mockGet.mockResolvedValueOnce({
+        data: { success: false, error: 'Impossible de charger les filtres' },
+      });
+
+      await expect(authApi.getRoadmapAdoria2026DefaultFilters()).rejects.toThrow(
+        'Impossible de charger les filtres'
+      );
+    });
+  });
+
+  describe('saveRoadmapAdoria2026DefaultFilters', () => {
+    it('enregistre et retourne les filtres', async () => {
+      const filters = { trimestre: 'Q1' as const, statut: ['To do'] };
+      mockPut.mockResolvedValueOnce({ data: { success: true, filters } });
+
+      const result = await authApi.saveRoadmapAdoria2026DefaultFilters(filters);
+
+      expect(mockPut).toHaveBeenCalledWith(
+        '/api/auth/me/preferences/roadmap-adoria-2026-filters',
+        filters
+      );
+      expect(result).toEqual(filters);
+    });
+
+    it('lance une erreur si success false', async () => {
+      mockPut.mockResolvedValueOnce({
+        data: { success: false, error: "Impossible d'enregistrer les filtres" },
+      });
+
+      await expect(
+        authApi.saveRoadmapAdoria2026DefaultFilters({ trimestre: 'all', statut: [] })
+      ).rejects.toThrow("Impossible d'enregistrer les filtres");
     });
   });
 

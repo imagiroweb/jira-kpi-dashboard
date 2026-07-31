@@ -4,9 +4,14 @@ import rateLimit from 'express-rate-limit';
 import mongoose from 'mongoose';
 import { authService } from '../application/services/AuthService';
 import { authenticate, requireSuperAdmin } from '../middleware/authMiddleware';
-import { User } from '../domain/user/entities/User';
+import {
+  User,
+  DEFAULT_ROADMAP_ADORIA_2026_FILTERS,
+  IRoadmapAdoria2026Filters,
+} from '../domain/user/entities/User';
 import { Role, IPageVisibilities, PAGE_IDS } from '../domain/user/entities/Role';
 import { UserActivityLog } from '../domain/user/entities/UserActivityLog';
+import { parseRoadmapAdoria2026Filters } from '../domain/user/parseRoadmapAdoria2026Filters';
 import { logger } from '../utils/logger';
 
 /** Max 5 demandes de reset par IP par 15 minutes */
@@ -568,6 +573,112 @@ router.post(
       res.json({ success: true });
     } catch (error) {
       logger.error('Record page view error:', error);
+      res.status(500).json({ success: false, error: 'Erreur serveur' });
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/auth/me/preferences/roadmap-adoria-2026-filters:
+ *   get:
+ *     summary: Récupère les filtres par défaut Roadmap Adoria 2026 de l'utilisateur
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Filtres (trimestre + statut) ; valeurs par défaut si aucune préférence
+ *       401:
+ *         description: Non authentifié
+ */
+router.get(
+  '/me/preferences/roadmap-adoria-2026-filters',
+  authenticate,
+  async (req: Request, res: Response) => {
+    try {
+      const user = await User.findById(req.user!.userId)
+        .select('preferences.roadmapAdoria2026Filters')
+        .lean();
+      if (!user) {
+        return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
+      }
+      const saved = user.preferences?.roadmapAdoria2026Filters;
+      const candidate = {
+        trimestre: saved?.trimestre ?? DEFAULT_ROADMAP_ADORIA_2026_FILTERS.trimestre,
+        statut: Array.isArray(saved?.statut) ? saved.statut : [],
+      };
+      const filters: IRoadmapAdoria2026Filters =
+        parseRoadmapAdoria2026Filters(candidate) ??
+        parseRoadmapAdoria2026Filters({
+          trimestre: DEFAULT_ROADMAP_ADORIA_2026_FILTERS.trimestre,
+          statut: candidate.statut,
+        }) ??
+        { ...DEFAULT_ROADMAP_ADORIA_2026_FILTERS, statut: [] };
+      res.json({ success: true, filters });
+    } catch (error) {
+      logger.error('Get roadmap Adoria default filters error:', error);
+      res.status(500).json({ success: false, error: 'Erreur serveur' });
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/auth/me/preferences/roadmap-adoria-2026-filters:
+ *   put:
+ *     summary: Enregistre les filtres par défaut Roadmap Adoria 2026
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [trimestre, statut]
+ *             properties:
+ *               trimestre:
+ *                 type: string
+ *                 enum: [all, Q1, Q2, Q3, Q4]
+ *               statut:
+ *                 type: array
+ *                 items: { type: string }
+ *     responses:
+ *       200:
+ *         description: Filtres enregistrés
+ *       400:
+ *         description: Payload invalide
+ *       401:
+ *         description: Non authentifié
+ */
+router.put(
+  '/me/preferences/roadmap-adoria-2026-filters',
+  authenticate,
+  async (req: Request, res: Response) => {
+    try {
+      const filters = parseRoadmapAdoria2026Filters(req.body);
+      if (!filters) {
+        return res.status(400).json({
+          success: false,
+          error: 'Filtres invalides (trimestre: all|Q1|Q2|Q3|Q4, statut: tableau de chaînes)',
+        });
+      }
+      const updated = await User.findByIdAndUpdate(
+        req.user!.userId,
+        { $set: { 'preferences.roadmapAdoria2026Filters': filters } },
+        { new: true, select: 'preferences.roadmapAdoria2026Filters' }
+      ).lean();
+      if (!updated) {
+        return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
+      }
+      res.json({
+        success: true,
+        filters: updated.preferences?.roadmapAdoria2026Filters ?? filters,
+      });
+    } catch (error) {
+      logger.error('Save roadmap Adoria default filters error:', error);
       res.status(500).json({ success: false, error: 'Erreur serveur' });
     }
   }

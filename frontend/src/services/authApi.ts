@@ -30,6 +30,14 @@ export interface VisiblePages {
   gestionUtilisateurs: boolean;
 }
 
+/** Filtres par défaut Roadmap Adoria 2026 (préférences utilisateur) */
+export type RoadmapAdoriaQuarterFilter = 'all' | 'Q1' | 'Q2' | 'Q3' | 'Q4';
+
+export interface RoadmapAdoria2026DefaultFilters {
+  trimestre: RoadmapAdoriaQuarterFilter;
+  statut: string[];
+}
+
 export interface User {
   id: string;
   email: string;
@@ -283,6 +291,35 @@ export const authApi = {
     } catch {
       // Non-blocking: do not break navigation if tracking fails
     }
+  },
+
+  /**
+   * Filtres par défaut Roadmap Adoria 2026 (trimestre + statut) pour l'utilisateur connecté.
+   */
+  async getRoadmapAdoria2026DefaultFilters(): Promise<RoadmapAdoria2026DefaultFilters> {
+    const response = await api.get<{ success: boolean; filters: RoadmapAdoria2026DefaultFilters }>(
+      '/api/auth/me/preferences/roadmap-adoria-2026-filters'
+    );
+    if (!response.data.success) {
+      throw new Error((response.data as { error?: string }).error || 'Impossible de charger les filtres');
+    }
+    return response.data.filters;
+  },
+
+  /**
+   * Enregistre les filtres par défaut Roadmap Adoria 2026 pour l'utilisateur connecté.
+   */
+  async saveRoadmapAdoria2026DefaultFilters(
+    filters: RoadmapAdoria2026DefaultFilters
+  ): Promise<RoadmapAdoria2026DefaultFilters> {
+    const response = await api.put<{ success: boolean; filters: RoadmapAdoria2026DefaultFilters }>(
+      '/api/auth/me/preferences/roadmap-adoria-2026-filters',
+      filters
+    );
+    if (!response.data.success) {
+      throw new Error((response.data as { error?: string }).error || 'Impossible d\'enregistrer les filtres');
+    }
+    return response.data.filters;
   },
 
   /**
