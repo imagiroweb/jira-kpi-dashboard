@@ -290,6 +290,68 @@ describe('produitSuiviKpi', () => {
       expect(k.projetsAnneeEnCours).toBe(2);
     });
 
+    it('calcule la progression sites actifs / target', () => {
+      const cols: MondayColumn[] = [
+        { id: 'sites', title: 'Sites actifs', type: 'numbers' },
+        { id: 'target', title: 'Target', type: 'numbers' },
+      ];
+      const k = computeSuiviKpis(
+        [
+          {
+            id: '1',
+            name: 'A',
+            column_values: [
+              { id: 'sites', text: '5', type: 'numbers' },
+              { id: 'target', text: '20', type: 'numbers' },
+            ],
+          },
+          {
+            id: '2',
+            name: 'B',
+            column_values: [
+              { id: 'sites', text: '5', type: 'numbers' },
+              { id: 'target', text: '20', type: 'numbers' },
+            ],
+          },
+        ],
+        cols
+      );
+      expect(k.sitesActifs).toBe(10);
+      expect(k.target).toBe(40);
+      expect(k.sitesProgressionPct).toBe(25);
+    });
+
+    it('calcule la progression utilisateurs actifs / bruts', () => {
+      const cols: MondayColumn[] = [
+        { id: 'ua', title: "KPI Adoria - Nbre d'utilisateurs actifs", type: 'numbers' },
+        { id: 'ub', title: "KPI Adoria - Nbre d'utilisateurs bruts", type: 'numbers' },
+      ];
+      const k = computeSuiviKpis(
+        [
+          {
+            id: '1',
+            name: 'A',
+            column_values: [
+              { id: 'ua', text: '20', type: 'numbers' },
+              { id: 'ub', text: '50', type: 'numbers' },
+            ],
+          },
+          {
+            id: '2',
+            name: 'B',
+            column_values: [
+              { id: 'ua', text: '30', type: 'numbers' },
+              { id: 'ub', text: '50', type: 'numbers' },
+            ],
+          },
+        ],
+        cols
+      );
+      expect(k.totalUtilisateursActifs).toBe(50);
+      expect(k.totalUtilisateursBruts).toBe(100);
+      expect(k.utilisateursProgressionPct).toBe(50);
+    });
+
     it('calcule les délais de mise en prod', () => {
       const k = computeSuiviKpis(items, columns);
       expect(k.delaiByClient).toHaveLength(2);
@@ -310,6 +372,55 @@ describe('produitSuiviKpi', () => {
       expect(k.integrationsEnCoursStuckCount).toBe(1);
       expect(k.integrationsEnCoursAgeMedianJours).toBe(k.integrationsEnCours[0].ageJours);
       expect(k.integrationsEnCoursAgeMoyenJours).toBe(k.integrationsEnCours[0].ageJours);
+    });
+
+    it('agrège CDC : sites déployés, commandes, target des projets CDC et progression', () => {
+      const cols: MondayColumn[] = [
+        ...columns,
+        { id: 'target', title: 'Target', type: 'numbers' },
+        { id: 'cdc', title: 'CDC déployé', type: 'numbers' },
+        {
+          id: 'cmd',
+          title: 'KPI Adoria - Nombre de commandes générées via le CDC',
+          type: 'numbers',
+        },
+      ];
+      const cdcItems: MondayItem[] = [
+        {
+          id: 'a',
+          name: 'Avec CDC',
+          column_values: [
+            { id: 'cdc', text: '10', type: 'numbers' },
+            { id: 'cmd', text: '40', type: 'numbers' },
+            { id: 'target', text: '25', type: 'numbers' },
+          ],
+        },
+        {
+          id: 'b',
+          name: 'Avec CDC 2',
+          column_values: [
+            { id: 'cdc', text: '5', type: 'numbers' },
+            { id: 'cmd', text: '12', type: 'numbers' },
+            { id: 'target', text: '10', type: 'numbers' },
+          ],
+        },
+        {
+          id: 'c',
+          name: 'Sans CDC',
+          column_values: [
+            { id: 'cdc', text: '0', type: 'numbers' },
+            { id: 'cmd', text: '0', type: 'numbers' },
+            { id: 'target', text: '100', type: 'numbers' },
+          ],
+        },
+      ];
+      const k = computeSuiviKpis(cdcItems, cols);
+      expect(k.cdcDeploye).toBe(15);
+      expect(k.totalCommandesViaCdc).toBe(52);
+      expect(k.cdcTargetSites).toBe(35);
+      expect(k.cdcProjetsCount).toBe(2);
+      expect(k.cdcProgressionPct).toBe(43);
+      expect(k.target).toBe(135);
     });
   });
 

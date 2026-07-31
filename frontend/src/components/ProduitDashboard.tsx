@@ -474,7 +474,17 @@ export function ProduitDashboard() {
   }, [suiviData]);
 
   /** Données pour la modale détail KPI (répartition par ligne). */
-  const kpiDetailData = useMemo((): { title: string; rows: { name: string; value: number }[] } | { title: string; rows: { name: string; value1: number; value2: number }[] } | null => {
+  const kpiDetailData = useMemo(():
+    | {
+        title: string;
+        rows: { name: string; value: number }[];
+      }
+    | {
+        title: string;
+        columns: [string, string] | [string, string, string];
+        rows: { name: string; value1: number; value2: number; value3?: number }[];
+      }
+    | null => {
     if (!detailKpi || !suiviData?.columns?.length || !suiviData?.items?.length) return null;
     const columns = suiviData.columns;
     const items = suiviData.items;
@@ -484,10 +494,22 @@ export function ProduitDashboard() {
 
     switch (detailKpi) {
       case 'sitesActifs': {
-        const col = getCol(SITES_ACTIFS_KEYS);
-        if (!col) return null;
-        const rows = items.map((item) => ({ name: item.name || '—', value: getVal(item, col) }));
-        return { title: 'Sites actifs', rows: rows.sort((a, b) => b.value - a.value) };
+        const colSites = getCol(SITES_ACTIFS_KEYS);
+        const colTarget = getCol(TARGET_KEYS);
+        if (!colSites && !colTarget) return null;
+        const dataRows = items.map((item) => ({
+          name: item.name || '—',
+          value1: colSites ? getVal(item, colSites) : 0,
+          value2: colTarget ? getVal(item, colTarget) : 0,
+        }));
+        const sorted = dataRows.sort((a, b) => b.value1 - a.value1 || b.value2 - a.value2);
+        const totalSites = sorted.reduce((s, r) => s + r.value1, 0);
+        const totalTarget = sorted.reduce((s, r) => s + r.value2, 0);
+        return {
+          title: 'Sites actifs / target',
+          columns: ['Sites actifs', 'Sites cible (target)'],
+          rows: [...sorted, { name: 'Total', value1: totalSites, value2: totalTarget }],
+        };
       }
       case 'target': {
         const col = getCol(TARGET_KEYS);
@@ -498,18 +520,24 @@ export function ProduitDashboard() {
       case 'cdcDeploye': {
         const col = getColById(SUIVI_CDC_DEPLOYE_COLUMN_ID) ?? getCol(CDC_KEYS);
         const colCommandes = getCol(COMMANDES_VIA_CDC_KEYS);
+        const colTarget = getCol(TARGET_KEYS);
         if (!col) return null;
-        const dataRows = items.map((item) => ({
-          name: item.name || '—',
-          value1: getVal(item, col),
-          value2: colCommandes ? getVal(item, colCommandes) : 0,
-        }));
-        const sorted = dataRows.sort((a, b) => Math.max(b.value1, b.value2) - Math.max(a.value1, a.value2));
+        const dataRows = items
+          .map((item) => ({
+            name: item.name || '—',
+            value1: getVal(item, col),
+            value2: colCommandes ? getVal(item, colCommandes) : 0,
+            value3: colTarget ? getVal(item, colTarget) : 0,
+          }))
+          .filter((r) => r.value1 > 0);
+        const sorted = dataRows.sort((a, b) => b.value1 - a.value1 || b.value3 - a.value3);
         const totalCdc = sorted.reduce((s, r) => s + r.value1, 0);
         const totalCommandes = sorted.reduce((s, r) => s + r.value2, 0);
+        const totalTarget = sorted.reduce((s, r) => s + r.value3, 0);
         return {
-          title: 'CDC déployé / commandes via CdC',
-          rows: [...sorted, { name: 'Total', value1: totalCdc, value2: totalCommandes }],
+          title: 'CDC déployé — sites, commandes et target',
+          columns: ['Sites CDC', 'Commandes via CDC', 'Sites cible (target)'],
+          rows: [...sorted, { name: 'Total', value1: totalCdc, value2: totalCommandes, value3: totalTarget }],
         };
       }
       case 'totalProjets': {
@@ -519,10 +547,23 @@ export function ProduitDashboard() {
         return { title: 'Total projets', rows: rows.sort((a, b) => b.value - a.value) };
       }
       case 'totalUtilisateursActifs': {
-        const col = getColById(SUIVI_UTILISATEURS_ACTIFS_COLUMN_ID) ?? getCol(UTILISATEURS_ACTIFS_KEYS);
-        if (!col) return null;
-        const rows = items.map((item) => ({ name: item.name || '—', value: getVal(item, col) }));
-        return { title: 'Utilisateurs actifs', rows: rows.sort((a, b) => b.value - a.value) };
+        const colActifs =
+          getColById(SUIVI_UTILISATEURS_ACTIFS_COLUMN_ID) ?? getCol(UTILISATEURS_ACTIFS_KEYS);
+        const colBruts = getCol(UTILISATEURS_BRUTS_KEYS);
+        if (!colActifs && !colBruts) return null;
+        const dataRows = items.map((item) => ({
+          name: item.name || '—',
+          value1: colActifs ? getVal(item, colActifs) : 0,
+          value2: colBruts ? getVal(item, colBruts) : 0,
+        }));
+        const sorted = dataRows.sort((a, b) => b.value1 - a.value1 || b.value2 - a.value2);
+        const totalActifs = sorted.reduce((s, r) => s + r.value1, 0);
+        const totalBruts = sorted.reduce((s, r) => s + r.value2, 0);
+        return {
+          title: 'Utilisateurs actifs / total',
+          columns: ['Utilisateurs actifs', 'Total utilisateurs'],
+          rows: [...sorted, { name: 'Total', value1: totalActifs, value2: totalBruts }],
+        };
       }
       case 'totalUtilisateursBruts': {
         const col = getCol(UTILISATEURS_BRUTS_KEYS);
@@ -551,7 +592,11 @@ export function ProduitDashboard() {
           value1: colActives ? getVal(item, colActives) : 0,
           value2: colBrut ? getVal(item, colBrut) : 0,
         }));
-        return { title: 'Fiches techniques (actives / brut)', rows };
+        return {
+          title: 'Fiches techniques (actives / brut)',
+          columns: ['Actives', 'Brut'],
+          rows,
+        };
       }
       case 'produitsGeneriques': {
         const colBrut = getCol(PRODUITS_GENERIQUES_BRUT_KEYS);
@@ -562,7 +607,11 @@ export function ProduitDashboard() {
           value1: colBrut ? getVal(item, colBrut) : 0,
           value2: colActifs ? getVal(item, colActifs) : 0,
         }));
-        return { title: 'Produits génériques (brut / actifs)', rows };
+        return {
+          title: 'Produits génériques (brut / actifs)',
+          columns: ['Brut', 'Actifs'],
+          rows,
+        };
       }
       default:
         return null;
@@ -1983,34 +2032,85 @@ export function ProduitDashboard() {
                 )}
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 gap-4">
-                <button type="button" onClick={() => setDetailKpi('sitesActifs')} className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer">
-                  <div className="flex items-center gap-2 mb-1">
+                <button
+                  type="button"
+                  onClick={() => setDetailKpi('sitesActifs')}
+                  className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer sm:col-span-2"
+                >
+                  <div className="flex items-center gap-2 mb-2">
                     <Building2 className="w-4 h-4 text-amber-400" />
-                    <span className="text-xs font-medium text-surface-500">Sites actifs</span>
+                    <span className="text-xs font-medium text-surface-500">Sites actifs / target</span>
                   </div>
-                  <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.sitesActifs}</div>
-                </button>
-                <button type="button" onClick={() => setDetailKpi('target')} className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer">
-                  <div className="flex items-center gap-2 mb-1">
-                    <Target className="w-4 h-4 text-primary-400" />
-                    <span className="text-xs font-medium text-surface-500">Target sites</span>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.sitesActifs}</div>
+                      <div className="text-[11px] text-surface-400 leading-snug mt-0.5">Sites actifs</div>
+                    </div>
+                    <div>
+                      <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.target}</div>
+                      <div className="text-[11px] text-surface-400 leading-snug mt-0.5">Sites cible (target)</div>
+                    </div>
                   </div>
-                  <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.target}</div>
+                  <div className="mt-2.5 flex items-center gap-2">
+                    <div
+                      className="h-1.5 flex-1 rounded-full bg-surface-700/60 overflow-hidden"
+                      role="progressbar"
+                      aria-valuenow={suiviKpis.sitesProgressionPct ?? 0}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-label="Progression sites actifs vs target"
+                    >
+                      <div
+                        className="h-full rounded-full bg-amber-400/80"
+                        style={{ width: `${suiviKpis.sitesProgressionPct ?? 0}%` }}
+                      />
+                    </div>
+                    <span className="shrink-0 text-xs font-semibold tabular-nums text-amber-300">
+                      {suiviKpis.sitesProgressionPct != null ? `${suiviKpis.sitesProgressionPct} %` : '—'}
+                    </span>
+                  </div>
                 </button>
-                <button type="button" onClick={() => setDetailKpi('cdcDeploye')} className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer">
-                  <div className="flex items-center gap-2 mb-1">
+                <button type="button" onClick={() => setDetailKpi('cdcDeploye')} className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer sm:col-span-2">
+                  <div className="flex items-center gap-2 mb-2">
                     <CheckCircle className="w-4 h-4 text-green-400" />
                     <span className="text-xs font-medium text-surface-500">CDC déployé</span>
+                    {suiviKpis.cdcProjetsCount > 0 && (
+                      <span className="text-[10px] text-surface-500 tabular-nums">
+                        · {suiviKpis.cdcProjetsCount} projet{suiviKpis.cdcProjetsCount > 1 ? 's' : ''}
+                      </span>
+                    )}
                   </div>
-                  <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                    <span className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.cdcDeploye}</span>
-                    <span className="text-surface-600 text-lg leading-none" aria-hidden>
-                      ·
-                    </span>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.cdcDeploye}</div>
+                      <div className="text-[11px] text-surface-400 leading-snug mt-0.5">Sites déployés CDC</div>
+                    </div>
                     <div>
                       <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.totalCommandesViaCdc}</div>
-                      <div className="text-[10px] text-surface-500 leading-tight">cmd. via CdC</div>
+                      <div className="text-[11px] text-surface-400 leading-snug mt-0.5">Commandes via CDC</div>
                     </div>
+                    <div>
+                      <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.cdcTargetSites}</div>
+                      <div className="text-[11px] text-surface-400 leading-snug mt-0.5">Sites cible (target)</div>
+                    </div>
+                  </div>
+                  <div className="mt-2.5 flex items-center gap-2">
+                    <div
+                      className="h-1.5 flex-1 rounded-full bg-surface-700/60 overflow-hidden"
+                      role="progressbar"
+                      aria-valuenow={suiviKpis.cdcProgressionPct ?? 0}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-label="Progression déploiement CDC vs target"
+                    >
+                      <div
+                        className="h-full rounded-full bg-green-400/80"
+                        style={{ width: `${suiviKpis.cdcProgressionPct ?? 0}%` }}
+                      />
+                    </div>
+                    <span className="shrink-0 text-xs font-semibold tabular-nums text-green-300">
+                      {suiviKpis.cdcProgressionPct != null ? `${suiviKpis.cdcProgressionPct} %` : '—'}
+                    </span>
                   </div>
                 </button>
                 <button
@@ -2080,21 +2180,49 @@ export function ProduitDashboard() {
                   </div>
                   <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.totalProjets}</div>
                 </button>
-                <button type="button" onClick={() => setDetailKpi('totalUtilisateursActifs')} className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer">
-                  <div className="flex items-center gap-2 mb-1">
+                <button
+                  type="button"
+                  onClick={() => setDetailKpi('totalUtilisateursActifs')}
+                  className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer sm:col-span-2"
+                >
+                  <div className="flex items-center gap-2 mb-2">
                     <User className="w-4 h-4 text-blue-400" />
-                    <span className="text-xs font-medium text-surface-500">Utilisateurs actifs</span>
+                    <span className="text-xs font-medium text-surface-500">Utilisateurs actifs / total</span>
                   </div>
-                  <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.totalUtilisateursActifs}</div>
-                  <div className="text-[10px] text-surface-500 mt-0.5">somme par site (Nbre d&apos;utilisateurs actifs)</div>
-                </button>
-                <button type="button" onClick={() => setDetailKpi('totalUtilisateursBruts')} className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer">
-                  <div className="flex items-center gap-2 mb-1">
-                    <User className="w-4 h-4 text-surface-400" />
-                    <span className="text-xs font-medium text-surface-500">Total des utilisateurs</span>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <div className="text-xl font-bold text-surface-100 tabular-nums">
+                        {suiviKpis.totalUtilisateursActifs}
+                      </div>
+                      <div className="text-[11px] text-surface-400 leading-snug mt-0.5">Utilisateurs actifs</div>
+                    </div>
+                    <div>
+                      <div className="text-xl font-bold text-surface-100 tabular-nums">
+                        {suiviKpis.totalUtilisateursBruts}
+                      </div>
+                      <div className="text-[11px] text-surface-400 leading-snug mt-0.5">Total utilisateurs</div>
+                    </div>
                   </div>
-                  <div className="text-xl font-bold text-surface-100 tabular-nums">{suiviKpis.totalUtilisateursBruts}</div>
-                  <div className="text-[10px] text-surface-500 mt-0.5">somme par site (Nbre utilisateurs bruts)</div>
+                  <div className="mt-2.5 flex items-center gap-2">
+                    <div
+                      className="h-1.5 flex-1 rounded-full bg-surface-700/60 overflow-hidden"
+                      role="progressbar"
+                      aria-valuenow={suiviKpis.utilisateursProgressionPct ?? 0}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-label="Progression utilisateurs actifs vs total"
+                    >
+                      <div
+                        className="h-full rounded-full bg-blue-400/80"
+                        style={{ width: `${suiviKpis.utilisateursProgressionPct ?? 0}%` }}
+                      />
+                    </div>
+                    <span className="shrink-0 text-xs font-semibold tabular-nums text-blue-300">
+                      {suiviKpis.utilisateursProgressionPct != null
+                        ? `${suiviKpis.utilisateursProgressionPct} %`
+                        : '—'}
+                    </span>
+                  </div>
                 </button>
                 <button type="button" onClick={() => setDetailKpi('totalUtilisationMobile')} className="rounded-xl bg-surface-800/50 border border-surface-700/50 p-4 text-left hover:border-amber-500/40 hover:bg-surface-800/80 transition-colors cursor-pointer">
                   <div className="flex items-center gap-2 mb-1">
@@ -2767,18 +2895,31 @@ export function ProduitDashboard() {
                     <thead>
                       <tr className="border-b border-surface-700/50">
                         <th className="text-left py-2 px-3 text-xs font-medium text-surface-500 uppercase">Nom</th>
-                        <th className="text-right py-2 px-3 text-xs font-medium text-surface-500 uppercase">Col. 1</th>
-                        <th className="text-right py-2 px-3 text-xs font-medium text-surface-500 uppercase">Col. 2</th>
+                        {('columns' in kpiDetailData ? kpiDetailData.columns : ['Col. 1', 'Col. 2']).map((h) => (
+                          <th
+                            key={h}
+                            className="text-right py-2 px-3 text-xs font-medium text-surface-500 uppercase"
+                          >
+                            {h}
+                          </th>
+                        ))}
                       </tr>
                     </thead>
                     <tbody>
-                      {(kpiDetailData.rows as { name: string; value1: number; value2: number }[])
-                        .sort((a, b) => Math.max(b.value1, b.value2) - Math.max(a.value1, a.value2))
+                      {(kpiDetailData.rows as { name: string; value1: number; value2: number; value3?: number }[])
                         .map((row, i) => (
-                          <tr key={i} className="border-b border-surface-700/30">
+                          <tr
+                            key={i}
+                            className={`border-b border-surface-700/30 ${row.name === 'Total' ? 'font-semibold' : ''}`}
+                          >
                             <td className="py-2 px-3 text-surface-200">{row.name}</td>
                             <td className="py-2 px-3 text-right tabular-nums text-surface-100">{row.value1}</td>
                             <td className="py-2 px-3 text-right tabular-nums text-surface-100">{row.value2}</td>
+                            {'columns' in kpiDetailData && kpiDetailData.columns.length >= 3 && (
+                              <td className="py-2 px-3 text-right tabular-nums text-surface-100">
+                                {row.value3 ?? 0}
+                              </td>
+                            )}
                           </tr>
                         ))}
                     </tbody>

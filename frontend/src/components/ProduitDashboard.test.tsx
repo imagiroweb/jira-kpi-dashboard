@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderWithProviders } from '@/test/render';
 import {
@@ -43,6 +43,12 @@ const SUIVI_BOARD_ID = '475358061';
 const SUIVI_COLUMNS = [
   { id: 'sites', title: 'Sites actifs', type: 'numbers' },
   { id: 'target', title: 'Target', type: 'numbers' },
+  { id: 'cdc', title: 'CDC déployé', type: 'numbers' },
+  {
+    id: 'cmdcdc',
+    title: 'KPI Adoria - Nombre de commandes générées via le CDC',
+    type: 'numbers',
+  },
   { id: 'caisse', title: 'Système de caisse actif', type: 'text' },
   { id: 'prod', title: 'Date mise en production', type: 'date' },
   { id: 'start', title: 'Project start date', type: 'date' },
@@ -51,6 +57,8 @@ const SUIVI_COLUMNS = [
   { id: 'formend', title: 'Dernier jour de formation sites', type: 'date' },
   { id: 'rollout', title: 'Initial roll out', type: 'status' },
   { id: 'projets', title: 'Total projets', type: 'numbers' },
+  { id: 'uactifs', title: "KPI Adoria - Nbre d'utilisateurs actifs", type: 'numbers' },
+  { id: 'ubruts', title: "KPI Adoria - Nbre d'utilisateurs bruts", type: 'numbers' },
 ];
 
 const SUIVI_ITEMS = [
@@ -60,11 +68,15 @@ const SUIVI_ITEMS = [
     column_values: [
       { id: 'sites', text: '4', type: 'numbers' },
       { id: 'target', text: '10', type: 'numbers' },
+      { id: 'cdc', text: '8', type: 'numbers' },
+      { id: 'cmdcdc', text: '20', type: 'numbers' },
       { id: 'caisse', text: 'Caisse Pro', type: 'text' },
       { id: 'prod', text: '2026-05-01', type: 'date' },
       { id: 'start', text: '2026-04-01', type: 'date' },
       { id: 'rollout', text: 'Done', type: 'status' },
       { id: 'projets', text: '2', type: 'numbers' },
+      { id: 'uactifs', text: '30', type: 'numbers' },
+      { id: 'ubruts', text: '50', type: 'numbers' },
     ],
   },
   {
@@ -72,12 +84,16 @@ const SUIVI_ITEMS = [
     name: 'Client Beta',
     column_values: [
       { id: 'sites', text: '1', type: 'numbers' },
-      { id: 'target', text: '5', type: 'numbers' },
+      { id: 'target', text: '10', type: 'numbers' },
+      { id: 'cdc', text: '2', type: 'numbers' },
+      { id: 'cmdcdc', text: '6', type: 'numbers' },
       { id: 'caisse', text: '-', type: 'text' },
       { id: 'prod', text: '2026-06-10', type: 'date' },
       { id: 'start', text: '2026-05-01', type: 'date' },
       { id: 'rollout', text: 'Done', type: 'status' },
       { id: 'projets', text: '1', type: 'numbers' },
+      { id: 'uactifs', text: '10', type: 'numbers' },
+      { id: 'ubruts', text: '50', type: 'numbers' },
     ],
   },
   {
@@ -86,6 +102,8 @@ const SUIVI_ITEMS = [
     column_values: [
       { id: 'sites', text: '0', type: 'numbers' },
       { id: 'target', text: '2', type: 'numbers' },
+      { id: 'cdc', text: '0', type: 'numbers' },
+      { id: 'cmdcdc', text: '0', type: 'numbers' },
       { id: 'caisse', text: 'Zelty', type: 'text' },
       { id: 'prod', text: '', type: 'date' },
       { id: 'start', text: '2026-03-01', type: 'date' },
@@ -94,9 +112,19 @@ const SUIVI_ITEMS = [
       { id: 'formend', text: '2026-04-25', type: 'date' },
       { id: 'rollout', text: 'Stuck', type: 'status' },
       { id: 'projets', text: '1', type: 'numbers' },
+      { id: 'uactifs', text: '0', type: 'numbers' },
+      { id: 'ubruts', text: '0', type: 'numbers' },
     ],
   },
 ];
+
+function modalRootFromHeading(heading: HTMLElement): HTMLElement {
+  const root = heading.closest('.fixed') ?? heading.parentElement?.parentElement;
+  if (!(root instanceof HTMLElement)) {
+    throw new Error('Modale détail introuvable');
+  }
+  return root;
+}
 
 function setupMondayMocks() {
   mockGetStatus.mockResolvedValue({ success: true, configured: true });
@@ -240,16 +268,26 @@ describe('ProduitDashboard', () => {
   it('ouvre la modale détail KPI sites actifs', async () => {
     renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
 
+    const sitesTile = await screen.findByRole('button', { name: /Sites actifs \/ target/i });
+    expect(sitesTile).toHaveTextContent(/5\s*Sites actifs/);
+    expect(sitesTile).toHaveTextContent(/22\s*Sites cible/);
+    expect(sitesTile).toHaveTextContent(/23\s*%/); // round(5/22*100)
+    expect(screen.getByLabelText('Progression sites actifs vs target')).toBeInTheDocument();
+
+    fireEvent.click(sitesTile);
+
     await waitFor(() => {
-      expect(screen.getByText('5')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: /Détail — Sites actifs \/ target/i })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByText('Sites actifs').closest('button')!);
+    const detailHeading = screen.getByRole('heading', { name: /Détail — Sites actifs \/ target/i });
+    const detailModal = modalRootFromHeading(detailHeading);
 
-    await waitFor(() => {
-      expect(screen.getByText('Client Alpha')).toBeInTheDocument();
-      expect(screen.getByText('Client Beta')).toBeInTheDocument();
-    });
+    expect(within(detailModal).getByRole('columnheader', { name: /Sites actifs/i })).toBeInTheDocument();
+    expect(within(detailModal).getByRole('columnheader', { name: /Sites cible/i })).toBeInTheDocument();
+    expect(within(detailModal).getByText('Client Alpha')).toBeInTheDocument();
+    expect(within(detailModal).getByText('Client Beta')).toBeInTheDocument();
+    expect(within(detailModal).getByText('Total')).toBeInTheDocument();
   });
 
   it('ouvre la modale délai moyen de mise en production', async () => {
@@ -367,5 +405,73 @@ describe('ProduitDashboard', () => {
       expect(screen.getByText('Aujourd’hui')).toBeInTheDocument();
       expect(screen.getByText('J+0')).toBeInTheDocument();
     });
+  });
+
+  it('affiche la tuile CDC (sites, commandes, target) et ouvre la modale détail', async () => {
+    renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
+
+    const cdcTile = await screen.findByRole('button', { name: /CDC déployé/i });
+
+    // Alpha 8+Beta 2 = 10 sites CDC ; cmd 20+6 = 26 ; target CDC 10+10 = 20 ; 50 %
+    expect(cdcTile).toHaveTextContent(/Sites déployés CDC/);
+    expect(cdcTile).toHaveTextContent(/Commandes via CDC/);
+    expect(cdcTile).toHaveTextContent(/Sites cible \(target\)/);
+    expect(cdcTile).toHaveTextContent(/2 projets/);
+    expect(cdcTile).toHaveTextContent(/10\s*Sites déployés CDC/);
+    expect(cdcTile).toHaveTextContent(/26\s*Commandes via CDC/);
+    expect(cdcTile).toHaveTextContent(/20\s*Sites cible/);
+    expect(cdcTile).toHaveTextContent(/50\s*%/);
+    expect(screen.getByLabelText('Progression déploiement CDC vs target')).toBeInTheDocument();
+
+    fireEvent.click(cdcTile);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { name: /Détail — CDC déployé — sites, commandes et target/i })
+      ).toBeInTheDocument();
+    });
+
+    const detailHeading = screen.getByRole('heading', {
+      name: /Détail — CDC déployé — sites, commandes et target/i,
+    });
+    const detailModal = modalRootFromHeading(detailHeading);
+
+    expect(within(detailModal).getByRole('columnheader', { name: /Sites CDC/i })).toBeInTheDocument();
+    expect(within(detailModal).getByRole('columnheader', { name: /Commandes via CDC/i })).toBeInTheDocument();
+    expect(within(detailModal).getByRole('columnheader', { name: /Sites cible/i })).toBeInTheDocument();
+    expect(within(detailModal).getByText('Client Alpha')).toBeInTheDocument();
+    expect(within(detailModal).getByText('Client Beta')).toBeInTheDocument();
+    expect(within(detailModal).queryByText('Client WIP Stuck')).not.toBeInTheDocument();
+    expect(within(detailModal).getByText('Total')).toBeInTheDocument();
+  });
+
+  it('affiche la tuile utilisateurs actifs / total et ouvre la modale détail', async () => {
+    renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
+
+    const usersTile = await screen.findByRole('button', { name: /Utilisateurs actifs \/ total/i });
+    // 30+10 = 40 actifs ; 50+50 = 100 bruts ; 40 %
+    expect(usersTile).toHaveTextContent(/40\s*Utilisateurs actifs/);
+    expect(usersTile).toHaveTextContent(/100\s*Total utilisateurs/);
+    expect(usersTile).toHaveTextContent(/40\s*%/);
+    expect(screen.getByLabelText('Progression utilisateurs actifs vs total')).toBeInTheDocument();
+
+    fireEvent.click(usersTile);
+
+    await waitFor(() => {
+      expect(
+        screen.getByRole('heading', { name: /Détail — Utilisateurs actifs \/ total/i })
+      ).toBeInTheDocument();
+    });
+
+    const detailHeading = screen.getByRole('heading', {
+      name: /Détail — Utilisateurs actifs \/ total/i,
+    });
+    const detailModal = modalRootFromHeading(detailHeading);
+
+    expect(within(detailModal).getByRole('columnheader', { name: /Utilisateurs actifs/i })).toBeInTheDocument();
+    expect(within(detailModal).getByRole('columnheader', { name: /Total utilisateurs/i })).toBeInTheDocument();
+    expect(within(detailModal).getByText('Client Alpha')).toBeInTheDocument();
+    expect(within(detailModal).getByText('Client Beta')).toBeInTheDocument();
+    expect(within(detailModal).getByText('Total')).toBeInTheDocument();
   });
 });
