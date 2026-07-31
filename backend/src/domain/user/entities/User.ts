@@ -7,6 +7,8 @@ export interface IRoadmapAdoria2026Filters {
   trimestre: RoadmapAdoriaQuarterFilter;
   /** Statuts cochés ; vide = pas de filtre statut */
   statut: string[];
+  /** Teams cochées ; vide = pas de filtre team (tout afficher) */
+  team: string[];
 }
 
 export interface IUserPreferences {
@@ -46,6 +48,7 @@ export const ROADMAP_ADORIA_QUARTER_FILTERS: RoadmapAdoriaQuarterFilter[] = [
 export const DEFAULT_ROADMAP_ADORIA_2026_FILTERS: IRoadmapAdoria2026Filters = {
   trimestre: 'all',
   statut: [],
+  team: [],
 };
 
 const UserSchema = new Schema<IUser>(
@@ -111,6 +114,10 @@ const UserSchema = new Schema<IUser>(
           default: 'all'
         },
         statut: {
+          type: [String],
+          default: []
+        },
+        team: {
           type: [String],
           default: []
         }

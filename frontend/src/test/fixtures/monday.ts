@@ -18,6 +18,7 @@ export const TEST_MONDAY_COLUMNS: MondayColumn[] = [
   { id: 'date', title: 'DATE', type: 'text' },
   { id: 'pm', title: 'PM', type: 'text' },
   { id: 'st', title: 'Statut', type: 'status' },
+  { id: 'team', title: 'Team', type: 'status' },
   { id: 'macro', title: 'Macro chiffrage', type: 'numbers' },
 ];
 
@@ -29,6 +30,7 @@ export const TEST_MONDAY_ITEMS: MondayItem[] = [
       { id: 'date', text: '2026-01-01 - 2026-03-31', type: 'text' },
       { id: 'pm', text: 'Bob', type: 'text' },
       { id: 'st', text: 'En cours', type: 'status' },
+      { id: 'team', text: 'Team Cook', type: 'status' },
       { id: 'macro', text: '10', type: 'numbers' },
     ],
   },
@@ -39,6 +41,7 @@ export const TEST_MONDAY_ITEMS: MondayItem[] = [
       { id: 'date', text: '2026-04-01 - 2026-06-30', type: 'text' },
       { id: 'pm', text: 'Alice', type: 'text' },
       { id: 'st', text: 'Done', type: 'status' },
+      { id: 'team', text: 'Softcam', type: 'status' },
       { id: 'macro', text: '5', type: 'numbers' },
     ],
   },

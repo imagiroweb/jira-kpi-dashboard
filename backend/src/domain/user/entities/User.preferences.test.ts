@@ -12,10 +12,11 @@ describe('User preferences Roadmap Adoria 2026 (TU)', () => {
     expect(ROADMAP_ADORIA_QUARTER_FILTERS).toEqual(['all', 'Q1', 'Q2', 'Q3', 'Q4']);
   });
 
-  it('expose les filtres par défaut (trimestre all, statut vide)', () => {
+  it('expose les filtres par défaut (trimestre all, statut/team vides)', () => {
     expect(DEFAULT_ROADMAP_ADORIA_2026_FILTERS).toEqual({
       trimestre: 'all',
       statut: [],
+      team: [],
     });
   });
 
@@ -23,6 +24,7 @@ describe('User preferences Roadmap Adoria 2026 (TU)', () => {
     const schema = User.schema;
     expect(schema.path('preferences.roadmapAdoria2026Filters.trimestre')).toBeDefined();
     expect(schema.path('preferences.roadmapAdoria2026Filters.statut')).toBeDefined();
+    expect(schema.path('preferences.roadmapAdoria2026Filters.team')).toBeDefined();
     expect(
       schema.path('preferences.roadmapAdoria2026Filters.trimestre').options.enum
     ).toEqual(ROADMAP_ADORIA_QUARTER_FILTERS);

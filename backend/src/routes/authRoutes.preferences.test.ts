@@ -35,7 +35,7 @@ jest.mock('../middleware/authMiddleware', () => {
 
 jest.mock('../domain/user/entities/User', () => ({
   ROADMAP_ADORIA_QUARTER_FILTERS: ['all', 'Q1', 'Q2', 'Q3', 'Q4'],
-  DEFAULT_ROADMAP_ADORIA_2026_FILTERS: { trimestre: 'all', statut: [] },
+  DEFAULT_ROADMAP_ADORIA_2026_FILTERS: { trimestre: 'all', statut: [], team: [] },
   User: {
     findById: (...args: unknown[]) => mockUserFindById(...args),
     findByIdAndUpdate: (...args: unknown[]) => mockUserFindByIdAndUpdate(...args),
@@ -93,7 +93,7 @@ describe('Préférences Roadmap Adoria 2026 (TI)', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.filters).toEqual({ trimestre: 'all', statut: [] });
+      expect(res.body.filters).toEqual({ trimestre: 'all', statut: [], team: [] });
       expect(mockUserFindById).toHaveBeenCalledWith(TEST_USER_ID);
     });
 
@@ -101,7 +101,11 @@ describe('Préférences Roadmap Adoria 2026 (TI)', () => {
       mockUserFindById.mockReturnValue(
         leanChain({
           preferences: {
-            roadmapAdoria2026Filters: { trimestre: 'Q2', statut: ['En cours', 'Done'] },
+            roadmapAdoria2026Filters: {
+              trimestre: 'Q2',
+              statut: ['En cours', 'Done'],
+              team: ['Team Cook', 'IA'],
+            },
           },
         })
       );
@@ -112,10 +116,11 @@ describe('Préférences Roadmap Adoria 2026 (TI)', () => {
       expect(res.body.filters).toEqual({
         trimestre: 'Q2',
         statut: ['Done', 'En cours'],
+        team: ['IA', 'Team Cook'],
       });
     });
 
-    it('complète les préférences partielles (trimestre / statut manquants)', async () => {
+    it('complète les préférences partielles (trimestre / statut / team manquants)', async () => {
       mockUserFindById.mockReturnValue(
         leanChain({
           preferences: {
@@ -127,14 +132,18 @@ describe('Préférences Roadmap Adoria 2026 (TI)', () => {
       const res = await request(app).get(path);
 
       expect(res.status).toBe(200);
-      expect(res.body.filters).toEqual({ trimestre: 'all', statut: [] });
+      expect(res.body.filters).toEqual({ trimestre: 'all', statut: [], team: [] });
     });
 
-    it('ignore un trimestre hors enum et conserve un statut valide', async () => {
+    it('ignore un trimestre hors enum et conserve statut/team valides', async () => {
       mockUserFindById.mockReturnValue(
         leanChain({
           preferences: {
-            roadmapAdoria2026Filters: { trimestre: 'Q5', statut: ['En cours'] },
+            roadmapAdoria2026Filters: {
+              trimestre: 'Q5',
+              statut: ['En cours'],
+              team: ['Softcam'],
+            },
           },
         })
       );
@@ -142,7 +151,11 @@ describe('Préférences Roadmap Adoria 2026 (TI)', () => {
       const res = await request(app).get(path);
 
       expect(res.status).toBe(200);
-      expect(res.body.filters).toEqual({ trimestre: 'all', statut: ['En cours'] });
+      expect(res.body.filters).toEqual({
+        trimestre: 'all',
+        statut: ['En cours'],
+        team: ['Softcam'],
+      });
     });
 
     it('retourne 404 si utilisateur introuvable', async () => {
@@ -174,14 +187,14 @@ describe('Préférences Roadmap Adoria 2026 (TI)', () => {
 
       const res = await request(app)
         .put(path)
-        .send({ trimestre: 'all', statut: [] });
+        .send({ trimestre: 'all', statut: [], team: [] });
 
       expect(res.status).toBe(401);
       expect(mockUserFindByIdAndUpdate).not.toHaveBeenCalled();
     });
 
     it('enregistre les filtres et renvoie le résultat', async () => {
-      const filters = { trimestre: 'Q3', statut: ['To do'] };
+      const filters = { trimestre: 'Q3', statut: ['To do'], team: ['Team QA'] };
       mockUserFindByIdAndUpdate.mockReturnValue(
         leanChain({
           preferences: { roadmapAdoria2026Filters: filters },
@@ -203,18 +216,26 @@ describe('Préférences Roadmap Adoria 2026 (TI)', () => {
       );
     });
 
-    it('normalise statut (trim, unicité, tri)', async () => {
+    it('normalise statut et team (trim, unicité, tri)', async () => {
       mockUserFindByIdAndUpdate.mockReturnValue(
         leanChain({
           preferences: {
-            roadmapAdoria2026Filters: { trimestre: 'Q1', statut: ['A', 'B'] },
+            roadmapAdoria2026Filters: {
+              trimestre: 'Q1',
+              statut: ['A', 'B'],
+              team: ['IA', 'Softcam'],
+            },
           },
         })
       );
 
       const res = await request(app)
         .put(path)
-        .send({ trimestre: 'Q1', statut: [' B ', 'A', 'A', ''] });
+        .send({
+          trimestre: 'Q1',
+          statut: [' B ', 'A', 'A', ''],
+          team: [' Softcam ', 'IA', 'IA'],
+        });
 
       expect(res.status).toBe(200);
       expect(mockUserFindByIdAndUpdate).toHaveBeenCalledWith(
@@ -224,6 +245,7 @@ describe('Préférences Roadmap Adoria 2026 (TI)', () => {
             'preferences.roadmapAdoria2026Filters': {
               trimestre: 'Q1',
               statut: ['A', 'B'],
+              team: ['IA', 'Softcam'],
             },
           },
         },
@@ -234,7 +256,7 @@ describe('Préférences Roadmap Adoria 2026 (TI)', () => {
     it('retourne 400 si trimestre invalide', async () => {
       const res = await request(app)
         .put(path)
-        .send({ trimestre: 'Q5', statut: [] });
+        .send({ trimestre: 'Q5', statut: [], team: [] });
 
       expect(res.status).toBe(400);
       expect(res.body.success).toBe(false);
@@ -244,7 +266,7 @@ describe('Préférences Roadmap Adoria 2026 (TI)', () => {
     it('retourne 400 si statut n’est pas un tableau de chaînes', async () => {
       const res = await request(app)
         .put(path)
-        .send({ trimestre: 'all', statut: [1, 2] });
+        .send({ trimestre: 'all', statut: [1, 2], team: [] });
 
       expect(res.status).toBe(400);
       expect(mockUserFindByIdAndUpdate).not.toHaveBeenCalled();
@@ -256,7 +278,7 @@ describe('Préférences Roadmap Adoria 2026 (TI)', () => {
 
       const tooLong = await request(app)
         .put(path)
-        .send({ trimestre: 'all', statut: ['x'.repeat(201)] });
+        .send({ trimestre: 'all', statut: ['x'.repeat(201)], team: [] });
       expect(tooLong.status).toBe(400);
       expect(mockUserFindByIdAndUpdate).not.toHaveBeenCalled();
     });
@@ -266,7 +288,7 @@ describe('Préférences Roadmap Adoria 2026 (TI)', () => {
 
       const res = await request(app)
         .put(path)
-        .send({ trimestre: 'all', statut: [] });
+        .send({ trimestre: 'all', statut: [], team: [] });
 
       expect(res.status).toBe(404);
     });
@@ -278,7 +300,7 @@ describe('Préférences Roadmap Adoria 2026 (TI)', () => {
 
       const res = await request(app)
         .put(path)
-        .send({ trimestre: 'all', statut: [] });
+        .send({ trimestre: 'all', statut: [], team: [] });
 
       expect(res.status).toBe(500);
       expect(res.body.success).toBe(false);

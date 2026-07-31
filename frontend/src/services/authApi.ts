@@ -36,6 +36,7 @@ export type RoadmapAdoriaQuarterFilter = 'all' | 'Q1' | 'Q2' | 'Q3' | 'Q4';
 export interface RoadmapAdoria2026DefaultFilters {
   trimestre: RoadmapAdoriaQuarterFilter;
   statut: string[];
+  team: string[];
 }
 
 export interface User {
@@ -294,7 +295,7 @@ export const authApi = {
   },
 
   /**
-   * Filtres par défaut Roadmap Adoria 2026 (trimestre + statut) pour l'utilisateur connecté.
+   * Filtres par défaut Roadmap Adoria 2026 (trimestre + statut + team) pour l'utilisateur connecté.
    */
   async getRoadmapAdoria2026DefaultFilters(): Promise<RoadmapAdoria2026DefaultFilters> {
     const response = await api.get<{ success: boolean; filters: RoadmapAdoria2026DefaultFilters }>(
