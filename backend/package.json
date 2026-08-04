@@ -1,6 +1,7 @@
 {
   "name": "jira-kpi-backend",
   "version": "1.0.0",
+  "private": true,
   "description": "Backend API for Jira KPI Dashboard",
   "main": "dist/index.js",
   "scripts": {

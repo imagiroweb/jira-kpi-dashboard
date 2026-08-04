@@ -48,7 +48,7 @@ La logique pure est centralisée dans `frontend/src/domain/epicProgress.ts` (`bu
 ## Tests
 
 ```bash
-cd frontend && npm run test -- src/domain/epicProgress.test.ts
+cd frontend && yarn test src/domain/epicProgress.test.ts
 ```
 
-Ou toute la suite : `npm run test`.
+Ou toute la suite : `yarn test`.

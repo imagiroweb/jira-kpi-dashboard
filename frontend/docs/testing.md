@@ -19,14 +19,14 @@ Guide pour écrire et maintenir les tests unitaires, hooks et composants React d
 
 ```bash
 # Depuis la racine du monorepo
-npm run test              # Backend + frontend + tableau récap (couverture incluse)
-npm run test:frontend     # Frontend uniquement
+yarn test                 # Backend + frontend + tableau récap (couverture incluse)
+yarn test:frontend        # Frontend uniquement
 
 cd frontend
-npm run test              # Tous les tests Vitest
-npm run test:watch        # Mode watch
-npx vitest run --coverage # Rapport de couverture détaillé
-npx vitest run src/hooks/useSocket.test.ts  # Fichier précis
+yarn test                 # Tous les tests Vitest
+yarn test:watch           # Mode watch
+yarn test --coverage      # Rapport de couverture détaillé
+yarn test src/hooks/useSocket.test.ts  # Fichier précis
 ```
 
 La couverture exclut `src/test/**`, `src/main.tsx`, `src/vite-env.d.ts` et `src/types/**` (voir `vitest.config.ts`).

@@ -5,18 +5,20 @@
   "description": "Jira KPI Dashboard - monorepo root",
   "scripts": {
     "prepare": "husky",
-    "lint": "npm run lint --prefix backend && npm run lint --prefix frontend",
-    "lint:backend": "npm run lint --prefix backend",
-    "lint:frontend": "npm run lint --prefix frontend",
+    "install:all": "yarn install && yarn --cwd backend install && yarn --cwd frontend install",
+    "lint": "yarn --cwd backend lint && yarn --cwd frontend lint",
+    "lint:backend": "yarn --cwd backend lint",
+    "lint:frontend": "yarn --cwd frontend lint",
     "test": "node scripts/test-summary.js",
-    "test:backend": "npm run test --prefix backend",
-    "test:frontend": "npm run test --prefix frontend",
-    "dev": "concurrently -n backend,frontend -c blue,green \"npm run dev:backend\" \"npm run dev:frontend\"",
-    "dev:frontend": "npm run dev --prefix frontend",
-    "dev:backend": "npm run dev --prefix backend"
+    "test:backend": "yarn --cwd backend test",
+    "test:frontend": "yarn --cwd frontend test",
+    "dev": "concurrently -n backend,frontend -c blue,green \"yarn dev:backend\" \"yarn dev:frontend\"",
+    "dev:frontend": "yarn --cwd frontend dev",
+    "dev:backend": "yarn --cwd backend dev"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
     "husky": "^9.0.11"
-  }
+  },
+  "packageManager": "yarn@1.22.22+sha512.a6b2f7906b721bba3d67d4aff083df04dad64c399707841b7acf00f6b133b7ac24255f2652fa22ae3534329dc6180534e98d17432037ff6fd140556e2bb3137e"
 }

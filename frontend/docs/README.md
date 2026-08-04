@@ -13,9 +13,9 @@ Index de la documentation technique du frontend Jira KPI Dashboard.
 
 ```bash
 cd frontend
-npm run test              # Tous les tests
-npm run test:watch        # Mode watch
-npx vitest run --coverage # Couverture
+yarn test                 # Tous les tests
+yarn test:watch           # Mode watch
+yarn test --coverage      # Couverture
 ```
 
-Depuis la racine : `npm run test:frontend` ou `npm run test` (backend + frontend + récap).
+Depuis la racine : `yarn test:frontend` ou `yarn test` (backend + frontend + récap).

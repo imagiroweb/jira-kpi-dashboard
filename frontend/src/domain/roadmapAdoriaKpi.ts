@@ -475,3 +475,301 @@ export function computeRoadmapKpis(
     byStatus,
   };
 }
+
+/** Identifiants des encarts « Sans … » (un par contrôle qualité de la Roadmap). */
+export type RoadmapMissingIndicatorId =
+  | 'cp'
+  | 'solutionDoc'
+  | 'wireframe'
+  | 'maquette'
+  | 'macroChiffrage'
+  | 'estimation'
+  | 'devis'
+  | 'validationClient'
+  | 'validationClients'
+  | 'validationOperationnelle'
+  | 'validationMarketing'
+  | 'clientsPilotes'
+  | 'epic';
+
+/**
+ * Règle décidant si la cellule d'une ligne est « manquante » :
+ * - `person` : vide, « - » ou « sans nom » ;
+ * - `blank` : vide ou « - » (liens, fichiers, listes déroulantes) ;
+ * - `numeric` : vide, non numérique ou ≤ 0 ;
+ * - `checkbox` : case non cochée.
+ */
+export type RoadmapMissingRule = 'person' | 'blank' | 'numeric' | 'checkbox';
+
+export interface RoadmapMissingIndicatorDef {
+  id: RoadmapMissingIndicatorId;
+  /** Libellé de l'encart, aligné sur les vues Monday « Sans … ». */
+  label: string;
+  /** Titres de colonne Monday acceptés : égalité exacte d'abord, puis inclusion. */
+  columnTitles: string[];
+  rule: RoadmapMissingRule;
+  /** Explication courte affichée sous le compteur. */
+  hint: string;
+  /**
+   * Colonne « … requis ? » : la ligne n'entre dans le périmètre que si sa valeur
+   * est listée (les lignes « NON » ne sont ni comptées ni décomptées).
+   */
+  gate?: { columnTitles: string[]; values: string[] };
+}
+
+/** Valeurs de colonne « … requis ? » qui rendent le contrôle applicable. */
+export const ROADMAP_REQUIS_GATE_VALUES = ['oui', 'à définir'];
+
+/**
+ * Les 13 contrôles « Sans … » du board Roadmap Adoria 2026, dans l'ordre d'affichage.
+ * Chaque entrée reprend la colonne testée par la vue Monday du même nom.
+ */
+export const ROADMAP_MISSING_INDICATORS: RoadmapMissingIndicatorDef[] = [
+  {
+    id: 'cp',
+    label: 'Sans CP référent',
+    columnTitles: ['CP référent', ...CP_REFERENT_KEYS],
+    rule: 'person',
+    hint: 'Aucune personne assignée.',
+  },
+  {
+    id: 'solutionDoc',
+    label: 'Sans solution doc',
+    columnTitles: ['Solution doc', ...SOLUTION_DOC_KEYS],
+    rule: 'blank',
+    hint: 'Lien vide ou « - ».',
+  },
+  {
+    id: 'wireframe',
+    label: 'Sans wireframe',
+    columnTitles: ['Wireframe'],
+    rule: 'blank',
+    hint: 'Wireframe requis, lien absent.',
+    gate: { columnTitles: ['Wireframe requis ?'], values: ROADMAP_REQUIS_GATE_VALUES },
+  },
+  {
+    id: 'maquette',
+    label: 'Sans maquettes',
+    columnTitles: ['Lien vers la maquette', 'maquette'],
+    rule: 'blank',
+    hint: 'Maquette requise, lien absent.',
+    gate: { columnTitles: ['Maquettes requis ?'], values: ROADMAP_REQUIS_GATE_VALUES },
+  },
+  {
+    id: 'macroChiffrage',
+    label: 'Sans macro chiffrage',
+    columnTitles: ['Macro chiffrage', ...ROADMAP_MACRO_CHIFFRAGE_KEYS],
+    rule: 'numeric',
+    hint: 'Vide, « - » ou ≤ 0.',
+  },
+  {
+    id: 'estimation',
+    label: 'Sans estimation',
+    columnTitles: ['Estimation', ...ROADMAP_ESTIMATION_KEYS],
+    rule: 'numeric',
+    hint: 'Vide, « - » ou ≤ 0.',
+  },
+  {
+    id: 'devis',
+    label: 'Sans devis',
+    columnTitles: ['Devis'],
+    rule: 'blank',
+    hint: 'Aucun fichier joint.',
+  },
+  {
+    id: 'validationClient',
+    label: 'Sans validation client',
+    columnTitles: ['Validation client'],
+    rule: 'checkbox',
+    hint: 'Case non cochée.',
+  },
+  {
+    id: 'validationClients',
+    label: 'Sans validation clients',
+    columnTitles: ['Validation clients'],
+    rule: 'checkbox',
+    hint: 'Case non cochée.',
+  },
+  {
+    id: 'validationOperationnelle',
+    label: 'Sans validation opérationnelle',
+    columnTitles: ['Validation opérationnelle'],
+    rule: 'checkbox',
+    hint: 'Case non cochée.',
+  },
+  {
+    id: 'validationMarketing',
+    label: 'Sans validation marketing',
+    columnTitles: ['Validation marketing'],
+    rule: 'checkbox',
+    hint: 'Marketing requis, case non cochée.',
+    gate: { columnTitles: ['Marketing requis ?'], values: ROADMAP_REQUIS_GATE_VALUES },
+  },
+  {
+    id: 'clientsPilotes',
+    label: 'Sans clients pilotes',
+    columnTitles: ['Clients pilotes'],
+    rule: 'blank',
+    hint: 'Aucun client sélectionné.',
+  },
+  {
+    id: 'epic',
+    label: 'Sans Epic',
+    columnTitles: ['Lien Epic', 'epic'],
+    rule: 'blank',
+    hint: 'Lien Jira absent.',
+  },
+];
+
+/** Normalisation de titre insensible à la casse, aux accents et aux espaces multiples. */
+export function normalizeRoadmapColumnTitle(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\u2018\u2019]/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * Colonne correspondant à l'un des titres : égalité exacte d'abord (évite que
+ * « Wireframe » capte « Wireframe requis ? » ou « Devis » capte « Jours devis »),
+ * puis inclusion, en ignorant les colonnes déjà attribuées.
+ */
+export function findRoadmapColumnByTitles(
+  columns: MondayColumn[],
+  titles: string[],
+  excludedIds: ReadonlySet<string> = new Set()
+): MondayColumn | null {
+  const available = columns.filter((c) => !excludedIds.has(c.id));
+  for (const title of titles) {
+    const nt = normalizeRoadmapColumnTitle(title);
+    const exact = available.find((c) => normalizeRoadmapColumnTitle(c.title) === nt);
+    if (exact) return exact;
+  }
+  for (const title of [...titles].sort((a, b) => b.length - a.length)) {
+    const nt = normalizeRoadmapColumnTitle(title);
+    const partial = available.find((c) => normalizeRoadmapColumnTitle(c.title).includes(nt));
+    if (partial) return partial;
+  }
+  return null;
+}
+
+/** Colonne testée + colonne « … requis ? » de chaque encart, sans collision entre indicateurs. */
+export function resolveRoadmapMissingIndicatorColumns(
+  columns: MondayColumn[],
+  defs: RoadmapMissingIndicatorDef[] = ROADMAP_MISSING_INDICATORS
+): Map<RoadmapMissingIndicatorId, { column: MondayColumn | null; gateColumn: MondayColumn | null }> {
+  const used = new Set<string>();
+  const gateColumns = new Map<RoadmapMissingIndicatorId, MondayColumn | null>();
+  for (const def of defs) {
+    if (!def.gate) {
+      gateColumns.set(def.id, null);
+      continue;
+    }
+    const gate = findRoadmapColumnByTitles(columns, def.gate.columnTitles, used);
+    if (gate) used.add(gate.id);
+    gateColumns.set(def.id, gate);
+  }
+  const resolved = new Map<
+    RoadmapMissingIndicatorId,
+    { column: MondayColumn | null; gateColumn: MondayColumn | null }
+  >();
+  const pending: RoadmapMissingIndicatorDef[] = [];
+  for (const def of defs) {
+    const nt = def.columnTitles.map(normalizeRoadmapColumnTitle);
+    const exact = columns.find((c) => !used.has(c.id) && nt.includes(normalizeRoadmapColumnTitle(c.title)));
+    if (exact) {
+      used.add(exact.id);
+      resolved.set(def.id, { column: exact, gateColumn: gateColumns.get(def.id) ?? null });
+    } else {
+      pending.push(def);
+    }
+  }
+  for (const def of pending) {
+    const column = findRoadmapColumnByTitles(columns, def.columnTitles, used);
+    if (column) used.add(column.id);
+    resolved.set(def.id, { column, gateColumn: gateColumns.get(def.id) ?? null });
+  }
+  return resolved;
+}
+
+/** Case à cocher Monday non cochée (texte vide et `value` sans `checked: true`). */
+export function isRoadmapCheckboxUnchecked(item: MondayItem, col: MondayColumn): boolean {
+  const cv = item.column_values?.find((c) => String(c.id) === String(col.id));
+  if (!cv) return true;
+  if ((cv.text ?? '').toString().trim()) return false;
+  const raw = (cv.value ?? '').toString();
+  return !/"checked"\s*:\s*(true|"true")/.test(raw);
+}
+
+/** Applique la règle « manquant » d'un encart à une ligne. */
+export function isRoadmapIndicatorValueMissing(
+  item: MondayItem,
+  col: MondayColumn | null,
+  rule: RoadmapMissingRule
+): boolean {
+  if (!col) return false;
+  if (rule === 'numeric') return isRoadmapNumericKpiValueMissing(item, col);
+  if (rule === 'checkbox') return isRoadmapCheckboxUnchecked(item, col);
+  const value = getItemValue(item, col.id);
+  if (rule === 'person') {
+    const v = value.trim();
+    return v === '' || v === '-' || v.toLowerCase() === 'sans nom';
+  }
+  return isRoadmapSolutionDocValueMissing(value);
+}
+
+/** Ligne concernée par l'encart : vrai si aucune colonne « … requis ? » ou si sa valeur est listée. */
+export function isRoadmapIndicatorRowApplicable(
+  item: MondayItem,
+  gateColumn: MondayColumn | null,
+  gateValues: string[] | undefined
+): boolean {
+  if (!gateColumn || !gateValues?.length) return true;
+  const value = normalizeRoadmapColumnTitle(getItemValue(item, gateColumn.id));
+  return gateValues.some((v) => normalizeRoadmapColumnTitle(v) === value);
+}
+
+export interface RoadmapMissingIndicator {
+  def: RoadmapMissingIndicatorDef;
+  column: MondayColumn | null;
+  gateColumn: MondayColumn | null;
+  hasColumn: boolean;
+  /** Lignes entrant dans le périmètre du contrôle (après colonne « … requis ? »). */
+  applicableCount: number;
+  missingCount: number;
+  /** Lignes manquantes, triées par nom — utilisées par la modale de détail. */
+  missingItems: MondayItem[];
+}
+
+/**
+ * Compteurs des encarts « Sans … » sur les lignes déjà filtrées (trimestre / statut / team).
+ * Une colonne absente du board donne `hasColumn: false` et un compteur à 0.
+ */
+export function computeRoadmapMissingIndicators(
+  items: MondayItem[],
+  columns: MondayColumn[],
+  defs: RoadmapMissingIndicatorDef[] = ROADMAP_MISSING_INDICATORS
+): RoadmapMissingIndicator[] {
+  const resolved = resolveRoadmapMissingIndicatorColumns(columns, defs);
+  return defs.map((def) => {
+    const { column, gateColumn } = resolved.get(def.id) ?? { column: null, gateColumn: null };
+    const applicable = column
+      ? items.filter((item) => isRoadmapIndicatorRowApplicable(item, gateColumn, def.gate?.values))
+      : [];
+    const missingItems = applicable
+      .filter((item) => isRoadmapIndicatorValueMissing(item, column, def.rule))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || '', 'fr'));
+    return {
+      def,
+      column,
+      gateColumn,
+      hasColumn: !!column,
+      applicableCount: applicable.length,
+      missingCount: missingItems.length,
+      missingItems,
+    };
+  });
+}
