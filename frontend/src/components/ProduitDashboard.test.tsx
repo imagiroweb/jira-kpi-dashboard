@@ -366,6 +366,62 @@ describe('ProduitDashboard', () => {
     );
   });
 
+  it('affiche les 13 encarts « Sans … » sur le périmètre filtré', async () => {
+    renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
+
+    const solTile = await screen.findByTitle('Sans solution doc — voir le détail des lignes');
+
+    for (const label of [
+      'Sans CP référent',
+      'Sans solution doc',
+      'Sans wireframe',
+      'Sans maquettes',
+      'Sans macro chiffrage',
+      'Sans estimation',
+      'Sans devis',
+      'Sans validation client',
+      'Sans validation clients',
+      'Sans validation opérationnelle',
+      'Sans validation marketing',
+      'Sans clients pilotes',
+      'Sans Epic',
+    ]) {
+      expect(screen.getByTitle(`${label} — voir le détail des lignes`)).toBeInTheDocument();
+    }
+
+    // Feature B a une solution doc vide, Feature A est renseignée.
+    expect(solTile).toHaveTextContent('1');
+    // Colonne « Devis » absente du board de test.
+    expect(screen.getByTitle('Sans devis — voir le détail des lignes')).toHaveTextContent('—');
+  });
+
+  it('ouvre le détail d’un encart « Sans … » et respecte la colonne « … requis ? »', async () => {
+    renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
+
+    const solTile = await screen.findByTitle('Sans solution doc — voir le détail des lignes');
+    fireEvent.click(solTile);
+
+    const solHeading = await screen.findByRole('heading', {
+      name: 'Sans solution doc — détail des lignes',
+    });
+    const solModal = modalRootFromHeading(solHeading);
+    expect(within(solModal).getByText('Feature B')).toBeInTheDocument();
+    expect(within(solModal).queryByText('Feature A')).not.toBeInTheDocument();
+
+    fireEvent.click(within(solModal).getByRole('button', { name: '' }));
+
+    // « Wireframe requis ? » = NON sur Feature B : seule Feature A est comptée.
+    fireEvent.click(screen.getByTitle('Sans wireframe — voir le détail des lignes'));
+
+    const wfHeading = await screen.findByRole('heading', {
+      name: 'Sans wireframe — détail des lignes',
+    });
+    const wfModal = modalRootFromHeading(wfHeading);
+    expect(within(wfModal).getByText(/Wireframe requis \?/)).toBeInTheDocument();
+    expect(within(wfModal).getByText('Feature A')).toBeInTheDocument();
+    expect(within(wfModal).queryByText('Feature B')).not.toBeInTheDocument();
+  });
+
   it('affiche les intégrations en cours avec badge Stuck et ouvre la modale', async () => {
     renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
 

@@ -3,11 +3,13 @@ import type { MondayColumn, MondayItem } from '../services/api';
 import {
   EMPTY_ROADMAP_KPIS,
   ROADMAP_ADORIA_KNOWN_TEAMS,
+  ROADMAP_MISSING_INDICATORS,
   buildRoadmapTeamFilterOptions,
   calendarDaysInclusiveFromTodayToQuarterEnd,
   calendarQuarterFromDate,
   classifyRoadmapKanbanBucket,
   computeRoadmapKpis,
+  computeRoadmapMissingIndicators,
   findColumnByKeywords,
   findColumnPreferSpecific,
   findRoadmapDateColumn,
@@ -16,6 +18,7 @@ import {
   getQuarterEndDate,
   getRoadmapDateColumnRaw,
   getRoadmapItemTeamLabel,
+  isRoadmapCheckboxUnchecked,
   isRoadmapNumericKpiValueMissing,
   isRoadmapSolutionDocValueMissing,
   isRoadmapStatusDone,
@@ -24,6 +27,7 @@ import {
   parseRoadmapDateColumnEndDate,
   parseRoadmapDateColumnRange,
   resolveRoadmapMacroEstimationColumns,
+  resolveRoadmapMissingIndicatorColumns,
   roadmapRangeFullyInQuarter,
   roadmapRangeFullyInQuarterCurrentYear,
 } from './roadmapAdoriaKpi';
@@ -494,6 +498,161 @@ describe('roadmapAdoriaKpi', () => {
         expect.arrayContaining([...ROADMAP_ADORIA_KNOWN_TEAMS, 'Custom Team', 'Team Cook'])
       );
       expect(options).toEqual([...options].sort((a, b) => a.localeCompare(b, 'fr')));
+    });
+  });
+
+  describe('encarts « Sans … » (13 contrôles)', () => {
+    /** Colonnes du board Roadmap Adoria 2026 utilisées par les 13 contrôles. */
+    const boardColumns: MondayColumn[] = [
+      { id: 'cp', title: 'CP référent', type: 'people' },
+      { id: 'sol', title: 'Solution doc', type: 'link' },
+      { id: 'wfRequis', title: 'Wireframe requis ?', type: 'status' },
+      { id: 'wf', title: 'Wireframe', type: 'link' },
+      { id: 'maqRequis', title: 'Maquettes requis ?', type: 'status' },
+      { id: 'maq', title: 'Lien vers la maquette', type: 'link' },
+      { id: 'macro', title: 'Macro chiffrage', type: 'numbers' },
+      { id: 'est', title: 'Estimation', type: 'numbers' },
+      { id: 'joursDevis', title: 'Jours devis', type: 'numbers' },
+      { id: 'devis', title: 'Devis', type: 'file' },
+      { id: 'valClient', title: 'Validation client', type: 'checkbox' },
+      { id: 'valClients', title: 'Validation clients', type: 'checkbox' },
+      { id: 'valOp', title: 'Validation opérationnelle', type: 'checkbox' },
+      { id: 'mktRequis', title: 'Marketing requis ?', type: 'status' },
+      { id: 'valMkt', title: 'Validation marketing', type: 'checkbox' },
+      { id: 'pilotes', title: 'Clients pilotes', type: 'dropdown' },
+      { id: 'epic', title: 'Lien Epic', type: 'link' },
+    ];
+
+    const byId = (indicators: ReturnType<typeof computeRoadmapMissingIndicators>, id: string) => {
+      const found = indicators.find((i) => i.def.id === id);
+      expect(found, `indicateur ${id} absent`).toBeDefined();
+      return found!;
+    };
+
+    it('expose 13 contrôles et résout chaque colonne par titre exact', () => {
+      expect(ROADMAP_MISSING_INDICATORS).toHaveLength(13);
+      const resolved = resolveRoadmapMissingIndicatorColumns(boardColumns);
+      expect(resolved.get('wireframe')?.column?.id).toBe('wf');
+      expect(resolved.get('wireframe')?.gateColumn?.id).toBe('wfRequis');
+      expect(resolved.get('maquette')?.column?.id).toBe('maq');
+      expect(resolved.get('devis')?.column?.id).toBe('devis');
+      expect(resolved.get('validationClient')?.column?.id).toBe('valClient');
+      expect(resolved.get('validationClients')?.column?.id).toBe('valClients');
+      expect(resolved.get('epic')?.column?.id).toBe('epic');
+    });
+
+    it('compte les lignes vides pour liens, fichiers, listes et cases à cocher', () => {
+      const items: MondayItem[] = [
+        {
+          id: '1',
+          name: 'Tout renseigné',
+          column_values: [
+            { id: 'cp', text: 'alice@adoria.com', type: 'people' },
+            { id: 'sol', text: 'Solution doc - https://wiki', type: 'link' },
+            { id: 'wfRequis', text: 'OUI', type: 'status' },
+            { id: 'wf', text: 'https://figma', type: 'link' },
+            { id: 'devis', text: 'https://devis.pdf', type: 'file' },
+            { id: 'valClient', text: 'v', value: '{"checked":true}', type: 'checkbox' },
+            { id: 'pilotes', text: 'Pokawa', type: 'dropdown' },
+            { id: 'epic', text: 'https://jira/EPIC-1', type: 'link' },
+          ],
+        },
+        {
+          id: '2',
+          name: 'Rien renseigné',
+          column_values: [
+            { id: 'cp', text: '', type: 'people' },
+            { id: 'sol', text: '', type: 'link' },
+            { id: 'wfRequis', text: 'OUI', type: 'status' },
+            { id: 'wf', text: '', type: 'link' },
+            { id: 'devis', text: '', type: 'file' },
+            { id: 'valClient', text: '', value: '{"checked":false}', type: 'checkbox' },
+            { id: 'pilotes', text: '', type: 'dropdown' },
+            { id: 'epic', text: '', type: 'link' },
+          ],
+        },
+      ];
+      const indicators = computeRoadmapMissingIndicators(items, boardColumns);
+      for (const id of ['cp', 'solutionDoc', 'wireframe', 'devis', 'validationClient', 'clientsPilotes', 'epic']) {
+        const ind = byId(indicators, id);
+        expect(ind.hasColumn, id).toBe(true);
+        expect(ind.missingCount, id).toBe(1);
+        expect(ind.missingItems.map((i) => i.id), id).toEqual(['2']);
+      }
+    });
+
+    it('ignore les lignes dont la colonne « … requis ? » vaut NON', () => {
+      const items: MondayItem[] = [
+        {
+          id: '1',
+          name: 'Wireframe non requis',
+          column_values: [
+            { id: 'wfRequis', text: 'NON', type: 'status' },
+            { id: 'wf', text: '', type: 'link' },
+          ],
+        },
+        {
+          id: '2',
+          name: 'Wireframe à définir',
+          column_values: [
+            { id: 'wfRequis', text: 'À définir', type: 'status' },
+            { id: 'wf', text: '', type: 'link' },
+          ],
+        },
+      ];
+      const wireframe = byId(computeRoadmapMissingIndicators(items, boardColumns), 'wireframe');
+      expect(wireframe.applicableCount).toBe(1);
+      expect(wireframe.missingCount).toBe(1);
+      expect(wireframe.missingItems[0].id).toBe('2');
+    });
+
+    it('macro chiffrage / estimation : ≤ 0 ou non numérique compte comme manquant', () => {
+      const items: MondayItem[] = [
+        {
+          id: '1',
+          name: 'Zéro',
+          column_values: [
+            { id: 'macro', text: '0', value: '{"number":"0"}', type: 'numbers' },
+            { id: 'est', text: '5', value: '"5"', type: 'numbers' },
+          ],
+        },
+      ];
+      const indicators = computeRoadmapMissingIndicators(items, boardColumns);
+      expect(byId(indicators, 'macroChiffrage').missingCount).toBe(1);
+      expect(byId(indicators, 'estimation').missingCount).toBe(0);
+    });
+
+    it('colonne absente du board : hasColumn false et compteur à 0', () => {
+      const indicators = computeRoadmapMissingIndicators(
+        [{ id: '1', name: 'A', column_values: [] }],
+        [{ id: 'cp', title: 'CP référent', type: 'people' }]
+      );
+      const devis = byId(indicators, 'devis');
+      expect(devis.hasColumn).toBe(false);
+      expect(devis.missingCount).toBe(0);
+      expect(devis.applicableCount).toBe(0);
+    });
+
+    it('trie les lignes manquantes par nom', () => {
+      const items: MondayItem[] = [
+        { id: '1', name: 'Zèbre', column_values: [{ id: 'sol', text: '', type: 'link' }] },
+        { id: '2', name: 'Abeille', column_values: [{ id: 'sol', text: '-', type: 'link' }] },
+      ];
+      const sol = byId(computeRoadmapMissingIndicators(items, boardColumns), 'solutionDoc');
+      expect(sol.missingItems.map((i) => i.name)).toEqual(['Abeille', 'Zèbre']);
+    });
+
+    it('isRoadmapCheckboxUnchecked lit le texte ou le JSON Monday', () => {
+      const col: MondayColumn = { id: 'valOp', title: 'Validation opérationnelle', type: 'checkbox' };
+      expect(
+        isRoadmapCheckboxUnchecked(
+          { id: '1', name: 'A', column_values: [{ id: 'valOp', text: '', value: '{"checked":true}', type: 'checkbox' }] },
+          col
+        )
+      ).toBe(false);
+      expect(
+        isRoadmapCheckboxUnchecked({ id: '2', name: 'B', column_values: [] }, col)
+      ).toBe(true);
     });
   });
 });

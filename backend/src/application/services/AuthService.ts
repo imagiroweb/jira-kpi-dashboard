@@ -345,12 +345,20 @@ export class AuthService {
     lastName?: string
   ): Promise<LoginResult> {
     try {
+      if (!email || typeof email !== 'string') {
+        return {
+          success: false,
+          error: 'Email Microsoft manquant',
+        };
+      }
+      const normalizedEmail = email.toLowerCase();
+
       // Find or create user
       let user = await User.findOne({
         $or: [
           { microsoftId },
-          { email: email.toLowerCase(), provider: 'microsoft' }
-        ]
+          { email: normalizedEmail, provider: 'microsoft' },
+        ],
       });
 
       let firstLogin = false;
@@ -358,19 +366,19 @@ export class AuthService {
         // Create new user from Microsoft SSO (must choose role on frontend)
         firstLogin = true;
         const newUser = await User.create({
-          email: email.toLowerCase(),
+          email: normalizedEmail,
           firstName,
           lastName,
           provider: 'microsoft',
           microsoftId,
-          isActive: true
+          isActive: true,
         });
         await this.ensureSuperAdmin(newUser.email);
         await this.assignDefaultRoleIfNeeded(newUser);
         const refreshed = await User.findById(newUser._id).select('-password');
         if (!refreshed) throw new Error('User not found after create');
         user = refreshed;
-        logger.info(`New Microsoft SSO user created: ${email}`);
+        logger.info(`New Microsoft SSO user created: ${normalizedEmail}`);
       } else {
         // Update last login and any changed info
         user.lastLogin = new Date();
@@ -385,7 +393,7 @@ export class AuthService {
       if (!user.isActive) {
         return {
           success: false,
-          error: 'Ce compte a été désactivé'
+          error: 'Ce compte a été désactivé',
         };
       }
 
@@ -393,11 +401,11 @@ export class AuthService {
       const token = this.generateToken({
         userId: user._id.toString(),
         email: user.email,
-        provider: 'microsoft'
+        provider: 'microsoft',
       });
       const userWithPerms = await this.buildUserWithPermissions(user);
 
-      logger.info(`Microsoft SSO login: ${email}`);
+      logger.info(`Microsoft SSO login: ${normalizedEmail}`);
 
       return {
         success: true,

@@ -33,11 +33,9 @@ const PACKAGES = [
     prefix: 'backend',
     coverageSummaryPath: path.join(ROOT, 'backend', 'coverage', 'coverage-summary.json'),
     buildArgs: (jsonPath) => [
-      'run',
-      'test',
-      '--prefix',
+      '--cwd',
       'backend',
-      '--',
+      'test',
       '--json',
       `--outputFile=${jsonPath}`,
       '--coverage',
@@ -50,11 +48,9 @@ const PACKAGES = [
     prefix: 'frontend',
     coverageSummaryPath: path.join(ROOT, 'frontend', 'coverage', 'coverage-summary.json'),
     buildArgs: (jsonPath) => [
-      'run',
-      'test',
-      '--prefix',
+      '--cwd',
       'frontend',
-      '--',
+      'test',
       '--reporter=default',
       '--reporter=json',
       `--outputFile.json=${jsonPath}`,
@@ -328,7 +324,7 @@ async function main() {
 
     console.log(`${c.bold}${c.cyan}▶ Tests ${pkg.label}${c.reset}\n`);
 
-    const result = await runCommand('npm', args, ROOT);
+    const result = await runCommand('yarn', args, ROOT);
     const parsed = parseJsonReport(jsonPath);
     const warnings = countWarnings(result.output);
 

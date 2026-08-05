@@ -59,7 +59,9 @@ git clone <repository-url>
 cd jira-kpi-dashboard
 ```
 
-**Hooks Git (Husky)** : à la racine, exécuter `npm install` une fois pour installer Husky. Chaque commit exécute le lint (backend + frontend), le typecheck frontend, puis les tests backend + frontend avec un **tableau récapitulatif** (même script que `npm run test`).
+**Gestionnaire de paquets** : le dépôt utilise **yarn 1.22** (champ `packageManager` dans chaque `package.json`, lockfiles `yarn.lock`). N'utilisez pas `npm install`, qui recréerait un `package-lock.json` divergent.
+
+**Hooks Git (Husky)** : à la racine, exécuter `yarn install` une fois pour installer Husky. Chaque commit exécute le lint (backend + frontend), le typecheck frontend, puis les tests backend + frontend avec un **tableau récapitulatif** (même script que `yarn test`).
 
 ### 2. Configuration
 Créez un fichier `.env` à la racine du projet :
@@ -88,18 +90,23 @@ OPENAI_API_KEY=sk-...
 docker-compose -f docker-compose.dev.yml up -d
 ```
 
+#### Installer les dépendances (racine + backend + frontend)
+```bash
+yarn install:all
+```
+
 #### Backend
 ```bash
 cd backend
-npm install
-npm run dev
+yarn install
+yarn dev
 ```
 
 #### Frontend
 ```bash
 cd frontend
-npm install
-npm run dev
+yarn install
+yarn dev
 ```
 
 L'application sera accessible sur :
@@ -109,12 +116,12 @@ L'application sera accessible sur :
 
 ### Tests
 
-À la racine du monorepo, `npm run test` exécute les tests backend (Jest) et frontend (Vitest) **avec couverture de code**, puis affiche un **tableau récapitulatif** (passés / échoués / ignorés, erreurs, avertissements, durée, couverture lignes, statut). Le hook Husky pre-commit utilise le même script.
+À la racine du monorepo, `yarn test` exécute les tests backend (Jest) et frontend (Vitest) **avec couverture de code**, puis affiche un **tableau récapitulatif** (passés / échoués / ignorés, erreurs, avertissements, durée, couverture lignes, statut). Le hook Husky pre-commit utilise le même script.
 
 ```bash
-npm run test              # Backend + frontend + récap
-npm run test:backend      # Backend uniquement
-npm run test:frontend     # Frontend uniquement
+yarn test              # Backend + frontend + récap
+yarn test:backend      # Backend uniquement
+yarn test:frontend     # Frontend uniquement
 ```
 
 ### Tests backend
@@ -139,8 +146,8 @@ Les tests Vitest + Testing Library (plan de couverture par phases, mocks `src/te
 
 ```bash
 cd frontend
-npm run test              # Tous les tests
-npx vitest run --coverage # Couverture (~30 % lignes après Phase 3)
+yarn test                    # Tous les tests
+yarn test --coverage         # Couverture (~30 % lignes après Phase 3)
 ```
 
 ### 4. Production avec Docker

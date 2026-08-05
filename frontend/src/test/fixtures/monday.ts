@@ -20,6 +20,10 @@ export const TEST_MONDAY_COLUMNS: MondayColumn[] = [
   { id: 'st', title: 'Statut', type: 'status' },
   { id: 'team', title: 'Team', type: 'status' },
   { id: 'macro', title: 'Macro chiffrage', type: 'numbers' },
+  { id: 'sol', title: 'Solution doc', type: 'link' },
+  { id: 'wfRequis', title: 'Wireframe requis ?', type: 'status' },
+  { id: 'wf', title: 'Wireframe', type: 'link' },
+  { id: 'valClient', title: 'Validation client', type: 'checkbox' },
 ];
 
 export const TEST_MONDAY_ITEMS: MondayItem[] = [
@@ -32,6 +36,10 @@ export const TEST_MONDAY_ITEMS: MondayItem[] = [
       { id: 'st', text: 'En cours', type: 'status' },
       { id: 'team', text: 'Team Cook', type: 'status' },
       { id: 'macro', text: '10', type: 'numbers' },
+      { id: 'sol', text: 'Solution doc - https://wiki/a', type: 'link' },
+      { id: 'wfRequis', text: 'OUI', type: 'status' },
+      { id: 'wf', text: '', type: 'link' },
+      { id: 'valClient', text: 'v', value: '{"checked":true}', type: 'checkbox' },
     ],
   },
   {
@@ -43,6 +51,10 @@ export const TEST_MONDAY_ITEMS: MondayItem[] = [
       { id: 'st', text: 'Done', type: 'status' },
       { id: 'team', text: 'Softcam', type: 'status' },
       { id: 'macro', text: '5', type: 'numbers' },
+      { id: 'sol', text: '', type: 'link' },
+      { id: 'wfRequis', text: 'NON', type: 'status' },
+      { id: 'wf', text: '', type: 'link' },
+      { id: 'valClient', text: '', value: '{"checked":false}', type: 'checkbox' },
     ],
   },
 ];

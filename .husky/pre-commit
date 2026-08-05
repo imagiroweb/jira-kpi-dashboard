@@ -1,1 +1,1 @@
-npm run lint && (cd frontend && npm run typecheck) && node scripts/test-summary.js
+yarn lint && yarn --cwd frontend typecheck && node scripts/test-summary.js

@@ -23,41 +23,44 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          # Pas de cache global : lock files dans backend/ et frontend/, pas à la racine
+          cache: yarn
+          cache-dependency-path: |
+            backend/yarn.lock
+            frontend/yarn.lock
 
       # --- Backend ---
       - name: Backend – install
         working-directory: ./backend
-        run: npm ci
+        run: yarn install --frozen-lockfile
 
       - name: Backend – lint
         working-directory: ./backend
-        run: npm run lint
+        run: yarn lint
 
       - name: Backend – test
         working-directory: ./backend
-        run: npm run test
+        run: yarn test
 
       - name: Backend – build
         working-directory: ./backend
-        run: npm run build
+        run: yarn build
 
       # --- Frontend ---
       - name: Frontend – install
         working-directory: ./frontend
-        run: npm ci
+        run: yarn install --frozen-lockfile
 
       - name: Frontend – lint
         working-directory: ./frontend
-        run: npm run lint
+        run: yarn lint
 
       - name: Frontend – test
         working-directory: ./frontend
-        run: npm run test
+        run: yarn test
 
       - name: Frontend – build
         working-directory: ./frontend
-        run: npm run build
+        run: yarn build
 
   docker-build:
     name: Docker build (validation)

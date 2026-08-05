@@ -3,6 +3,9 @@ node_modules/
 .pnp
 .pnp.js
 
+# Yarn est le seul gestionnaire de paquets du dépôt : pas de lockfile npm
+package-lock.json
+
 # Build outputs
 dist/
 build/

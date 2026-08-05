@@ -17,7 +17,7 @@ Couvrir les routes HTTP (`src/routes/`) de bout en bout via **supertest**, sans 
 
 ## Commandes
 
-Depuis la racine du monorepo, `npm run test` lance backend + frontend et affiche un tableau récapitulatif en fin d'exécution.
+Depuis la racine du monorepo, `yarn test` lance backend + frontend et affiche un tableau récapitulatif en fin d'exécution.
 
 ```bash
 cd backend
