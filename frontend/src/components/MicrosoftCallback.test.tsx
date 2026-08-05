@@ -93,6 +93,33 @@ describe('MicrosoftCallback', () => {
     });
   });
 
+  it('affiche une erreur si le token du hash est corrompu (espace / accolade)', async () => {
+    stubLocation({ hash: '#access_token=tok%20en' });
+
+    render(<MicrosoftCallback />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Token Microsoft invalide ou corrompu/i)).toBeInTheDocument();
+    });
+    expect(mockMicrosoftCallback).not.toHaveBeenCalled();
+  });
+
+  it('préserve les + du access_token avant l’appel backend', async () => {
+    stubLocation({ hash: '#access_token=abc%2Bdef' });
+    mockMicrosoftCallback.mockResolvedValue({
+      success: true,
+      token: 'jwt-token',
+      user: TEST_USER,
+      firstLogin: false,
+    });
+
+    render(<MicrosoftCallback />);
+
+    await waitFor(() => {
+      expect(mockMicrosoftCallback).toHaveBeenCalledWith('abc+def');
+    });
+  });
+
   it('connecte l’utilisateur et redirige après succès', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const location = stubLocation({ hash: '#access_token=valid-ms-token' });

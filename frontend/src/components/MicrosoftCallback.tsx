@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Loader2, AlertCircle, CheckCircle } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { authApi } from '../services/authApi';
+import { isSafeMicrosoftAccessToken, parseOAuthFragment } from '../utils/microsoftOAuth';
 
 export function MicrosoftCallback() {
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
@@ -11,13 +12,11 @@ export function MicrosoftCallback() {
   useEffect(() => {
     const handleCallback = async () => {
       try {
-        // Parse the fragment (hash) from URL - Microsoft returns token in hash
-        const hash = window.location.hash.substring(1);
-        const params = new URLSearchParams(hash);
-        // Some flows may put error in query string
+        const hashParams = parseOAuthFragment(window.location.hash);
         const queryParams = new URLSearchParams(window.location.search);
-        const errorCode = params.get('error') || queryParams.get('error');
-        const errorDescription = params.get('error_description') || queryParams.get('error_description');
+        const errorCode = hashParams.error || queryParams.get('error');
+        const errorDescription =
+          hashParams.error_description || queryParams.get('error_description');
 
         if (errorCode) {
           setError(errorDescription || errorCode || 'Erreur lors de la connexion Microsoft');
@@ -25,15 +24,24 @@ export function MicrosoftCallback() {
           return;
         }
 
-        const accessToken = params.get('access_token');
+        const accessToken = hashParams.access_token;
         if (!accessToken) {
-          setError('Token d\'accès manquant. Vérifiez que l\'URI de redirection dans Azure correspond à cette page.');
+          setError(
+            "Token d'accès manquant. Vérifiez que l'URI de redirection dans Azure correspond à cette page."
+          );
           setStatus('error');
           return;
         }
 
-        // Send token to backend for validation
-        const result = await authApi.microsoftCallback(accessToken);
+        if (!isSafeMicrosoftAccessToken(accessToken)) {
+          setError(
+            'Token Microsoft invalide ou corrompu (caractères interdits). Réessayez la connexion SSO.'
+          );
+          setStatus('error');
+          return;
+        }
+
+        const result = await authApi.microsoftCallback(accessToken.trim());
 
         if (result.success && result.token && result.user) {
           setStatus('success');
@@ -45,14 +53,16 @@ export function MicrosoftCallback() {
           setError(result.error || 'Erreur de connexion');
           setStatus('error');
         }
-    } catch (err: unknown) {
-      console.error('Microsoft callback error:', err);
-      const msg = (err as { response?: { data?: { error?: string } }; message?: string })?.response?.data?.error
-        || (err as Error)?.message
-        || 'Erreur de connexion au serveur';
-      setError(msg);
-      setStatus('error');
-    }
+      } catch (err: unknown) {
+        console.error('Microsoft callback error:', err);
+        const msg =
+          (err as { response?: { data?: { error?: string } }; message?: string })?.response?.data
+            ?.error ||
+          (err as Error)?.message ||
+          'Erreur de connexion au serveur';
+        setError(msg);
+        setStatus('error');
+      }
     };
 
     handleCallback();
@@ -64,12 +74,8 @@ export function MicrosoftCallback() {
         {status === 'loading' && (
           <>
             <Loader2 className="w-12 h-12 text-accent-500 animate-spin mx-auto mb-4" />
-            <h2 className="text-xl font-semibold text-surface-100">
-              Connexion en cours...
-            </h2>
-            <p className="text-surface-400 mt-2">
-              Vérification de votre compte Microsoft
-            </p>
+            <h2 className="text-xl font-semibold text-surface-100">Connexion en cours...</h2>
+            <p className="text-surface-400 mt-2">Vérification de votre compte Microsoft</p>
           </>
         )}
 
@@ -78,12 +84,8 @@ export function MicrosoftCallback() {
             <div className="w-12 h-12 bg-success-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
               <CheckCircle className="w-8 h-8 text-success-500" />
             </div>
-            <h2 className="text-xl font-semibold text-surface-100">
-              Connexion réussie !
-            </h2>
-            <p className="text-surface-400 mt-2">
-              Redirection en cours...
-            </p>
+            <h2 className="text-xl font-semibold text-surface-100">Connexion réussie !</h2>
+            <p className="text-surface-400 mt-2">Redirection en cours...</p>
           </>
         )}
 
@@ -92,14 +94,9 @@ export function MicrosoftCallback() {
             <div className="w-12 h-12 bg-danger-500/20 rounded-full flex items-center justify-center mx-auto mb-4">
               <AlertCircle className="w-8 h-8 text-danger-500" />
             </div>
-            <h2 className="text-xl font-semibold text-surface-100">
-              Erreur de connexion
-            </h2>
+            <h2 className="text-xl font-semibold text-surface-100">Erreur de connexion</h2>
             <p className="text-danger-400 mt-2">{error}</p>
-            <button
-              onClick={() => window.location.href = '/'}
-              className="btn-secondary mt-6"
-            >
+            <button onClick={() => (window.location.href = '/')} className="btn-secondary mt-6">
               Retour à la connexion
             </button>
           </>
@@ -108,4 +105,3 @@ export function MicrosoftCallback() {
     </div>
   );
 }
-

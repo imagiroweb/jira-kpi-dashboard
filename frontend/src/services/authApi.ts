@@ -11,8 +11,13 @@ const api = axios.create({
   }
 });
 
-// Add auth token to requests if available
+// Add auth token to requests if available (sauf callback SSO Microsoft : token local
+// potentiellement corrompu ne doit pas polluer Authorization).
 api.interceptors.request.use((config) => {
+  const url = `${config.baseURL ?? ''}${config.url ?? ''}`;
+  if (url.includes('/auth/microsoft/callback')) {
+    return config;
+  }
   const token = localStorage.getItem('auth_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;

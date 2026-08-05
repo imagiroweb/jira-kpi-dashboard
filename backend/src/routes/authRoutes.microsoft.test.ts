@@ -147,6 +147,25 @@ describe('authRoutes — Microsoft (TI)', () => {
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
+    it('retourne 400 si accessToken contient des caractères invalides pour un header', async () => {
+      const res = await request(app)
+        .post('/api/auth/microsoft/callback')
+        .send({ accessToken: 'tok\nen' });
+
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/invalide/i);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('retourne 400 si accessToken ressemble à du JSON', async () => {
+      const res = await request(app)
+        .post('/api/auth/microsoft/callback')
+        .send({ accessToken: '{"access_token":"x"}' });
+
+      expect(res.status).toBe(400);
+      expect(mockFetch).not.toHaveBeenCalled();
+    });
+
     it('retourne 401 si Microsoft Graph rejette le token', async () => {
       mockFetch.mockResolvedValue({ ok: false, status: 401 });
 

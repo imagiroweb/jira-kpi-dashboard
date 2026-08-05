@@ -12,6 +12,8 @@ import {
 import { Role, IPageVisibilities, PAGE_IDS } from '../domain/user/entities/Role';
 import { UserActivityLog } from '../domain/user/entities/UserActivityLog';
 import { parseRoadmapAdoria2026Filters } from '../domain/user/parseRoadmapAdoria2026Filters';
+import { sanitizeMicrosoftAccessToken } from '../utils/sanitizeMicrosoftAccessToken';
+
 import { logger } from '../utils/logger';
 
 /** Max 5 demandes de reset par IP par 15 minutes */
@@ -318,35 +320,43 @@ router.post(
  */
 router.post('/microsoft/callback', async (req: Request, res: Response) => {
   try {
-    const { accessToken } = req.body;
+    const accessToken = sanitizeMicrosoftAccessToken(req.body?.accessToken);
 
     if (!accessToken) {
       return res.status(400).json({
         success: false,
-        error: 'Token Microsoft manquant'
+        error:
+          'Token Microsoft manquant ou invalide (format incorrect : JSON, espaces ou caractères interdits dans le header Authorization)',
       });
     }
 
     // Verify the token with Microsoft Graph API
     const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
       headers: {
-        Authorization: `Bearer ${accessToken}`
-      }
+        Authorization: `Bearer ${accessToken}`,
+      },
     });
 
     if (!graphResponse.ok) {
       return res.status(401).json({
         success: false,
-        error: 'Token Microsoft invalide'
+        error: 'Token Microsoft invalide',
       });
     }
 
-    const profile = await graphResponse.json() as MicrosoftGraphProfile;
+    const profile = (await graphResponse.json()) as MicrosoftGraphProfile;
+    const email = profile.mail || profile.userPrincipalName;
+    if (!email || typeof email !== 'string') {
+      return res.status(401).json({
+        success: false,
+        error: 'Profil Microsoft sans adresse e-mail exploitable',
+      });
+    }
 
     // Handle SSO login/registration
     const result = await authService.handleMicrosoftSSO(
       profile.id,
-      profile.mail || profile.userPrincipalName,
+      email,
       profile.givenName,
       profile.surname
     );
@@ -354,7 +364,7 @@ router.post('/microsoft/callback', async (req: Request, res: Response) => {
     if (!result.success) {
       return res.status(401).json({
         success: false,
-        error: result.error
+        error: result.error,
       });
     }
 
@@ -362,13 +372,23 @@ router.post('/microsoft/callback', async (req: Request, res: Response) => {
       success: true,
       token: result.token,
       user: result.user,
-      firstLogin: result.firstLogin
+      firstLogin: result.firstLogin,
     });
   } catch (error) {
-    logger.error('Microsoft SSO callback error:', error);
+    const err = error as { message?: string; code?: string; cause?: { message?: string } };
+    logger.error('Microsoft SSO callback error:', {
+      message: err?.message,
+      code: err?.code,
+      cause: err?.cause?.message,
+    });
+    const detail = err?.cause?.message || err?.message || '';
+    const headerIssue =
+      /invalid character in header|invalid header value|is an invalid header/i.test(detail);
     res.status(500).json({
       success: false,
-      error: 'Erreur lors de la connexion Microsoft'
+      error: headerIssue
+        ? 'Erreur SSO : caractère invalide dans le header Authorization (token Microsoft corrompu). Réessayez la connexion.'
+        : 'Erreur lors de la connexion Microsoft',
     });
   }
 });
