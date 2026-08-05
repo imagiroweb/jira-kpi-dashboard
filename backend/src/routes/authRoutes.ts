@@ -63,13 +63,36 @@ router.get('/microsoft/config', (req: Request, res: Response) => {
     });
   }
 
+  // URI de callback = page SPA (fragment OAuth). Jamais /api/... (POST Graph uniquement).
+  const host = req.get('host') || 'localhost';
+  const proto = (req.get('x-forwarded-proto') || req.protocol || 'https').split(',')[0].trim();
   res.json({
     success: true,
     enabled: true,
     clientId,
     tenantId,
-    redirectUri: process.env.MICROSOFT_REDIRECT_URI || `${req.protocol}://${req.get('host')}/api/auth/microsoft/callback`
+    redirectUri:
+      process.env.MICROSOFT_REDIRECT_URI || `${proto}://${host}/auth/microsoft/callback`,
   });
+});
+
+/**
+ * Filet de sécurité : si Azure redirige encore vers /api/auth/microsoft/callback
+ * (ancienne config), le fragment reste côté navigateur. On renvoie une page qui
+ * redirige vers la route SPA en conservant hash + query.
+ */
+router.get('/microsoft/callback', (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.status(200).send(`<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="utf-8"><title>Connexion Microsoft</title></head>
+<body>
+<p>Redirection SSO…</p>
+<script>
+location.replace("/auth/microsoft/callback" + location.search + location.hash);
+</script>
+</body>
+</html>`);
 });
 
 router.use(requireMongo);
