@@ -146,9 +146,11 @@ export function LoginPage() {
   const handleMicrosoftLogin = () => {
     if (!microsoftConfig) return;
 
-    // Toujours utiliser l'origine courante pour rester sur le même port (ex. 3001)
-    // Azure doit avoir cette URI enregistrée (ex. http://localhost:3001/auth/microsoft/callback)
-    const redirectUri = window.location.origin + '/auth/microsoft/callback';
+    // Doit être identique à Azure (SPA) et à MICROSOFT_REDIRECT_URI côté backend.
+    // Fallback local : même origine + route React /auth/microsoft/callback (jamais /api/...).
+    const redirectUri =
+      microsoftConfig.redirectUri?.trim() ||
+      `${window.location.origin}/auth/microsoft/callback`;
     const params = new URLSearchParams({
       client_id: microsoftConfig.clientId,
       response_type: 'token',
@@ -156,7 +158,7 @@ export function LoginPage() {
       scope: 'openid profile email User.Read',
       response_mode: 'fragment',
       state: crypto.randomUUID(),
-      nonce: crypto.randomUUID()
+      nonce: crypto.randomUUID(),
     });
 
     const authUrl = `https://login.microsoftonline.com/${microsoftConfig.tenantId}/oauth2/v2.0/authorize?${params.toString()}`;

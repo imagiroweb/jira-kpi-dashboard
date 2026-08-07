@@ -43,6 +43,9 @@ describe('MicrosoftCallback', () => {
     resetStore();
     vi.clearAllMocks();
     stubLocation();
+    vi.stubGlobal('history', {
+      replaceState: vi.fn(),
+    });
   });
 
   afterEach(() => {
@@ -168,6 +171,22 @@ describe('MicrosoftCallback', () => {
     await waitFor(() => {
       expect(screen.getByText('Network error')).toBeInTheDocument();
     });
+  });
+
+  it('n’affiche pas une SyntaxError brute (message technique Safari)', async () => {
+    stubLocation({ hash: '#access_token=token' });
+    mockMicrosoftCallback.mockRejectedValue(
+      new SyntaxError("Unexpected token '{'. Expected ')' to end a compound expression")
+    );
+
+    render(<MicrosoftCallback />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Erreur technique lors de la connexion Microsoft/i)).toBeInTheDocument();
+    });
+    expect(
+      screen.queryByText(/compound expression/i)
+    ).not.toBeInTheDocument();
   });
 
   it('redirige vers la connexion depuis l’écran d’erreur', async () => {

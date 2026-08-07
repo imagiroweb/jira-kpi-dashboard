@@ -29,6 +29,10 @@ describe('LoginPage', () => {
     mockGetRolesForSignup.mockResolvedValue([]);
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('connecte l’utilisateur en cas de login réussi', async () => {
     mockLogin.mockResolvedValue({
       success: true,
@@ -143,6 +147,39 @@ describe('LoginPage', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /microsoft/i })).toBeInTheDocument();
     });
+  });
+
+  it('utilise redirectUri de la config backend pour l’authorize Microsoft', async () => {
+    const redirectUri = 'https://jira-kpi.imagiro.fr/auth/microsoft/callback';
+    mockGetMicrosoftConfig.mockResolvedValue({
+      enabled: true,
+      clientId: 'ms-client-id',
+      tenantId: 'ms-tenant-id',
+      redirectUri,
+    });
+
+    let capturedHref = '';
+    vi.stubGlobal('location', {
+      ...window.location,
+      origin: 'https://jira-kpi.imagiro.fr',
+      get href() {
+        return capturedHref;
+      },
+      set href(value: string) {
+        capturedHref = value;
+      },
+    });
+
+    renderWithProviders(<LoginPage />, { user: null });
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /microsoft/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /microsoft/i }));
+
+    expect(capturedHref).toContain('login.microsoftonline.com/ms-tenant-id/oauth2/v2.0/authorize');
+    expect(capturedHref).toContain(`redirect_uri=${encodeURIComponent(redirectUri)}`);
   });
 
   it('affiche une erreur lors de l’inscription échouée', async () => {

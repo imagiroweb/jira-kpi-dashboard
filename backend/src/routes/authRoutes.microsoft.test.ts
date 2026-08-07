@@ -135,6 +135,37 @@ describe('authRoutes — Microsoft (TI)', () => {
       expect(res.status).toBe(200);
       expect(res.body.enabled).toBe(true);
     });
+
+    it('fallback redirectUri pointe vers la route SPA /auth/... (pas /api/...)', async () => {
+      process.env.MICROSOFT_CLIENT_ID = 'ms-client-id';
+      delete process.env.MICROSOFT_REDIRECT_URI;
+
+      const res = await request(app).get('/api/auth/microsoft/config');
+
+      expect(res.status).toBe(200);
+      expect(res.body.redirectUri).toMatch(/\/auth\/microsoft\/callback$/);
+      expect(res.body.redirectUri).not.toMatch(/\/api\/auth\/microsoft\/callback/);
+    });
+  });
+
+  describe('GET /api/auth/microsoft/callback', () => {
+    it('renvoie une page HTML qui redirige vers la route SPA', async () => {
+      const res = await request(app).get('/api/auth/microsoft/callback');
+
+      expect(res.status).toBe(200);
+      expect(res.headers['content-type']).toMatch(/text\/html/);
+      expect(res.text).toContain('/auth/microsoft/callback');
+      expect(res.text).toContain('location.hash');
+    });
+
+    it('reste accessible même si MongoDB est déconnecté', async () => {
+      mongoReadyState = 0;
+
+      const res = await request(app).get('/api/auth/microsoft/callback');
+
+      expect(res.status).toBe(200);
+      expect(res.text).toContain('location.replace');
+    });
   });
 
   describe('POST /api/auth/microsoft/callback', () => {

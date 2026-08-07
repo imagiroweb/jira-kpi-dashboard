@@ -4,6 +4,23 @@ import { useStore } from '../store/useStore';
 import { authApi } from '../services/authApi';
 import { isSafeMicrosoftAccessToken, parseOAuthFragment } from '../utils/microsoftOAuth';
 
+/** Évite d’afficher des messages JS bruts (ex. SyntaxError Safari) à l’utilisateur. */
+function friendlySsoError(err: unknown): string {
+  const fromApi = (err as { response?: { data?: { error?: string } } })?.response?.data?.error;
+  if (fromApi && typeof fromApi === 'string') return fromApi;
+
+  const message = err instanceof Error ? err.message : typeof err === 'string' ? err : '';
+  if (
+    err instanceof SyntaxError ||
+    /unexpected token|compound expression|invalid character in header|invalid header/i.test(
+      message
+    )
+  ) {
+    return 'Erreur technique lors de la connexion Microsoft. Réessayez, ou vérifiez la configuration Azure (URI de redirection SPA).';
+  }
+  return message || 'Erreur de connexion au serveur';
+}
+
 export function MicrosoftCallback() {
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +44,7 @@ export function MicrosoftCallback() {
         const accessToken = hashParams.access_token;
         if (!accessToken) {
           setError(
-            "Token d'accès manquant. Vérifiez que l'URI de redirection dans Azure correspond à cette page."
+            "Token d'accès manquant. Vérifiez que l'URI de redirection dans Azure correspond à cette page (/auth/microsoft/callback, type SPA)."
           );
           setStatus('error');
           return;
@@ -39,6 +56,13 @@ export function MicrosoftCallback() {
           );
           setStatus('error');
           return;
+        }
+
+        // Retirer le token de l’URL (historique / fuites via referrer)
+        try {
+          window.history.replaceState(null, '', window.location.pathname + window.location.search);
+        } catch {
+          // ignore
         }
 
         const result = await authApi.microsoftCallback(accessToken.trim());
@@ -55,12 +79,7 @@ export function MicrosoftCallback() {
         }
       } catch (err: unknown) {
         console.error('Microsoft callback error:', err);
-        const msg =
-          (err as { response?: { data?: { error?: string } }; message?: string })?.response?.data
-            ?.error ||
-          (err as Error)?.message ||
-          'Erreur de connexion au serveur';
-        setError(msg);
+        setError(friendlySsoError(err));
         setStatus('error');
       }
     };
