@@ -135,6 +135,24 @@ export function findRoadmapDateColumn(columns: MondayColumn[]): MondayColumn | n
   return columns.find((c) => normalizeTitle(c.title) === 'date') ?? null;
 }
 
+/**
+ * Colonne « CHR » (statut Q1/Q2/Q3/Q4/2027/To define/NO GO) : trimestre de référence
+ * du board Roadmap Adoria, utilisée en complément de la timeline « Date » — certaines
+ * lignes n'ont pas de date renseignée mais sont déjà catégorisées par trimestre via CHR.
+ */
+export function findRoadmapQuarterStatusColumn(columns: MondayColumn[]): MondayColumn | null {
+  return columns.find((c) => normalizeTitle(c.title) === 'chr') ?? null;
+}
+
+/**
+ * La valeur de la colonne CHR correspond-elle au trimestre ciblé (ex. « Q3 ») ?
+ * Suppose que « Q1 »..« Q4 » désignent l'année du board (Roadmap Adoria 2026) ; les lignes
+ * d'une autre année utilisent une valeur dédiée (ex. « 2027 »), sans ambiguïté à ce jour.
+ */
+export function roadmapQuarterStatusMatchesQuarter(value: string, qTarget: CalendarQuarter): boolean {
+  return value.trim().toUpperCase() === `Q${qTarget}`;
+}
+
 export function findRoadmapPmColumn(columns: MondayColumn[]): MondayColumn | null {
   const exact = columns.find((c) => normalizeTitle(c.title) === 'pm');
   if (exact) return exact;
