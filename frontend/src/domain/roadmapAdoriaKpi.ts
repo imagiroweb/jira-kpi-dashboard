@@ -144,7 +144,11 @@ export function findRoadmapQuarterStatusColumn(columns: MondayColumn[]): MondayC
   return columns.find((c) => normalizeTitle(c.title) === 'chr') ?? null;
 }
 
-/** La valeur de la colonne CHR correspond-elle au trimestre ciblé (ex. « Q3 ») ? */
+/**
+ * La valeur de la colonne CHR correspond-elle au trimestre ciblé (ex. « Q3 ») ?
+ * Suppose que « Q1 »..« Q4 » désignent l'année du board (Roadmap Adoria 2026) ; les lignes
+ * d'une autre année utilisent une valeur dédiée (ex. « 2027 »), sans ambiguïté à ce jour.
+ */
 export function roadmapQuarterStatusMatchesQuarter(value: string, qTarget: CalendarQuarter): boolean {
   return value.trim().toUpperCase() === `Q${qTarget}`;
 }
