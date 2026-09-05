@@ -373,17 +373,17 @@ describe('ProduitDashboard', () => {
 
     for (const label of [
       'Sans CP référent',
+      'Sans macro chiffrage',
       'Sans solution doc',
       'Sans wireframe',
-      'Sans maquettes',
-      'Sans macro chiffrage',
       'Sans estimation',
       'Sans devis',
-      'Sans validation client',
-      'Sans validation clients',
-      'Sans validation opérationnelle',
-      'Sans validation marketing',
+      'Sans Validation client devis',
       'Sans clients pilotes',
+      'Sans maquettes',
+      'Sans validation opérationnelle',
+      'Sans validation client finale',
+      'Sans validation marketing',
       'Sans Epic',
     ]) {
       expect(screen.getByTitle(`${label} — voir le détail des lignes`)).toBeInTheDocument();
