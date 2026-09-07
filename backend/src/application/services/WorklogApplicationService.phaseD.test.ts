@@ -60,6 +60,23 @@ jest.mock('../../utils/logger', () => ({
   logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() }
 }));
 
+const mockEnsureYtdBackfill = jest.fn();
+const mockSumHoursByProject = jest.fn();
+const mockProjectsWithCoverage = jest.fn();
+const mockIsMongoReady = jest.fn();
+const mockUpsertBuckets = jest.fn();
+
+jest.mock('./WorklogHoursDailyService', () => ({
+  worklogHoursDailyService: {
+    ensureYtdBackfill: (...args: unknown[]) => mockEnsureYtdBackfill(...args),
+    sumHoursByProject: (...args: unknown[]) => mockSumHoursByProject(...args),
+    projectsWithCoverage: (...args: unknown[]) => mockProjectsWithCoverage(...args),
+    isMongoReady: (...args: unknown[]) => mockIsMongoReady(...args),
+    upsertBuckets: (...args: unknown[]) => mockUpsertBuckets(...args),
+  },
+  bucketHoursByCalendarDate: () => new Map<string, number>(),
+}));
+
 jest.mock('../../infrastructure/Container', () => ({
   container: () => ({
     jiraClient: mockJiraClient,
@@ -74,6 +91,10 @@ jest.mock('../../infrastructure/Container', () => ({
 }));
 
 import { WorklogApplicationService } from './WorklogApplicationService';
+import { globalCache } from '../../infrastructure/cache/CacheDecorator';
+import { Worklog } from '../../domain/worklog/entities/Worklog';
+import { Author } from '../../domain/worklog/value-objects/Author';
+import { TimeSpent } from '../../domain/worklog/value-objects/TimeSpent';
 
 describe('WorklogApplicationService (phase D — Jira orchestration)', () => {
   const service = new WorklogApplicationService();
@@ -85,11 +106,21 @@ describe('WorklogApplicationService (phase D — Jira orchestration)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    globalCache.clear();
     delete process.env.JIRA_RESOLVED_BY_DAY_PROJECT;
     delete process.env.JIRA_RESOLVED_BY_DAY_GROUP_BY;
     delete process.env.JIRA_RESOLVED_BY_DAY_TYPES;
     delete process.env.JIRA_RESOLUTION_NAME;
     delete process.env.JIRA_RESOLUTION_ID;
+    delete process.env.JIRA_REL_PROJECT_KEY;
+    process.env.JIRA_SUPPORT_PROJECT_KEY = 'SB';
+
+    // Phase 2 : par défaut pas de couverture Mongo → fallback Jira (comportement historique des tests)
+    mockEnsureYtdBackfill.mockResolvedValue(false);
+    mockSumHoursByProject.mockResolvedValue(new Map());
+    mockProjectsWithCoverage.mockResolvedValue(new Set());
+    mockIsMongoReady.mockReturnValue(false);
+    mockUpsertBuckets.mockResolvedValue(0);
 
     mockJiraClient.configuredProjectKeys = ['ABC'];
     mockJiraClient.configuredBoardIds = [1];
@@ -438,6 +469,83 @@ describe('WorklogApplicationService (phase D — Jira orchestration)', () => {
     const kpi = await service.getSupportBoardKPI(undefined, undefined, true);
     expect(kpi.statusCounts.total).toBe(0);
     expect(kpi.ponderationByStatus.total).toBe(0);
+  });
+
+  it('getSupportBoardKPI sert le cache mémoire au 2e appel (issue #37)', async () => {
+    mockJiraClient.configuredBoardIds = [1];
+    mockJiraClient.getBoardSprints.mockResolvedValue([
+      { id: 1, name: 'S', state: 'active', startDate: '2026-04-01T00:00:00.000Z', endDate: '2026-04-15T00:00:00.000Z' }
+    ]);
+
+    await service.getSupportBoardKPI(undefined, undefined, true);
+    const firstSearchCalls = mockJiraClient.searchIssuesWithPagination.mock.calls.length;
+    expect(firstSearchCalls).toBeGreaterThan(0);
+
+    await service.getSupportBoardKPI(undefined, undefined, true);
+    expect(mockJiraClient.searchIssuesWithPagination.mock.calls.length).toBe(firstSearchCalls);
+  });
+
+  it('getSupportBuildRatio YTD lit Mongo quand couverture complète (issue #37 phase 2)', async () => {
+    mockProjectsWithCoverage.mockResolvedValue(new Set(['ABC', 'SB']));
+    mockSumHoursByProject.mockResolvedValue(
+      new Map([
+        ['ABC', 90],
+        ['SB', 10],
+      ])
+    );
+
+    const kpi = await service.getSupportBoardKPI(undefined, undefined, true);
+
+    expect(mockEnsureYtdBackfill).toHaveBeenCalled();
+    expect(mockSumHoursByProject).toHaveBeenCalled();
+    expect(mockWorklogRepo.findByProject).not.toHaveBeenCalled();
+    expect(kpi.supportBuildRatio?.yearToDatePercent).toBe(10);
+    expect(kpi.supportBuildRatio?.yearToDateByProject).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ projectKey: 'ABC', hours: 90 }),
+        expect.objectContaining({ projectKey: 'SB', hours: 10 }),
+      ])
+    );
+    for (const row of kpi.supportBuildRatio?.retrievalDetail ?? []) {
+      expect(row.ytd.jql).toContain('mongo worklog_hours_daily');
+      expect(row.ytd.issueCount).toBe(0);
+      expect(row.ytd.worklogCount).toBe(0);
+    }
+  });
+
+  it('getSupportBuildRatio YTD fallback Jira si projet sans couverture Mongo (issue #37 phase 2)', async () => {
+    mockProjectsWithCoverage.mockResolvedValue(new Set(['ABC'])); // SB manquant
+    mockSumHoursByProject.mockResolvedValue(new Map([['ABC', 40], ['SB', 0]]));
+    mockIsMongoReady.mockReturnValue(true);
+
+    mockWorklogRepo.findByProject.mockImplementation(async (projectKey: string) => {
+      if (projectKey !== 'SB') return [];
+      return [
+        Worklog.create({
+          id: 'wl-sb-1',
+          issueKey: 'SB-1',
+          author: Author.create('u1', 'User'),
+          timeSpent: TimeSpent.fromHours(5),
+          workStart: new Date('2026-03-01T10:00:00.000Z'),
+        }),
+      ];
+    });
+
+    const kpi = await service.getSupportBoardKPI(undefined, undefined, true);
+
+    expect(mockWorklogRepo.findByProject).toHaveBeenCalledWith(
+      'SB',
+      expect.anything()
+    );
+    // ABC depuis Mongo (40) + SB depuis Jira (5)
+    expect(kpi.supportBuildRatio?.yearToDatePercent).toBeCloseTo(11.1, 1);
+    const abcDetail = kpi.supportBuildRatio?.retrievalDetail?.find((d) => d.projectKey === 'ABC');
+    const sbDetail = kpi.supportBuildRatio?.retrievalDetail?.find((d) => d.projectKey === 'SB');
+    expect(abcDetail?.ytd.jql).toContain('mongo worklog_hours_daily');
+    expect(sbDetail?.ytd.jql).not.toContain('mongo worklog_hours_daily');
+    expect(sbDetail?.ytd.totalHours).toBe(5);
+    expect(sbDetail?.ytd.worklogCount).toBe(1);
+    expect(mockUpsertBuckets).toHaveBeenCalled();
   });
 
   it('getSupportBoardKPI mappe labels/beginDate/endDate/assignee/statut par ticket (issue #34 — détail par étiquette)', async () => {

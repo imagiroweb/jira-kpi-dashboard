@@ -429,10 +429,15 @@ router.get('/support-kpi', async (req: Request, res: Response) => {
  * Get cache statistics
  * GET /api/worklog/cache/stats
  */
-router.get('/cache/stats', async (req: Request, res: Response) => {
+router.get('/cache/stats', async (_req: Request, res: Response) => {
   res.json({
     success: true,
-    message: 'Cache is managed internally'
+    message: 'Cache mémoire process-local (issue #37 : support-kpi + support-build-ratio)',
+    keysHint: ['support-kpi:active', 'support-kpi:range:…', 'support-build-ratio:…'],
+    ttlEnv: {
+      SUPPORT_KPI_CACHE_TTL_MINUTES: process.env.SUPPORT_KPI_CACHE_TTL_MINUTES || '30',
+      SUPPORT_BUILD_RATIO_CACHE_TTL_MINUTES: process.env.SUPPORT_BUILD_RATIO_CACHE_TTL_MINUTES || '60',
+    },
   });
 });
 

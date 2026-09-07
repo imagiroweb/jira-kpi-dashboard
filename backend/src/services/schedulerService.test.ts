@@ -3,6 +3,7 @@ const mockEmitAlert = jest.fn();
 const mockGetConfiguredProjects = jest.fn();
 const mockGetSprintIssuesForProject = jest.fn();
 const mockGetSupportBoardKPI = jest.fn();
+const mockSyncWorklogHoursDaily = jest.fn();
 const mockCacheClear = jest.fn();
 
 jest.mock('../websocket/socketHandler', () => ({
@@ -14,7 +15,8 @@ jest.mock('../application/services/WorklogApplicationService', () => ({
   worklogAppService: {
     getConfiguredProjects: mockGetConfiguredProjects,
     getSprintIssuesForProject: mockGetSprintIssuesForProject,
-    getSupportBoardKPI: mockGetSupportBoardKPI
+    getSupportBoardKPI: mockGetSupportBoardKPI,
+    syncWorklogHoursDaily: mockSyncWorklogHoursDaily
   }
 }));
 
@@ -47,6 +49,7 @@ describe('schedulerService', () => {
     mockGetConfiguredProjects.mockResolvedValue(['ABC', 'DEF']);
     mockGetSprintIssuesForProject.mockResolvedValue(undefined);
     mockGetSupportBoardKPI.mockResolvedValue(undefined);
+    mockSyncWorklogHoursDaily.mockResolvedValue(undefined);
     process.env.JIRA_SUPPORT_PROJECT_KEY = 'SB';
   });
 
@@ -73,6 +76,7 @@ describe('schedulerService', () => {
     expect(mockCacheClear).toHaveBeenCalled();
     expect(mockGetConfiguredProjects).toHaveBeenCalled();
     expect(mockGetSprintIssuesForProject).toHaveBeenCalledTimes(2);
+    expect(mockSyncWorklogHoursDaily).toHaveBeenCalledWith(3);
     expect(mockGetSupportBoardKPI).toHaveBeenCalledTimes(1);
     expect(mockEmitKpiUpdate).toHaveBeenCalled();
   });

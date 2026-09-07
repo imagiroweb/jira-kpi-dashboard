@@ -2,7 +2,28 @@ import { container } from '../../infrastructure/Container';
 import { DateRange } from '../../domain/worklog/value-objects/DateRange';
 import { Worklog } from '../../domain/worklog/entities/Worklog';
 import { SprintIssue } from '../../domain/sprint/entities/SprintIssue';
+import { globalCache } from '../../infrastructure/cache/CacheDecorator';
+import { worklogHoursDailyService, bucketHoursByCalendarDate } from './WorklogHoursDailyService';
 import { logger } from '../../utils/logger';
+
+function cacheTtlMinutes(envKey: string, defaultMinutes: number): number {
+  const n = parseInt(process.env[envKey] || '', 10);
+  return Number.isFinite(n) && n > 0 ? n : defaultMinutes;
+}
+
+/** Clé cache résultat agrégé Support Board (issue #37). */
+export function supportKpiCacheKey(from?: string, to?: string, activeSprint: boolean = true): string {
+  if (activeSprint || (!from && !to)) return 'support-kpi:active';
+  return `support-kpi:range:${from ?? ''}:${to ?? ''}`;
+}
+
+export function supportBuildRatioCacheKey(
+  year: number,
+  sprintFrom: string | null,
+  sprintTo: string | null
+): string {
+  return `support-build-ratio:${year}:${sprintFrom ?? 'none'}:${sprintTo ?? 'none'}`;
+}
 
 /**
  * Application Service for Worklogs
@@ -139,6 +160,35 @@ export class WorklogApplicationService {
       ytd: { jql: string; issueCount: number; worklogCount: number; totalHours: number; from: string; to: string };
     }>;
   }> {
+    const year = new Date().getFullYear();
+    const ytdFrom = `${year}-01-01`;
+    const ytdTo = new Date().toISOString().slice(0, 10);
+    const rangeYtd = DateRange.create(ytdFrom, ytdTo);
+
+    // Sprint actif : même sémantique que WorklogPro / rapport utilisateurs — worklogDate dans la période
+    // du sprint (getActiveSprintDateRange), pas JQL Sprint in openSprints() (exclut backlog et fausse les heures).
+    const sprintRange = await this.getActiveSprintDateRange();
+    const ratioCacheKey = supportBuildRatioCacheKey(
+      year,
+      sprintRange?.from ?? null,
+      sprintRange?.to ?? null
+    );
+    const cachedRatio = globalCache.get<{
+      activeSprintPercent: number;
+      yearToDatePercent: number;
+      activeSprintByProject: Array<{ projectKey: string; hours: number; percent: number }>;
+      yearToDateByProject: Array<{ projectKey: string; hours: number; percent: number }>;
+      retrievalDetail: Array<{
+        projectKey: string;
+        sprint: { jql: string; issueCount: number; worklogCount: number; totalHours: number };
+        ytd: { jql: string; issueCount: number; worklogCount: number; totalHours: number; from: string; to: string };
+      }>;
+    }>(ratioCacheKey);
+    if (cachedRatio) {
+      logger.info(`Support build-ratio cache HIT: ${ratioCacheKey}`);
+      return cachedRatio;
+    }
+
     const repo = container().worklogRepository;
     const configured = await this.getConfiguredProjects();
     const supportProjectKey = process.env.JIRA_SUPPORT_PROJECT_KEY || 'SB';
@@ -157,15 +207,7 @@ export class WorklogApplicationService {
       ytd: { jql: string; issueCount: number; worklogCount: number; totalHours: number; from: string; to: string };
     }> = [];
 
-    const year = new Date().getFullYear();
-    const ytdFrom = `${year}-01-01`;
-    const ytdTo = new Date().toISOString().slice(0, 10);
-    const rangeYtd = DateRange.create(ytdFrom, ytdTo);
-
     try {
-      // Sprint actif : même sémantique que WorklogPro / rapport utilisateurs — worklogDate dans la période
-      // du sprint (getActiveSprintDateRange), pas JQL Sprint in openSprints() (exclut backlog et fausse les heures).
-      const sprintRange = await this.getActiveSprintDateRange();
       if (!sprintRange) {
         logger.warn('getSupportBuildRatio: getActiveSprintDateRange returned null — ratios sprint actif à 0');
       }
@@ -231,28 +273,54 @@ export class WorklogApplicationService {
         }
       }
 
-      // Year to date: parallel per project
+      // Year to date: Mongo worklog_hours_daily (phase 2), fallback Jira par projet sans couverture
       const hoursByProjectYtd = new Map<string, number>();
+
+      let mongoHours = new Map<string, number>();
+      let covered = new Set<string>();
+      try {
+        await worklogHoursDailyService.ensureYtdBackfill(allProjectKeys, ytdFrom, ytdTo);
+        mongoHours = await worklogHoursDailyService.sumHoursByProject(allProjectKeys, ytdFrom, ytdTo);
+        covered = await worklogHoursDailyService.projectsWithCoverage(allProjectKeys, ytdFrom, ytdTo);
+      } catch (mongoErr) {
+        logger.warn('getSupportBuildRatio: Mongo YTD unavailable, full Jira fallback:', mongoErr);
+      }
+
       const ytdRows = await Promise.all(
         allProjectKeys.map(async (projectKey) => {
+          const pk = projectKey.trim().toUpperCase();
+          if (covered.has(pk)) {
+            const hours = mongoHours.get(pk) ?? 0;
+            hoursByProjectYtd.set(projectKey, hours);
+            return { projectKey, hours, issueCount: 0, worklogCount: 0, source: 'mongo' as const };
+          }
+
           const worklogs = await repo.findByProject(projectKey, rangeYtd);
           const issueCount = new Set(worklogs.map((w) => w.issueKey)).size;
           const hours = worklogs.reduce((sum, w) => sum + w.timeSpent.toHours, 0);
           hoursByProjectYtd.set(projectKey, hours);
-          return {
-            projectKey,
-            issueCount,
-            worklogCount: worklogs.length,
-            hours,
-          };
+
+          try {
+            if (worklogHoursDailyService.isMongoReady()) {
+              await worklogHoursDailyService.upsertBuckets(
+                projectKey,
+                bucketHoursByCalendarDate(worklogs)
+              );
+            }
+          } catch (persistErr) {
+            logger.warn(`getSupportBuildRatio: persist YTD ${projectKey} failed:`, persistErr);
+          }
+
+          return { projectKey, hours, issueCount, worklogCount: worklogs.length, source: 'jira' as const };
         })
       );
       for (let i = 0; i < ytdRows.length; i++) {
         const row = ytdRows[i];
         const projectKey = row.projectKey;
         if (retrievalDetail[i]) {
+          const sourceHint = row.source === 'mongo' ? ' (mongo worklog_hours_daily)' : '';
           retrievalDetail[i].ytd = {
-            jql: `project = "${projectKey}" AND worklogDate >= "${ytdFrom}" AND worklogDate <= "${ytdTo}"`,
+            jql: `project = "${projectKey}" AND worklogDate >= "${ytdFrom}" AND worklogDate <= "${ytdTo}"${sourceHint}`,
             issueCount: row.issueCount,
             worklogCount: row.worklogCount,
             totalHours: Math.round(row.hours * 10) / 10,
@@ -279,13 +347,20 @@ export class WorklogApplicationService {
       logger.warn('getSupportBuildRatio failed:', e);
     }
 
-    return {
+    const ratioResult = {
       activeSprintPercent,
       yearToDatePercent,
       activeSprintByProject,
       yearToDateByProject,
       retrievalDetail,
     };
+    globalCache.set(
+      ratioCacheKey,
+      ratioResult,
+      cacheTtlMinutes('SUPPORT_BUILD_RATIO_CACHE_TTL_MINUTES', 60)
+    );
+    logger.info(`Support build-ratio cache SET: ${ratioCacheKey}`);
+    return ratioResult;
   }
 
   /**
@@ -293,6 +368,13 @@ export class WorklogApplicationService {
    * Fetches issues from Support project and calculates ponderation-based metrics
    */
   async getSupportBoardKPI(from?: string, to?: string, activeSprint: boolean = true): Promise<SupportKPIResult> {
+    const kpiCacheKey = supportKpiCacheKey(from, to, activeSprint);
+    const cachedKpi = globalCache.get<SupportKPIResult>(kpiCacheKey);
+    if (cachedKpi) {
+      logger.info(`Support KPI cache HIT: ${kpiCacheKey}`);
+      return cachedKpi;
+    }
+
     const jiraClient = container().jiraClient;
     const ponderationField = process.env.JIRA_PONDERATION_FIELD || 'customfield_10535';
     const teamField = process.env.JIRA_TEAM_FIELD || 'customfield_10001';
@@ -576,7 +658,7 @@ export class WorklogApplicationService {
       }, 0)
     };
 
-    return {
+    const kpiResult: SupportKPIResult = {
       issues: supportIssues,
       statusCounts,
       ponderationByStatus,
@@ -602,6 +684,33 @@ export class WorklogApplicationService {
         retrievalDetail: supportBuildRatio.retrievalDetail,
       },
     };
+    globalCache.set(
+      kpiCacheKey,
+      kpiResult,
+      cacheTtlMinutes('SUPPORT_KPI_CACHE_TTL_MINUTES', 30)
+    );
+    logger.info(`Support KPI cache SET: ${kpiCacheKey}`);
+    return kpiResult;
+  }
+
+  /**
+   * Sync agrégats worklog_hours_daily (issue #37 phase 2) : J/J−1/… + backfill YTD si vide.
+   * À appeler depuis le scheduler avant le warm getSupportBoardKPI.
+   */
+  async syncWorklogHoursDaily(dayCount = 3): Promise<void> {
+    const configured = await this.getConfiguredProjects();
+    const supportProjectKey = process.env.JIRA_SUPPORT_PROJECT_KEY || 'SB';
+    const relKey = process.env.JIRA_REL_PROJECT_KEY?.trim();
+    const allProjectKeys = Array.from(
+      new Set([...configured, ...(relKey ? [relKey] : []), supportProjectKey])
+    ).filter(Boolean);
+
+    const year = new Date().getFullYear();
+    const ytdFrom = `${year}-01-01`;
+    const ytdTo = new Date().toISOString().slice(0, 10);
+
+    await worklogHoursDailyService.ensureYtdBackfill(allProjectKeys, ytdFrom, ytdTo);
+    await worklogHoursDailyService.syncRecentDays(allProjectKeys, dayCount);
   }
 
   /**
