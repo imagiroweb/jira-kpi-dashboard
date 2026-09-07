@@ -14,6 +14,7 @@ import {
   findColumnPreferSpecific,
   findRoadmapDateColumn,
   findRoadmapPmColumn,
+  findRoadmapQuarterStatusColumn,
   getMondayItemNumericValue,
   getQuarterEndDate,
   getRoadmapDateColumnRaw,
@@ -28,6 +29,7 @@ import {
   parseRoadmapDateColumnRange,
   resolveRoadmapMacroEstimationColumns,
   resolveRoadmapMissingIndicatorColumns,
+  roadmapQuarterStatusMatchesQuarter,
   roadmapRangeFullyInQuarter,
   roadmapRangeFullyInQuarterCurrentYear,
 } from './roadmapAdoriaKpi';
@@ -154,6 +156,30 @@ describe('roadmapAdoriaKpi', () => {
 
     it('findColumnByKeywords statut', () => {
       expect(findColumnByKeywords(columns, ['statut'])?.id).toBe('st');
+    });
+  });
+
+  describe('findRoadmapQuarterStatusColumn / roadmapQuarterStatusMatchesQuarter', () => {
+    const columns: MondayColumn[] = [
+      { id: 'd1', title: 'Date', type: 'timeline' },
+      { id: 'chr1', title: 'CHR', type: 'status' },
+    ];
+
+    it('trouve la colonne CHR par titre exact', () => {
+      expect(findRoadmapQuarterStatusColumn(columns)?.id).toBe('chr1');
+    });
+
+    it('retourne null si aucune colonne CHR', () => {
+      expect(findRoadmapQuarterStatusColumn([{ id: 'd1', title: 'Date', type: 'timeline' }])).toBeNull();
+    });
+
+    it('matche la valeur au trimestre ciblé, insensible à la casse/espaces', () => {
+      expect(roadmapQuarterStatusMatchesQuarter('Q3', 3)).toBe(true);
+      expect(roadmapQuarterStatusMatchesQuarter(' q3 ', 3)).toBe(true);
+      expect(roadmapQuarterStatusMatchesQuarter('Q4', 3)).toBe(false);
+      expect(roadmapQuarterStatusMatchesQuarter('2027', 3)).toBe(false);
+      expect(roadmapQuarterStatusMatchesQuarter('To define', 3)).toBe(false);
+      expect(roadmapQuarterStatusMatchesQuarter('', 3)).toBe(false);
     });
   });
 

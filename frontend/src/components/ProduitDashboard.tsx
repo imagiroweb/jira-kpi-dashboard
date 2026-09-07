@@ -102,6 +102,7 @@ import {
   computeRoadmapMissingIndicators,
   findColumnByKeywords as findColumn,
   findRoadmapDateColumn,
+  findRoadmapQuarterStatusColumn,
   getItemValue,
   getMondayItemNumericValue,
   getQuarterEndDate,
@@ -112,6 +113,7 @@ import {
   isRoadmapStatusDone,
   parseRoadmapDateColumnEndDate,
   parseRoadmapDateColumnRange,
+  roadmapQuarterStatusMatchesQuarter,
   roadmapRangeFullyInQuarterCurrentYear,
   type CalendarQuarter,
   type RoadmapKanbanBucket,
@@ -722,6 +724,13 @@ export function ProduitDashboard() {
     [roadmapData?.columns]
   );
 
+  /** Colonne « CHR » (Q1/Q2/Q3/Q4/…) : trimestre en complément de la timeline « Date », pour les
+   * lignes sans date renseignée mais déjà catégorisées par trimestre côté Monday. */
+  const roadmapQuarterStatusColumn = useMemo(
+    () => (roadmapData?.columns ? findRoadmapQuarterStatusColumn(roadmapData.columns) : null),
+    [roadmapData?.columns]
+  );
+
   const roadmapStatusColumn = useMemo(
     () => (roadmapData?.columns ? findColumn(roadmapData.columns, STATUS_KEYS) : null),
     [roadmapData?.columns]
@@ -749,15 +758,27 @@ export function ProduitDashboard() {
   const roadmapItemsForKpis = useMemo(() => {
     if (!roadmapData?.items?.length) return [];
     let items = roadmapData.items;
-    if (roadmapQuarterFilter !== 'all' && roadmapDateColumn) {
+    if (roadmapQuarterFilter !== 'all' && (roadmapDateColumn || roadmapQuarterStatusColumn)) {
       const currentYear = new Date().getFullYear();
       const qTarget: CalendarQuarter =
         roadmapQuarterFilter === 'Q1' ? 1 : roadmapQuarterFilter === 'Q2' ? 2 : roadmapQuarterFilter === 'Q3' ? 3 : 4;
       items = items.filter((item) => {
-        const raw = getRoadmapDateColumnRaw(item, roadmapDateColumn.id);
-        const { start, end } = parseRoadmapDateColumnRange(raw);
-        if (!start || !end) return false;
-        return roadmapRangeFullyInQuarterCurrentYear(start, end, qTarget, currentYear);
+        let hasUsableDate = false;
+        if (roadmapDateColumn) {
+          const raw = getRoadmapDateColumnRaw(item, roadmapDateColumn.id);
+          const { start, end } = parseRoadmapDateColumnRange(raw);
+          if (start && end) {
+            hasUsableDate = true;
+            if (roadmapRangeFullyInQuarterCurrentYear(start, end, qTarget, currentYear)) return true;
+          }
+        }
+        // CHR ne complète que les lignes sans date exploitable : une date renseignée
+        // reste la source de vérité même si CHR n'a pas été mis à jour en cohérence.
+        if (!hasUsableDate && roadmapQuarterStatusColumn) {
+          const chrValue = getItemValue(item, roadmapQuarterStatusColumn.id);
+          if (roadmapQuarterStatusMatchesQuarter(chrValue, qTarget)) return true;
+        }
+        return false;
       });
     }
     if (roadmapStatusSelected.length > 0 && roadmapStatusColumn) {
@@ -772,6 +793,7 @@ export function ProduitDashboard() {
   }, [
     roadmapData?.items,
     roadmapDateColumn,
+    roadmapQuarterStatusColumn,
     roadmapQuarterFilter,
     roadmapStatusColumn,
     roadmapStatusSelected,
@@ -1148,9 +1170,9 @@ export function ProduitDashboard() {
           )}
           {!roadmapLoading && roadmapDefaultsReady && roadmapKpis && (
             <div className="p-6 space-y-6">
-              {(roadmapDateColumn || roadmapStatusColumn || roadmapTeamColumn) && (
+              {(roadmapDateColumn || roadmapQuarterStatusColumn || roadmapStatusColumn || roadmapTeamColumn) && (
                 <div className="flex flex-wrap items-start gap-x-8 gap-y-3 pb-1 border-b border-surface-700/40">
-                  {roadmapDateColumn && (
+                  {(roadmapDateColumn || roadmapQuarterStatusColumn) && (
                     <div className="flex flex-wrap items-center gap-3 min-w-0">
                       <span className="text-xs font-medium text-surface-500 uppercase tracking-wide shrink-0">
                         Trimestre
@@ -1158,7 +1180,13 @@ export function ProduitDashboard() {
                       <div
                         className="flex flex-wrap gap-1.5"
                         role="group"
-                        aria-label="Filtrer les KPI Roadmap par trimestre (date de fin, colonne DATE)"
+                        aria-label={
+                          roadmapDateColumn && roadmapQuarterStatusColumn
+                            ? 'Filtrer les KPI Roadmap par trimestre (colonne DATE, complétée par la colonne CHR)'
+                            : roadmapQuarterStatusColumn
+                              ? 'Filtrer les KPI Roadmap par trimestre (colonne CHR)'
+                              : 'Filtrer les KPI Roadmap par trimestre (colonne DATE)'
+                        }
                       >
                         {(['all', 'Q1', 'Q2', 'Q3', 'Q4'] as const).map((key) => (
                           <button

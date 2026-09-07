@@ -395,6 +395,76 @@ describe('ProduitDashboard', () => {
     expect(screen.getByTitle('Sans devis — voir le détail des lignes')).toHaveTextContent('—');
   });
 
+  it('filtre trimestre : garde une ligne sans date renseignée si la colonne CHR indique le trimestre ciblé (ticket #29)', async () => {
+    const columnsWithChr = [...TEST_MONDAY_COLUMNS, { id: 'chr', title: 'CHR', type: 'status' }];
+    const itemsWithChr = [
+      ...TEST_MONDAY_ITEMS,
+      {
+        id: 'item-3',
+        name: 'INT135 - Retouches rapport CM V3',
+        column_values: [
+          { id: 'date', text: '', type: 'text' },
+          { id: 'pm', text: 'Bob', type: 'text' },
+          { id: 'st', text: 'Done', type: 'status' },
+          { id: 'team', text: 'Chocolateam', type: 'status' },
+          { id: 'macro', text: '3', type: 'numbers' },
+          { id: 'sol', text: '', type: 'link' },
+          { id: 'wfRequis', text: 'NON', type: 'status' },
+          { id: 'wf', text: '', type: 'link' },
+          { id: 'valClient', text: '', value: '{"checked":false}', type: 'checkbox' },
+          { id: 'chr', text: 'Q3', type: 'status' },
+        ],
+      },
+      {
+        // Date exploitable en Q1 mais CHR resté sur "Q3" (non mis à jour) : la date
+        // reste la source de vérité, cette ligne ne doit pas remonter sous le filtre Q3.
+        id: 'item-4',
+        name: 'CHR obsolète mais date renseignée',
+        column_values: [
+          { id: 'date', text: '2026-02-01 - 2026-02-15', type: 'text' },
+          { id: 'pm', text: 'Bob', type: 'text' },
+          { id: 'st', text: 'Done', type: 'status' },
+          { id: 'team', text: 'Team Cook', type: 'status' },
+          { id: 'macro', text: '3', type: 'numbers' },
+          { id: 'sol', text: '', type: 'link' },
+          { id: 'wfRequis', text: 'NON', type: 'status' },
+          { id: 'wf', text: '', type: 'link' },
+          { id: 'valClient', text: '', value: '{"checked":false}', type: 'checkbox' },
+          { id: 'chr', text: 'Q3', type: 'status' },
+        ],
+      },
+    ];
+    mockGetBoard.mockImplementation(async (boardId: string) => {
+      if (boardId === SUIVI_BOARD_ID) {
+        return {
+          success: true,
+          columns: SUIVI_COLUMNS,
+          items: SUIVI_ITEMS,
+          board: { id: boardId, name: 'Suivi clients', state: 'active', boardKind: 'public', itemCount: 2 },
+        };
+      }
+      return {
+        success: true,
+        columns: columnsWithChr,
+        items: itemsWithChr,
+        board: { id: boardId, name: 'Board', state: 'active', boardKind: 'public', itemCount: 4 },
+      };
+    });
+
+    renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
+
+    // Feature B (Q2, sol vide) + INT135 (sans date, sol vide) + item-4 (Q1, sol vide) = 3 avant filtre trimestre.
+    expect(await screen.findByTitle('Sans solution doc — voir le détail des lignes')).toHaveTextContent('3');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Q3' }));
+
+    // Feature A/B sont hors Q3 (dates en Q1/Q2) ; item-4 a une date exploitable en Q1 donc
+    // son CHR="Q3" obsolète est ignoré ; seule INT135 reste, via son CHR = Q3 (pas de date).
+    await waitFor(() => {
+      expect(screen.getByTitle('Sans solution doc — voir le détail des lignes')).toHaveTextContent('1');
+    });
+  });
+
   it('ouvre le détail d’un encart « Sans … » et respecte la colonne « … requis ? »', async () => {
     renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
 
