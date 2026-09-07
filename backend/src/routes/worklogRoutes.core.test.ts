@@ -453,13 +453,15 @@ describe('worklogRoutes — core (TI)', () => {
   });
 
   describe('GET /api/worklog/cache/stats', () => {
-    it('retourne 200 avec message statique', async () => {
+    it('retourne 200 avec infos TTL support KPI', async () => {
       const res = await request(app).get('/api/worklog/cache/stats');
 
       expect(res.status).toBe(200);
-      expect(res.body).toEqual({
-        success: true,
-        message: 'Cache is managed internally',
+      expect(res.body.success).toBe(true);
+      expect(res.body.message).toMatch(/support-kpi/i);
+      expect(res.body.ttlEnv).toEqual({
+        SUPPORT_KPI_CACHE_TTL_MINUTES: '30',
+        SUPPORT_BUILD_RATIO_CACHE_TTL_MINUTES: '60',
       });
     });
   });

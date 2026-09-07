@@ -67,7 +67,7 @@ class SchedulerService {
     logger.info('Running scheduled Jira sync...');
 
     try {
-      // Clear cache to force fresh data
+      // Clear cache to force fresh data (le warm getSupportBoardKPI remplit support-kpi:* ensuite)
       globalCache.clear();
 
       // Get configured projects (includes main project + support project)
@@ -90,7 +90,16 @@ class SchedulerService {
         }
       }
 
-      // Sync Support Board KPI if configured
+      // Agrégats YTD Mongo (phase 2) avant warm KPI — évite le N+1 worklogs année entière
+      try {
+        await worklogAppService.syncWorklogHoursDaily(3);
+      } catch (hoursErr) {
+        const errorMsg = hoursErr instanceof Error ? hoursErr.message : 'Unknown error';
+        logger.warn('Error syncing worklog_hours_daily:', hoursErr);
+        errors.push(`worklog_hours_daily: ${errorMsg}`);
+      }
+
+      // Sync Support Board KPI if configured (préchauffe aussi le cache mémoire issue #37)
       if (supportProjectKey) {
         try {
           await worklogAppService.getSupportBoardKPI();
