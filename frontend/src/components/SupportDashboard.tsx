@@ -21,6 +21,12 @@ interface SupportIssue {
   assignee: string | null;
   created: string;
   resolved: string | null;
+  /** Étiquettes Jira (ex. « SUPP-NOT-A-BUG ») — pour le détail par étiquette. */
+  labels?: string[];
+  /** Date de prise en charge. */
+  beginDate?: string | null;
+  /** Date de résolution (renseignée seulement si le ticket est résolu). */
+  endDate?: string | null;
 }
 
 interface AssigneeStats {
@@ -136,6 +142,8 @@ export function SupportDashboard() {
   const [showResolutionDetails, setShowResolutionDetails] = useState(false);
   // First response (1ère prise en charge) details modal state
   const [showFirstResponseDetails, setShowFirstResponseDetails] = useState(false);
+  // Label details modal state (encart « Répartition par Étiquette », ex. SUPP-NOT-A-BUG) — null = fermée
+  const [labelDetailsFor, setLabelDetailsFor] = useState<string | null>(null);
 
   const filtersKey = useMemo(
     () => `${dateRange.from}|${dateRange.to}|${useActiveSprint}`,
@@ -235,6 +243,15 @@ export function SupportDashboard() {
     if (!kpiData) return [];
     return kpiData.ponderationByAssignee.slice(0, 8);
   }, [kpiData]);
+
+  /** Tickets de l'étiquette ouverte dans la modale détail (ex. SUPP-NOT-A-BUG), triés du plus récent au plus ancien. */
+  const labelDetailIssues = useMemo(() => {
+    if (!kpiData || !labelDetailsFor) return [];
+    return kpiData.issues
+      .filter((issue) => (issue.labels ?? []).includes(labelDetailsFor))
+      .slice()
+      .sort((a, b) => new Date(b.created).getTime() - new Date(a.created).getTime());
+  }, [kpiData, labelDetailsFor]);
 
   // Issue types sorted by ponderation
   const issueTypesSorted = useMemo(() => {
@@ -1304,9 +1321,12 @@ export function SupportDashboard() {
                   const borderColor = colorClass.split(' ')[0];
                   
                   return (
-                    <div 
-                      key={item.label} 
-                      className={`bg-surface-800/50 rounded-lg p-3 border-l-4 ${borderColor}`}
+                    <button
+                      type="button"
+                      key={item.label}
+                      onClick={() => setLabelDetailsFor(item.label)}
+                      title={`Cliquer pour voir le détail des tickets « ${item.label} »`}
+                      className={`bg-surface-800/50 rounded-lg p-3 border-l-4 ${borderColor} w-full text-left cursor-pointer hover:bg-surface-800/80 transition-colors`}
                     >
                       <div className="flex items-center justify-between mb-2">
                         <span className={`text-sm font-medium truncate max-w-[70%] ${colorClass.split(' ')[1]}`} title={item.label}>
@@ -1324,7 +1344,7 @@ export function SupportDashboard() {
                           style={{ width: `${percent}%` }}
                         />
                       </div>
-                    </div>
+                    </button>
                   );
                 })}
               </div>
@@ -1697,6 +1717,92 @@ export function SupportDashboard() {
               <button
                 onClick={() => setShowResolutionDetails(false)}
                 className="w-full px-4 py-2.5 bg-surface-700 hover:bg-surface-600 rounded-lg text-surface-200 transition-colors"
+              >
+                Fermer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Label Details Modal (encart « Répartition par Étiquette », ex. SUPP-NOT-A-BUG) */}
+      {labelDetailsFor && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="card-glass p-6 w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col animate-slide-up">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h3 className="text-xl font-semibold text-surface-100 flex items-center gap-2">
+                  <Tag className="w-5 h-5 text-accent-400" />
+                  Détail étiquette « {labelDetailsFor} »
+                </h3>
+                <p className="text-sm text-surface-500 mt-1">
+                  {labelDetailIssues.length} ticket{labelDetailIssues.length > 1 ? 's' : ''} • Ordre décroissant (création)
+                </p>
+              </div>
+              <button
+                onClick={() => setLabelDetailsFor(null)}
+                className="p-2 hover:bg-surface-700 rounded-lg transition-colors"
+              >
+                <X className="w-5 h-5 text-surface-400" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              <table className="w-full">
+                <thead className="sticky top-0 bg-surface-900">
+                  <tr className="text-left text-xs text-surface-500 uppercase tracking-wider">
+                    <th className="pb-3 pr-4">Ticket</th>
+                    <th className="pb-3 pr-4">Résumé</th>
+                    <th className="pb-3 pr-4 text-center">Statut</th>
+                    <th className="pb-3 pr-4 text-center">Prise en charge</th>
+                    <th className="pb-3 pr-4 text-center">Résolution</th>
+                    <th className="pb-3 text-center">Assigné</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-surface-800">
+                  {labelDetailIssues.map((issue) => (
+                    <tr key={issue.issueKey} className="hover:bg-surface-800/50 transition-colors">
+                      <td className="py-3 pr-4">
+                        <a
+                          href={`https://${import.meta.env.VITE_JIRA_DOMAIN || 'jira.atlassian.net'}/browse/${issue.issueKey}`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-primary-400 hover:text-primary-300 font-mono text-sm"
+                        >
+                          {issue.issueKey}
+                        </a>
+                      </td>
+                      <td className="py-3 pr-4">
+                        <span className="text-sm text-surface-200 line-clamp-1" title={issue.summary}>
+                          {issue.summary}
+                        </span>
+                      </td>
+                      <td className="py-3 pr-4 text-center">
+                        <span className="text-xs text-surface-400">{issue.status}</span>
+                      </td>
+                      <td className="py-3 pr-4 text-center">
+                        <span className="text-xs text-surface-400">
+                          {issue.beginDate ? new Date(issue.beginDate).toLocaleDateString('fr-FR') : '—'}
+                        </span>
+                      </td>
+                      <td className="py-3 pr-4 text-center">
+                        <span className="text-xs text-surface-400">
+                          {issue.endDate ? new Date(issue.endDate).toLocaleDateString('fr-FR') : '—'}
+                        </span>
+                      </td>
+                      <td className="py-3 text-center">
+                        <span className="text-sm text-surface-300">{issue.assignee || 'Non assigné'}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="mt-4 pt-4 border-t border-surface-700 flex justify-end">
+              <button
+                onClick={() => setLabelDetailsFor(null)}
+                className="px-4 py-2 bg-surface-700 hover:bg-surface-600 rounded-lg text-surface-200 transition-colors"
               >
                 Fermer
               </button>

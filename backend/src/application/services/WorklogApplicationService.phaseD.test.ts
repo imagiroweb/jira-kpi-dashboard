@@ -440,6 +440,54 @@ describe('WorklogApplicationService (phase D — Jira orchestration)', () => {
     expect(kpi.ponderationByStatus.total).toBe(0);
   });
 
+  it('getSupportBoardKPI mappe labels/beginDate/endDate/assignee/statut par ticket (issue #34 — détail par étiquette)', async () => {
+    mockJiraClient.configuredBoardIds = [1];
+    mockJiraClient.getBoardSprints.mockResolvedValue([
+      { id: 1, name: 'S', state: 'active', startDate: '2026-04-01T00:00:00.000Z', endDate: '2026-04-15T00:00:00.000Z' }
+    ]);
+    // 1er appel searchIssuesWithPagination = issues du sprint, 2e = backlog (Promise.all, appelé dans cet ordre)
+    mockJiraClient.searchIssuesWithPagination
+      .mockResolvedValueOnce({
+        issues: [
+          {
+            key: 'SB-1',
+            fields: {
+              summary: 'Ticket faussement remonté comme bug',
+              issuetype: { name: 'Bug' },
+              status: { name: 'Resolved', statusCategory: { key: 'done' } },
+              created: '2026-04-01T08:00:00.000Z',
+              resolutiondate: '2026-04-05T10:00:00.000Z',
+              assignee: { displayName: 'Alice' },
+              labels: ['SUPP-NOT-A-BUG'],
+              customfield_10535: 5, // ponderationField (JIRA_PONDERATION_FIELD, défaut)
+              customfield_10001: { name: 'Support' }, // teamField (défaut)
+              customfield_10537: '2026-04-02T09:00:00.000Z', // beginDateField (défaut)
+              customfield_10538: '2026-04-05T10:00:00.000Z' // endDateField (défaut)
+            }
+          }
+        ],
+        total: 1,
+        startAt: 0,
+        maxResults: 1
+      })
+      .mockResolvedValueOnce({ issues: [], total: 0, startAt: 0, maxResults: 0 });
+
+    const kpi = await service.getSupportBoardKPI(undefined, undefined, true);
+
+    expect(kpi.issues).toHaveLength(1);
+    const issue = kpi.issues[0];
+    expect(issue.issueKey).toBe('SB-1');
+    expect(issue.status).toBe('Resolved');
+    expect(issue.statusCategory).toBe('done');
+    expect(issue.assignee).toBe('Alice');
+    expect(issue.labels).toEqual(['SUPP-NOT-A-BUG']);
+    expect(issue.beginDate).toBe('2026-04-02T09:00:00.000Z');
+    expect(issue.endDate).toBe('2026-04-05T10:00:00.000Z');
+
+    const notABugLabel = kpi.ponderationByLabel.find((l) => l.label === 'SUPP-NOT-A-BUG');
+    expect(notABugLabel).toEqual({ label: 'SUPP-NOT-A-BUG', ponderation: 5, ticketCount: 1 });
+  });
+
   it('getEpicProgressByBoard sans projet retourne vide', async () => {
     mockJiraClient.getBoard.mockResolvedValueOnce({ id: 99, name: 'Orphan', location: {} });
     const res = await service.getEpicProgressByBoard(99, 'all', 'all', 1, 20);

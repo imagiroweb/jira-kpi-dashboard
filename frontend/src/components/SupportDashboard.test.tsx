@@ -220,6 +220,25 @@ describe('SupportDashboard', () => {
     });
   });
 
+  it('ouvre la modale de détail d’une étiquette (issue #34, ex. SUPP-NOT-A-BUG)', async () => {
+    vi.stubGlobal('fetch', makeSupportFetchMock());
+
+    renderWithProviders(<SupportDashboard />, { user: TEST_USER });
+
+    await waitFor(() => {
+      expect(screen.getByTitle('Cliquer pour voir le détail des tickets « urgent »')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTitle('Cliquer pour voir le détail des tickets « urgent »'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Détail étiquette « urgent »')).toBeInTheDocument();
+      expect(screen.getByText('SUP-1')).toBeInTheDocument();
+      expect(screen.getByText('Resolved')).toBeInTheDocument();
+      expect(screen.getByText('Alice')).toBeInTheDocument();
+    });
+  });
+
   it('affiche l’historique vide quand aucun snapshot n’existe', async () => {
     vi.stubGlobal('fetch', makeSupportFetchMock());
     mockGetSnapshots.mockResolvedValue({ success: true, snapshots: [] });

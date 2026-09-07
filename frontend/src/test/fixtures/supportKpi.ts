@@ -11,6 +11,9 @@ export const TEST_SUPPORT_KPI_PAYLOAD = {
       assignee: 'Alice',
       created: '2026-04-01T08:00:00.000Z',
       resolved: '2026-04-02T10:00:00.000Z',
+      labels: ['urgent'],
+      beginDate: '2026-04-01T09:00:00.000Z',
+      endDate: '2026-04-02T10:00:00.000Z',
     },
   ],
   statusCounts: {
