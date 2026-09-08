@@ -7,6 +7,7 @@ export const PAGE_IDS = [
   'epics',
   'marketing',
   'produit',
+  'pointHebdo',
   'gestionUtilisateurs'
 ] as const;
 
@@ -19,6 +20,7 @@ export interface IPageVisibilities {
   epics: boolean;
   marketing: boolean;
   produit: boolean;
+  pointHebdo: boolean;
   gestionUtilisateurs: boolean;
 }
 
@@ -36,6 +38,7 @@ const defaultPageVisibilities: IPageVisibilities = {
   epics: true,
   marketing: true,
   produit: true,
+  pointHebdo: true,
   gestionUtilisateurs: false
 };
 
@@ -47,6 +50,7 @@ const PageVisibilitiesSchema = new Schema<IPageVisibilities>(
     epics: { type: Boolean, default: true },
     marketing: { type: Boolean, default: true },
     produit: { type: Boolean, default: true },
+    pointHebdo: { type: Boolean, default: true },
     gestionUtilisateurs: { type: Boolean, default: false }
   },
   { _id: false }

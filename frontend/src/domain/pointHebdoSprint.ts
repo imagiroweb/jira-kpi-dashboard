@@ -1,0 +1,409 @@
+/**
+ * Logique métier du point hebdo sprint (Dev & QA), extraite du composant pour
+ * rester testable sans DOM : déroulé de la séance, minuteur, préremplissage des
+ * chiffres depuis Jira et génération du compte-rendu.
+ */
+
+export type MeetingTeamRole = 'dev' | 'qa';
+export type MeetingBlockerSeverity = 'Faible' | 'Moyen' | 'Élevé' | 'Critique';
+export type MeetingInteractionStatus = 'À traiter' | 'En cours' | 'OK';
+export type MeetingActionStatus = 'À faire' | 'En cours' | 'Fait';
+export type MeetingRetroColumn = 'keep' | 'stop' | 'try';
+export type MeetingMetricSource = 'jira' | 'manual';
+
+export const MEETING_BLOCKER_SEVERITIES: MeetingBlockerSeverity[] = [
+  'Faible',
+  'Moyen',
+  'Élevé',
+  'Critique'
+];
+export const MEETING_INTERACTION_STATUSES: MeetingInteractionStatus[] = [
+  'À traiter',
+  'En cours',
+  'OK'
+];
+export const MEETING_ACTION_STATUSES: MeetingActionStatus[] = ['À faire', 'En cours', 'Fait'];
+
+export interface MeetingMetric {
+  id: string;
+  label: string;
+  value: string;
+  target: string;
+  source: MeetingMetricSource;
+}
+
+export interface MeetingTeam {
+  id: string;
+  name: string;
+  role: MeetingTeamRole;
+  boardId?: number;
+  metrics: MeetingMetric[];
+}
+
+export interface MeetingBlocker {
+  id: string;
+  severity: MeetingBlockerSeverity;
+  text: string;
+  need: string;
+  owner: string;
+  resolved: boolean;
+}
+
+export interface MeetingInteraction {
+  id: string;
+  from: string;
+  to: string;
+  subject: string;
+  status: MeetingInteractionStatus;
+}
+
+export interface MeetingRetroItem {
+  id: string;
+  text: string;
+}
+
+export interface MeetingRetro {
+  keep: MeetingRetroItem[];
+  stop: MeetingRetroItem[];
+  try: MeetingRetroItem[];
+}
+
+export interface MeetingAction {
+  id: string;
+  text: string;
+  owner: string;
+  due: string;
+  status: MeetingActionStatus;
+}
+
+export interface MeetingSprint {
+  name: string;
+  number: string;
+  goal: string;
+  date: string;
+}
+
+export interface MeetingAuthor {
+  id: string;
+  email: string;
+  name?: string;
+}
+
+export interface WeeklyMeeting {
+  id: string;
+  sprint: MeetingSprint;
+  teams: MeetingTeam[];
+  blockers: MeetingBlocker[];
+  interactions: MeetingInteraction[];
+  retro: MeetingRetro;
+  actions: MeetingAction[];
+  createdBy?: MeetingAuthor;
+  updatedBy?: MeetingAuthor;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface WeeklyMeetingSummary {
+  id: string;
+  sprint: MeetingSprint;
+  updatedAt?: string;
+  updatedBy?: MeetingAuthor;
+  summary: {
+    teamCount: number;
+    openBlockerCount: number;
+    openActionCount: number;
+  };
+}
+
+/** Sections modifiables, envoyées telles quelles au PATCH. */
+export type WeeklyMeetingPatch = Partial<
+  Pick<WeeklyMeeting, 'sprint' | 'teams' | 'blockers' | 'interactions' | 'retro' | 'actions'>
+>;
+
+export interface MeetingPhase {
+  id: string;
+  label: string;
+  budgetMinutes: number;
+}
+
+/** Déroulé de la séance : 60 minutes réparties en quatre temps. */
+export const MEETING_PHASES: MeetingPhase[] = [
+  { id: 'chiffres', label: 'Avancée du sprint', budgetMinutes: 20 },
+  { id: 'blocages', label: 'Points bloquants', budgetMinutes: 15 },
+  { id: 'interactions', label: 'Interactions entre équipes', budgetMinutes: 10 },
+  { id: 'amelioration', label: 'Amélioration continue', budgetMinutes: 15 }
+];
+
+export const MEETING_TOTAL_BUDGET_SECONDS = MEETING_PHASES.reduce(
+  (total, phase) => total + phase.budgetMinutes * 60,
+  0
+);
+
+export const RETRO_COLUMNS: Array<{ key: MeetingRetroColumn; title: string; hint: string }> = [
+  { key: 'keep', title: 'Continuer', hint: 'Ce qui marche' },
+  { key: 'stop', title: 'Arrêter', hint: 'Ce qui gêne' },
+  { key: 'try', title: 'Essayer', hint: 'À tester ce sprint' }
+];
+
+export const DEFAULT_DEV_METRIC_LABELS = [
+  'Points engagés',
+  'Points réalisés',
+  'Tickets en cours',
+  'Tickets terminés',
+  'Bugs ouverts'
+];
+
+export const DEFAULT_QA_METRIC_LABELS = [
+  'Cas de test exécutés',
+  'Taux de réussite (%)',
+  'Bugs détectés',
+  'Bugs critiques',
+  'Couverture (%)'
+];
+
+let rowIdCounter = 0;
+
+/** Identifiant local d'une ligne ajoutée pendant la réunion. */
+export function createMeetingRowId(): string {
+  rowIdCounter += 1;
+  return `m${Date.now().toString(36)}${rowIdCounter.toString(36)}${Math.random()
+    .toString(36)
+    .slice(2, 7)}`;
+}
+
+/** Formate une durée en MM:SS, préfixée d'un « - » lorsque le budget est dépassé. */
+export function formatMeetingClock(seconds: number): string {
+  const negative = seconds < 0;
+  const absolute = Math.abs(Math.round(seconds));
+  const minutes = Math.floor(absolute / 60);
+  const rest = absolute % 60;
+  return `${negative ? '-' : ''}${String(minutes).padStart(2, '0')}:${String(rest).padStart(2, '0')}`;
+}
+
+/** Temps restant sur la phase courante ; négatif en cas de dépassement. */
+export function computePhaseRemainingSeconds(
+  phaseIndex: number,
+  elapsedSeconds: number,
+  phaseStartedAtSeconds: number
+): number {
+  const phase = MEETING_PHASES[phaseIndex];
+  if (!phase) return 0;
+  return phase.budgetMinutes * 60 - (elapsedSeconds - phaseStartedAtSeconds);
+}
+
+/** Convertit une saisie utilisateur en nombre, en tolérant la virgule décimale. */
+export function parseMetricNumber(raw: string): number | null {
+  if (typeof raw !== 'string') return null;
+  const normalized = raw.trim().replace(',', '.');
+  if (!normalized) return null;
+  const value = Number(normalized);
+  return Number.isFinite(value) ? value : null;
+}
+
+/** Avancement d'un indicateur vers sa cible, borné à 100 %. Null si non calculable. */
+export function computeMetricProgress(value: string, target: string): number | null {
+  const current = parseMetricNumber(value);
+  const objective = parseMetricNumber(target);
+  if (current == null || objective == null || objective <= 0) return null;
+  return Math.max(0, Math.min(100, (current / objective) * 100));
+}
+
+/* ------------------------------------------------------------------ *
+ * Préremplissage depuis Jira
+ * ------------------------------------------------------------------ */
+
+export interface SprintBoardIssue {
+  issueType: string;
+  statusCategoryKey: string;
+}
+
+export interface SprintBoardResult {
+  boardId: number;
+  name?: string;
+  statusCounts?: { total: number; todo: number; inProgress: number; qa: number; resolved: number };
+  storyPointsByStatus?: {
+    total: number;
+    todo: number;
+    inProgress: number;
+    qa: number;
+    resolved: number;
+  };
+  issues?: SprintBoardIssue[];
+}
+
+const BUG_ISSUE_TYPES = ['bug', 'bogue', 'anomalie', 'defaut'];
+
+function normalizeLabel(label: string): string {
+  return label
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function isBugIssue(issue: SprintBoardIssue): boolean {
+  const type = normalizeLabel(issue.issueType ?? '');
+  return BUG_ISSUE_TYPES.some((bugType) => type.includes(bugType));
+}
+
+function isOpenIssue(issue: SprintBoardIssue): boolean {
+  return (issue.statusCategoryKey ?? '').toLowerCase() !== 'done';
+}
+
+/**
+ * Valeurs proposées pour un board, indexées par libellé d'indicateur normalisé.
+ * Les indicateurs QA (cas de test, couverture) n'ont pas de source et restent
+ * en saisie manuelle.
+ */
+export function computeBoardPrefill(board: SprintBoardResult): Record<string, string> {
+  const statusCounts = board.statusCounts ?? { total: 0, todo: 0, inProgress: 0, qa: 0, resolved: 0 };
+  const points = board.storyPointsByStatus ?? {
+    total: 0,
+    todo: 0,
+    inProgress: 0,
+    qa: 0,
+    resolved: 0
+  };
+  const issues = board.issues ?? [];
+  const bugs = issues.filter(isBugIssue);
+
+  return {
+    [normalizeLabel('Points engagés')]: String(points.total),
+    [normalizeLabel('Points réalisés')]: String(points.resolved),
+    [normalizeLabel('Tickets en cours')]: String(statusCounts.inProgress),
+    [normalizeLabel('Tickets terminés')]: String(statusCounts.resolved),
+    [normalizeLabel('Tickets en QA')]: String(statusCounts.qa),
+    [normalizeLabel('Bugs ouverts')]: String(bugs.filter(isOpenIssue).length),
+    [normalizeLabel('Bugs détectés')]: String(bugs.length)
+  };
+}
+
+/**
+ * Applique les valeurs Jira aux indicateurs d'une équipe rattachée à un board.
+ * Les valeurs saisies à la main ne sont jamais écrasées.
+ */
+export function applyPrefillToTeam(team: MeetingTeam, board: SprintBoardResult | undefined): MeetingTeam {
+  if (!board) return team;
+  const prefill = computeBoardPrefill(board);
+
+  return {
+    ...team,
+    metrics: team.metrics.map((metric) => {
+      const suggested = prefill[normalizeLabel(metric.label)];
+      if (suggested === undefined) return metric;
+      if (metric.source === 'manual' && metric.value.trim() !== '') return metric;
+      return { ...metric, value: suggested, source: 'jira' as MeetingMetricSource };
+    })
+  };
+}
+
+/** Applique le préremplissage à toutes les équipes ayant un board renseigné. */
+export function applyPrefillToTeams(
+  teams: MeetingTeam[],
+  boards: SprintBoardResult[]
+): MeetingTeam[] {
+  const byBoardId = new Map(boards.map((board) => [board.boardId, board]));
+  return teams.map((team) =>
+    team.boardId == null ? team : applyPrefillToTeam(team, byBoardId.get(team.boardId))
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Compte-rendu
+ * ------------------------------------------------------------------ */
+
+/** Compte-rendu texte prêt à coller dans un canal d'équipe. */
+export function buildMeetingReport(meeting: WeeklyMeeting): string {
+  const lines: string[] = [];
+  const { sprint } = meeting;
+
+  lines.push(`# ${sprint.name} n°${sprint.number} — point du ${sprint.date}`);
+  if (sprint.goal) lines.push(`Objectif : ${sprint.goal}`);
+
+  lines.push('', '## Chiffres');
+  meeting.teams.forEach((team) => {
+    lines.push(`- ${team.name} (${team.role.toUpperCase()})`);
+    team.metrics.forEach((metric) => {
+      const target = metric.target ? ` / ${metric.target}` : '';
+      lines.push(`    · ${metric.label} : ${metric.value || '—'}${target}`);
+    });
+  });
+
+  lines.push('', '## Points bloquants');
+  if (meeting.blockers.length === 0) {
+    lines.push('- aucun');
+  }
+  meeting.blockers.forEach((blocker) => {
+    const resolved = blocker.resolved ? ' (levé)' : '';
+    const need = blocker.need ? ` → à lever : ${blocker.need}` : '';
+    const owner = blocker.owner ? ` (resp. ${blocker.owner})` : '';
+    lines.push(`- [${blocker.severity}]${resolved} ${blocker.text || '—'}${need}${owner}`);
+  });
+
+  lines.push('', '## Interactions entre équipes');
+  if (meeting.interactions.length === 0) {
+    lines.push('- aucune');
+  }
+  meeting.interactions.forEach((interaction) => {
+    lines.push(
+      `- ${interaction.from || '?'} → ${interaction.to || '?'} [${interaction.status}] : ${
+        interaction.subject || '—'
+      }`
+    );
+  });
+
+  lines.push('', '## Amélioration continue');
+  RETRO_COLUMNS.forEach((column) => {
+    const items = meeting.retro[column.key].filter((item) => item.text.trim());
+    if (items.length > 0) {
+      lines.push(`${column.title} :`);
+      items.forEach((item) => lines.push(`- ${item.text}`));
+    }
+  });
+
+  lines.push('', 'Actions :');
+  if (meeting.actions.length === 0) {
+    lines.push('- aucune');
+  }
+  meeting.actions.forEach((action) => {
+    const owner = action.owner ? ` — ${action.owner}` : '';
+    const due = action.due ? ` (${action.due})` : '';
+    lines.push(`- [${action.status}] ${action.text || '—'}${owner}${due}`);
+  });
+
+  return lines.join('\n');
+}
+
+/* ------------------------------------------------------------------ *
+ * Fabriques de lignes
+ * ------------------------------------------------------------------ */
+
+export function createMetric(label = 'Nouvel indicateur'): MeetingMetric {
+  return { id: createMeetingRowId(), label, value: '', target: '', source: 'manual' };
+}
+
+export function createTeam(role: MeetingTeamRole = 'dev'): MeetingTeam {
+  const labels = role === 'qa' ? DEFAULT_QA_METRIC_LABELS : DEFAULT_DEV_METRIC_LABELS;
+  return {
+    id: createMeetingRowId(),
+    name: role === 'qa' ? 'QA' : 'Nouvelle équipe',
+    role,
+    metrics: labels.map((label) => createMetric(label))
+  };
+}
+
+export function createBlocker(): MeetingBlocker {
+  return { id: createMeetingRowId(), severity: 'Moyen', text: '', need: '', owner: '', resolved: false };
+}
+
+export function createInteraction(): MeetingInteraction {
+  return { id: createMeetingRowId(), from: '', to: '', subject: '', status: 'À traiter' };
+}
+
+export function createRetroItem(): MeetingRetroItem {
+  return { id: createMeetingRowId(), text: '' };
+}
+
+export function createAction(): MeetingAction {
+  return { id: createMeetingRowId(), text: '', owner: '', due: '', status: 'À faire' };
+}

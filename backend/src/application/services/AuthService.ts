@@ -501,6 +501,7 @@ export class AuthService {
       epics: true,
       marketing: true,
       produit: true,
+      pointHebdo: true,
       gestionUtilisateurs: false
     };
   }

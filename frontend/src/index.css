@@ -267,3 +267,44 @@
   animation: slide-out 0.3s ease-in forwards;
 }
 
+/* Impression : rendu clair et lisible du compte-rendu (page Point hebdo) */
+@media print {
+  body {
+    background: #fff !important;
+    background-image: none !important;
+    color: #111 !important;
+  }
+
+  /* Chrome applicatif inutile sur papier */
+  aside,
+  footer,
+  .fixed {
+    display: none !important;
+  }
+
+  main {
+    margin-left: 0 !important;
+    max-width: none !important;
+  }
+
+  .card-glass {
+    background: #fff !important;
+    backdrop-filter: none !important;
+    border-color: #ccc !important;
+    box-shadow: none !important;
+    break-inside: avoid;
+  }
+
+  input,
+  select,
+  textarea {
+    background: #fff !important;
+    color: #111 !important;
+    border-color: #ccc !important;
+  }
+
+  h1, h2, h3, span, p, label, li {
+    color: #111 !important;
+  }
+}
+

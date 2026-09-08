@@ -21,6 +21,7 @@ import { healthRoutes } from './routes/healthRoutes';
 import { authRoutes } from './routes/authRoutes';
 import { brevoRoutes } from './routes/brevoRoutes';
 import { mondayRoutes } from './routes/mondayRoutes';
+import { meetingRoutes } from './routes/meetingRoutes';
 import { setupSocketHandlers } from './websocket/socketHandler';
 import { swaggerSpec } from './config/swagger';
 import { schedulerService } from './services/schedulerService';
@@ -45,6 +46,7 @@ const connectMongoDB = async () => {
           epics: false,
           marketing: false,
           produit: false,
+          pointHebdo: false,
           gestionUtilisateurs: false
         }
       },
@@ -57,6 +59,7 @@ const connectMongoDB = async () => {
           epics: false,
           marketing: false,
           produit: false,
+          pointHebdo: true,
           gestionUtilisateurs: false
         }
       },
@@ -69,6 +72,7 @@ const connectMongoDB = async () => {
           epics: true,
           marketing: false,
           produit: false,
+          pointHebdo: true,
           gestionUtilisateurs: false
         }
       },
@@ -81,6 +85,7 @@ const connectMongoDB = async () => {
           epics: false,
           marketing: false,
           produit: true,
+          pointHebdo: true,
           gestionUtilisateurs: false
         }
       },
@@ -93,6 +98,7 @@ const connectMongoDB = async () => {
           epics: false,
           marketing: true,
           produit: false,
+          pointHebdo: false,
           gestionUtilisateurs: false
         }
       }
@@ -177,6 +183,7 @@ app.use('/api/jira', jiraRoutes);
 app.use('/api/worklog', worklogRoutes);
 app.use('/api/brevo', brevoRoutes);
 app.use('/api/monday', mondayRoutes);
+app.use('/api/meetings', meetingRoutes);
 
 // Setup WebSocket handlers
 setupSocketHandlers(io);

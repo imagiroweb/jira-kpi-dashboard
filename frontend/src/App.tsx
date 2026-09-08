@@ -7,13 +7,14 @@ import {
   EpicProgressPage,
   MarketingDashboard,
   ProduitDashboard,
+  PointHebdoPage,
   UserManagementPage,
   LoginPage, 
   MicrosoftCallback,
   RoleSelectionScreen,
   ResetPasswordPage
 } from './components';
-import { useStore } from './store/useStore';
+import { useStore, type PageId } from './store/useStore';
 import { authApi } from './services/authApi';
 import { Loader2 } from 'lucide-react';
 import { SocketProvider } from './contexts/SocketContext';
@@ -95,8 +96,8 @@ function AuthenticatedApp({
   currentPage, 
   setCurrentPage 
 }: { 
-  currentPage: 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'gestionUtilisateurs';
-  setCurrentPage: (page: 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'gestionUtilisateurs') => void;
+  currentPage: PageId;
+  setCurrentPage: (page: PageId) => void;
 }) {
   useEffect(() => {
     authApi.recordPageView(currentPage);
@@ -116,6 +117,8 @@ function AuthenticatedApp({
         return <MarketingDashboard />;
       case 'produit':
         return <ProduitDashboard />;
+      case 'pointHebdo':
+        return <PointHebdoPage />;
       case 'gestionUtilisateurs':
         return <UserManagementPage />;
       default:

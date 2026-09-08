@@ -13,10 +13,10 @@ function getDefaultDateRange() {
 }
 
 // Page ids for permissions (must match backend PAGE_IDS)
-export type PageId = 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'gestionUtilisateurs';
+export type PageId = 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'pointHebdo' | 'gestionUtilisateurs';
 
 /** Order used for "first visible page" (dashboard first if visible, else first in list) */
-const PAGE_ORDER: PageId[] = ['dashboard', 'users', 'support', 'epics', 'marketing', 'produit', 'gestionUtilisateurs'];
+const PAGE_ORDER: PageId[] = ['dashboard', 'users', 'support', 'epics', 'marketing', 'produit', 'pointHebdo', 'gestionUtilisateurs'];
 
 export interface VisiblePages {
   dashboard: boolean;
@@ -25,6 +25,7 @@ export interface VisiblePages {
   epics: boolean;
   marketing: boolean;
   produit: boolean;
+  pointHebdo: boolean;
   gestionUtilisateurs: boolean;
 }
 
@@ -70,7 +71,7 @@ export interface BoardStats {
 }
 
 // Page type for navigation
-type PageType = 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'gestionUtilisateurs';
+type PageType = PageId;
 
 interface AppState {
   // Authentication State

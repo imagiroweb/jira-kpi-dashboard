@@ -10,6 +10,7 @@ export const TEST_VISIBLE_PAGES_ALL: VisiblePages = {
   epics: true,
   marketing: true,
   produit: true,
+  pointHebdo: true,
   gestionUtilisateurs: true,
 };
 
@@ -20,6 +21,7 @@ export const TEST_VISIBLE_PAGES_DASHBOARD_ONLY: VisiblePages = {
   epics: false,
   marketing: false,
   produit: false,
+  pointHebdo: false,
   gestionUtilisateurs: false,
 };
 

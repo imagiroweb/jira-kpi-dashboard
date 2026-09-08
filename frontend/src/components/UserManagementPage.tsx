@@ -19,6 +19,7 @@ const PAGE_LABELS: Record<keyof VisiblePages, string> = {
   epics: 'Suivi epics',
   marketing: 'Marketing',
   produit: 'Produit',
+  pointHebdo: 'Point hebdo',
   gestionUtilisateurs: 'Gestion des utilisateurs'
 };
 
@@ -165,6 +166,7 @@ export function UserManagementPage() {
         epics: true,
         marketing: true,
         produit: true,
+        pointHebdo: true,
         gestionUtilisateurs: false
       };
       const created = await authApi.createRole(newRoleName.trim(), defaultPages);
