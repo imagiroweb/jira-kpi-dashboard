@@ -30,6 +30,14 @@ jest.mock('../utils/logger', () =>
   jest.requireActual('../test/mocks/logger').loggerMockFactory()
 );
 
+jest.mock('../websocket/socketHandler', () => ({
+  emitMeetingUpdate: jest.fn(),
+}));
+
+import { emitMeetingUpdate } from '../websocket/socketHandler';
+
+const mockEmitMeetingUpdate = emitMeetingUpdate as jest.MockedFunction<typeof emitMeetingUpdate>;
+
 const mockWeeklySprintMeeting = {
   create: jest.fn(),
   find: jest.fn(),
@@ -96,6 +104,11 @@ function mockFindOneChain(doc: unknown) {
 
 describe('meetingRoutes — point hebdo (TI)', () => {
   const app = createTestApp({ mountPath: '/api/meetings', router: meetingRoutes });
+  const appWithIo = createTestApp({
+    mountPath: '/api/meetings',
+    router: meetingRoutes,
+    io: {} as never,
+  });
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -270,6 +283,45 @@ describe('meetingRoutes — point hebdo (TI)', () => {
       const res = await request(app).patch(`/api/meetings/${MEETING_ID}`).send({ actions: [] });
 
       expect(res.status).toBe(401);
+    });
+
+    it('n\'émet rien quand io n\'est pas disponible (app sans socket)', async () => {
+      await request(app)
+        .patch(`/api/meetings/${MEETING_ID}`)
+        .send({ actions: [] });
+
+      expect(mockEmitMeetingUpdate).not.toHaveBeenCalled();
+    });
+
+    it('diffuse la mise à jour aux autres clients via meeting:<id>, avec l\'origine du client', async () => {
+      const res = await request(appWithIo)
+        .patch(`/api/meetings/${MEETING_ID}`)
+        .set('X-Client-Origin', 'tab-abc123')
+        .send({ actions: [{ id: 'a1', text: 'Automatiser', owner: 'Sam', due: '', status: 'Fait' }] });
+
+      expect(res.status).toBe(200);
+      expect(mockEmitMeetingUpdate).toHaveBeenCalledWith(
+        {},
+        MEETING_ID,
+        expect.objectContaining({
+          meetingId: MEETING_ID,
+          patch: { actions: [{ id: 'a1', text: 'Automatiser', owner: 'Sam', due: '', status: 'Fait' }] },
+          updatedBy: expect.objectContaining({ email: TEST_USER.email }),
+          origin: 'tab-abc123',
+        })
+      );
+    });
+
+    it('émet une origine null quand le client n\'en fournit pas', async () => {
+      await request(appWithIo)
+        .patch(`/api/meetings/${MEETING_ID}`)
+        .send({ actions: [] });
+
+      expect(mockEmitMeetingUpdate).toHaveBeenCalledWith(
+        {},
+        MEETING_ID,
+        expect.objectContaining({ origin: null })
+      );
     });
   });
 

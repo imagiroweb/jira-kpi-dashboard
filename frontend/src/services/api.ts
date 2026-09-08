@@ -640,11 +640,19 @@ export const meetingApi = {
     const { data } = await api.post(`/meetings/${id}/next`, date ? { date } : {});
     return data;
   },
+  /**
+   * `origin` : identifiant d'onglet du client (voir PointHebdoPage), renvoyé tel quel dans
+   * l'événement socket `meeting:update` pour que l'auteur de la modification ignore son
+   * propre écho.
+   */
   update: async (
     id: string,
-    patch: WeeklyMeetingPatch
+    patch: WeeklyMeetingPatch,
+    origin?: string
   ): Promise<{ success: boolean; meeting: WeeklyMeeting }> => {
-    const { data } = await api.patch(`/meetings/${id}`, patch);
+    const { data } = await api.patch(`/meetings/${id}`, patch, {
+      headers: origin ? { 'X-Client-Origin': origin } : undefined,
+    });
     return data;
   },
   remove: async (id: string): Promise<{ success: boolean; message: string }> => {

@@ -1,7 +1,8 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderWithProviders } from '@/test/render';
 import { TEST_USER } from '@/test/fixtures/users';
+import { createMockSocketContextValue } from '@/test/mocks/socket';
 import type { WeeklyMeeting } from '../domain/pointHebdoSprint';
 
 vi.mock('../services/api', () => ({
@@ -58,9 +59,9 @@ function mockFetch(handlers: Record<string, unknown>) {
   return fetchMock;
 }
 
-async function renderPage() {
-  renderWithProviders(<PointHebdoPage />, { user: TEST_USER });
-  await waitFor(() => expect(screen.getByLabelText('Nom du sprint')).toBeInTheDocument());
+async function renderPage(options: { socket?: ReturnType<typeof createMockSocketContextValue> } = {}) {
+  renderWithProviders(<PointHebdoPage />, { user: TEST_USER, socket: options.socket ?? false });
+  await waitFor(() => expect(screen.getByLabelText('Numéro du sprint')).toBeInTheDocument());
 }
 
 describe('PointHebdoPage', () => {
@@ -80,7 +81,6 @@ describe('PointHebdoPage', () => {
     it('charge le dernier point et affiche son en-tête', async () => {
       await renderPage();
 
-      expect(screen.getByLabelText('Nom du sprint')).toHaveValue('Sprint');
       expect(screen.getByLabelText('Numéro du sprint')).toHaveValue('12');
       expect(screen.getByLabelText('Objectif du sprint')).toHaveValue('Livrer la facturation');
     });
@@ -142,7 +142,8 @@ describe('PointHebdoPage', () => {
           'meeting-1',
           expect.objectContaining({
             teams: [expect.objectContaining({ metrics: [expect.objectContaining({ value: '33' })] })],
-          })
+          }),
+          expect.any(String)
         )
       );
     });
@@ -159,7 +160,8 @@ describe('PointHebdoPage', () => {
           'meeting-1',
           expect.objectContaining({
             sprint: expect.objectContaining({ goal: 'Stabiliser la recette' }),
-          })
+          }),
+          expect.any(String)
         )
       );
     });
@@ -176,6 +178,75 @@ describe('PointHebdoPage', () => {
     });
   });
 
+  describe('édition collaborative (Socket.io)', () => {
+    it('rejoint la room temps réel du point ouvert', async () => {
+      const socket = createMockSocketContextValue();
+      await renderPage({ socket });
+
+      expect(socket.subscribeToMeeting).toHaveBeenCalledWith('meeting-1');
+    });
+
+    it('applique en direct une modification reçue d\'un autre client sur le même point', async () => {
+      const socket = createMockSocketContextValue();
+      await renderPage({ socket });
+
+      act(() => {
+        socket.triggerMeetingUpdate({
+          meetingId: 'meeting-1',
+          patch: {
+            sprint: { name: 'Sprint', number: '12', goal: 'Objectif mis à jour par Bob', date: '2026-09-08' },
+          },
+          origin: 'autre-onglet',
+        });
+      });
+
+      await waitFor(() => {
+        expect(screen.getByLabelText('Objectif du sprint')).toHaveValue('Objectif mis à jour par Bob');
+      });
+    });
+
+    it('ignore une modification reçue pour un autre point hebdo', async () => {
+      const socket = createMockSocketContextValue();
+      await renderPage({ socket });
+
+      act(() => {
+        socket.triggerMeetingUpdate({
+          meetingId: 'un-autre-point',
+          patch: {
+            sprint: { name: 'Sprint', number: '99', goal: 'Ne doit pas apparaître', date: '2026-09-08' },
+          },
+          origin: 'autre-onglet',
+        });
+      });
+
+      expect(screen.getByLabelText('Objectif du sprint')).toHaveValue('Livrer la facturation');
+    });
+
+    it('ignore son propre écho (même origine que le dernier enregistrement envoyé)', async () => {
+      const socket = createMockSocketContextValue();
+      await renderPage({ socket });
+
+      fireEvent.change(screen.getByLabelText('Objectif du sprint'), {
+        target: { value: 'Mon édition en cours' },
+      });
+      await waitFor(() => expect(mockUpdate).toHaveBeenCalled());
+      const myOrigin = mockUpdate.mock.calls[0][2] as string;
+      expect(myOrigin).toEqual(expect.any(String));
+
+      act(() => {
+        socket.triggerMeetingUpdate({
+          meetingId: 'meeting-1',
+          patch: {
+            sprint: { name: 'Sprint', number: '12', goal: 'Ecrasement indésirable', date: '2026-09-08' },
+          },
+          origin: myOrigin,
+        });
+      });
+
+      expect(screen.getByLabelText('Objectif du sprint')).toHaveValue('Mon édition en cours');
+    });
+  });
+
   describe('édition des sections', () => {
     it('ajoute un blocage', async () => {
       await renderPage();
@@ -186,7 +257,8 @@ describe('PointHebdoPage', () => {
       await waitFor(() =>
         expect(mockUpdate).toHaveBeenCalledWith(
           'meeting-1',
-          expect.objectContaining({ blockers: [expect.objectContaining({ severity: 'Moyen' })] })
+          expect.objectContaining({ blockers: [expect.objectContaining({ severity: 'Moyen' })] }),
+          expect.any(String)
         )
       );
     });
@@ -226,7 +298,8 @@ describe('PointHebdoPage', () => {
       await waitFor(() =>
         expect(mockUpdate).toHaveBeenCalledWith(
           'meeting-1',
-          expect.objectContaining({ retro: expect.objectContaining({ keep: [expect.anything()] }) })
+          expect.objectContaining({ retro: expect.objectContaining({ keep: [expect.anything()] }) }),
+          expect.any(String)
         )
       );
     });
@@ -239,7 +312,8 @@ describe('PointHebdoPage', () => {
       await waitFor(() =>
         expect(mockUpdate).toHaveBeenCalledWith(
           'meeting-1',
-          expect.objectContaining({ teams: [expect.objectContaining({ metrics: [] })] })
+          expect.objectContaining({ teams: [expect.objectContaining({ metrics: [] })] }),
+          expect.any(String)
         )
       );
     });

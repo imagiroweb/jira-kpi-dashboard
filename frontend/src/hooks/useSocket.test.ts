@@ -181,6 +181,43 @@ describe('useSocket', () => {
     expect(socketHarness.mockSocket.emit).toHaveBeenCalledWith('ping');
   });
 
+  it('expose subscribeToMeeting/unsubscribeFromMeeting et appelle onMeetingUpdate (point hebdo temps réel)', async () => {
+    seedAuthenticatedUser();
+    const onMeetingUpdate = vi.fn();
+
+    const { result } = renderHook(() => useSocket({ onMeetingUpdate }));
+
+    act(() => {
+      socketHarness.mockSocket.trigger('connect');
+    });
+
+    await waitFor(() => {
+      expect(result.current.isConnected).toBe(true);
+    });
+
+    act(() => {
+      result.current.subscribeToMeeting('meeting-1');
+      result.current.unsubscribeFromMeeting('meeting-1');
+    });
+
+    expect(socketHarness.mockSocket.emit).toHaveBeenCalledWith('subscribe:meeting', 'meeting-1');
+    expect(socketHarness.mockSocket.emit).toHaveBeenCalledWith('unsubscribe:meeting', 'meeting-1');
+
+    const update = {
+      meetingId: 'meeting-1',
+      patch: { sprint: { name: 'Sprint', number: '12', goal: '', date: '2026-09-08' } },
+      origin: 'tab-1',
+    };
+
+    act(() => {
+      socketHarness.mockSocket.trigger('meeting:update', update);
+    });
+
+    await waitFor(() => {
+      expect(onMeetingUpdate).toHaveBeenCalledWith(update);
+    });
+  });
+
   it('déconnecte le socket au démontage du hook', () => {
     seedAuthenticatedUser();
 

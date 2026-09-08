@@ -279,22 +279,73 @@ export function computeBoardPrefill(board: SprintBoardResult): Record<string, st
 }
 
 /**
- * Applique les valeurs Jira aux indicateurs d'une équipe rattachée à un board.
- * Les valeurs saisies à la main ne sont jamais écrasées.
+ * Cibles proposées pour un board, indexées par libellé d'indicateur normalisé.
+ * Seul « Tickets terminés » a une cible source Jira (le nombre total de tickets
+ * de l'équipe sur le sprint en cours) — les autres cibles spéciales (« Points
+ * réalisés » = cible « Points engagés », etc.) sont dérivées côté affichage,
+ * voir {@link getMetricTargetMode}.
+ */
+export function computeBoardPrefillTargets(board: SprintBoardResult): Record<string, string> {
+  const statusCounts = board.statusCounts ?? { total: 0, todo: 0, inProgress: 0, qa: 0, resolved: 0 };
+  return {
+    [normalizeLabel('Tickets terminés')]: String(statusCounts.total)
+  };
+}
+
+/**
+ * Applique les valeurs (et cibles Jira connues) aux indicateurs d'une équipe rattachée
+ * à un board. Les valeurs saisies à la main ne sont jamais écrasées ; une cible déjà
+ * renseignée (manuellement ou par un préremplissage précédent) n'est jamais écrasée non plus.
  */
 export function applyPrefillToTeam(team: MeetingTeam, board: SprintBoardResult | undefined): MeetingTeam {
   if (!board) return team;
   const prefill = computeBoardPrefill(board);
+  const prefillTargets = computeBoardPrefillTargets(board);
 
   return {
     ...team,
     metrics: team.metrics.map((metric) => {
       const suggested = prefill[normalizeLabel(metric.label)];
-      if (suggested === undefined) return metric;
-      if (metric.source === 'manual' && metric.value.trim() !== '') return metric;
-      return { ...metric, value: suggested, source: 'jira' as MeetingMetricSource };
+      const suggestedTarget = prefillTargets[normalizeLabel(metric.label)];
+
+      const withTarget =
+        suggestedTarget !== undefined && metric.target.trim() === ''
+          ? { ...metric, target: suggestedTarget }
+          : metric;
+
+      if (suggested === undefined) return withTarget;
+      if (metric.source === 'manual' && metric.value.trim() !== '') return withTarget;
+      return { ...withTarget, value: suggested, source: 'jira' as MeetingMetricSource };
     })
   };
+}
+
+/**
+ * Comment la cible (« cible ») d'un indicateur par défaut doit être présentée :
+ * - `auto-engaged-points` : lecture seule, toujours égale à la valeur de l'indicateur
+ *   « Points engagés » de la même équipe (« Points réalisés »).
+ * - `hidden` : pas de cible pertinente (« Tickets en cours », « Bugs ouverts ») — le champ
+ *   n'est pas affiché.
+ * - `manual` : cible librement éditable (comportement par défaut, y compris pour les
+ *   indicateurs personnalisés et « Tickets terminés », dont la cible est seulement
+ *   suggérée depuis Jira via {@link computeBoardPrefillTargets}).
+ */
+export type MetricTargetMode = 'auto-engaged-points' | 'hidden' | 'manual';
+
+const METRIC_TARGET_MODE_BY_LABEL: Record<string, MetricTargetMode> = {
+  [normalizeLabel('Points réalisés')]: 'auto-engaged-points',
+  [normalizeLabel('Tickets en cours')]: 'hidden',
+  [normalizeLabel('Bugs ouverts')]: 'hidden'
+};
+
+export function getMetricTargetMode(label: string): MetricTargetMode {
+  return METRIC_TARGET_MODE_BY_LABEL[normalizeLabel(label)] ?? 'manual';
+}
+
+/** Valeur de l'indicateur « Points engagés » de l'équipe (cible dérivée de « Points réalisés »). */
+export function findEngagedPointsValue(metrics: MeetingMetric[]): string {
+  const engaged = metrics.find((m) => normalizeLabel(m.label) === normalizeLabel('Points engagés'));
+  return engaged?.value ?? '';
 }
 
 /** Applique le préremplissage à toutes les équipes ayant un board renseigné. */
@@ -386,7 +437,9 @@ export function createTeam(role: MeetingTeamRole = 'dev'): MeetingTeam {
   const labels = role === 'qa' ? DEFAULT_QA_METRIC_LABELS : DEFAULT_DEV_METRIC_LABELS;
   return {
     id: createMeetingRowId(),
-    name: role === 'qa' ? 'QA' : 'Nouvelle équipe',
+    // Pas d'intitulé générique « Nouvelle équipe » par défaut pour une équipe Dev : le select
+    // « Type d'équipe » (Dev/QA) l'identifie déjà, le nom reste à saisir.
+    name: role === 'qa' ? 'QA' : '',
     role,
     metrics: labels.map((label) => createMetric(label))
   };

@@ -1,4 +1,5 @@
 import { vi } from 'vitest';
+import type { MeetingUpdate } from '../../hooks/useSocket';
 
 export type MockSocketEventHandler = (...args: unknown[]) => void;
 
@@ -70,6 +71,11 @@ export interface MockSocketContextValue {
   lastPing: number | null;
   subscribeToProject: ReturnType<typeof vi.fn>;
   unsubscribeFromProject: ReturnType<typeof vi.fn>;
+  subscribeToMeeting: ReturnType<typeof vi.fn>;
+  unsubscribeFromMeeting: ReturnType<typeof vi.fn>;
+  onMeetingUpdate: (listener: (update: MeetingUpdate) => void) => () => void;
+  /** Aide de test : déclenche un `meeting:update` reçu par tous les listeners enregistrés via onMeetingUpdate. */
+  triggerMeetingUpdate: (update: MeetingUpdate) => void;
   requestSync: ReturnType<typeof vi.fn>;
   ping: ReturnType<typeof vi.fn>;
   notify: {
@@ -84,12 +90,23 @@ export interface MockSocketContextValue {
 export function createMockSocketContextValue(
   overrides: Partial<MockSocketContextValue> = {}
 ): MockSocketContextValue {
+  const listeners = new Set<(update: MeetingUpdate) => void>();
+
   return {
     isConnected: true,
     clientsCount: 1,
     lastPing: Date.now(),
     subscribeToProject: vi.fn(),
     unsubscribeFromProject: vi.fn(),
+    subscribeToMeeting: vi.fn(),
+    unsubscribeFromMeeting: vi.fn(),
+    onMeetingUpdate: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    triggerMeetingUpdate: (update) => {
+      listeners.forEach((listener) => listener(update));
+    },
     requestSync: vi.fn(),
     ping: vi.fn(),
     notify: {

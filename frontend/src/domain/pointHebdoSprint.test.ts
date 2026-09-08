@@ -3,14 +3,18 @@ import {
   applyPrefillToTeams,
   buildMeetingReport,
   computeBoardPrefill,
+  computeBoardPrefillTargets,
   computeMetricProgress,
   computePhaseRemainingSeconds,
   createAction,
   createTeam,
+  findEngagedPointsValue,
   formatMeetingClock,
+  getMetricTargetMode,
   MEETING_PHASES,
   MEETING_TOTAL_BUDGET_SECONDS,
   parseMetricNumber,
+  type MeetingMetric,
   type MeetingTeam,
   type SprintBoardResult,
   type WeeklyMeeting,
@@ -121,6 +125,57 @@ describe('computeBoardPrefill', () => {
   });
 });
 
+describe('computeBoardPrefillTargets', () => {
+  it('suggère le nombre total de tickets comme cible de « Tickets terminés »', () => {
+    const board: SprintBoardResult = {
+      boardId: 7,
+      statusCounts: { total: 12, todo: 3, inProgress: 4, qa: 2, resolved: 3 },
+    };
+
+    expect(computeBoardPrefillTargets(board)['tickets termines']).toBe('12');
+  });
+
+  it('tombe à zéro sur un board sans données', () => {
+    expect(computeBoardPrefillTargets({ boardId: 1 })['tickets termines']).toBe('0');
+  });
+});
+
+describe('getMetricTargetMode', () => {
+  it('« Points réalisés » : cible dérivée des points engagés', () => {
+    expect(getMetricTargetMode('Points réalisés')).toBe('auto-engaged-points');
+  });
+
+  it('« Tickets en cours » et « Bugs ouverts » : pas de cible', () => {
+    expect(getMetricTargetMode('Tickets en cours')).toBe('hidden');
+    expect(getMetricTargetMode('Bugs ouverts')).toBe('hidden');
+  });
+
+  it('les autres indicateurs (dont « Tickets terminés » et les personnalisés) restent en saisie libre', () => {
+    expect(getMetricTargetMode('Tickets terminés')).toBe('manual');
+    expect(getMetricTargetMode('Points engagés')).toBe('manual');
+    expect(getMetricTargetMode('Nouvel indicateur')).toBe('manual');
+  });
+
+  it('ignore la casse et les accents', () => {
+    expect(getMetricTargetMode('POINTS REALISES')).toBe('auto-engaged-points');
+  });
+});
+
+describe('findEngagedPointsValue', () => {
+  it('retourne la valeur de l\'indicateur « Points engagés » de l\'équipe', () => {
+    const metrics: MeetingMetric[] = [
+      { id: 'm1', label: 'Points engagés', value: '34', target: '', source: 'jira' },
+      { id: 'm2', label: 'Points réalisés', value: '9', target: '', source: 'jira' },
+    ];
+
+    expect(findEngagedPointsValue(metrics)).toBe('34');
+  });
+
+  it('retourne une chaîne vide si l\'indicateur est absent', () => {
+    expect(findEngagedPointsValue([])).toBe('');
+  });
+});
+
 describe('applyPrefillToTeams', () => {
   const boards: SprintBoardResult[] = [
     {
@@ -183,6 +238,26 @@ describe('applyPrefillToTeams', () => {
 
     expect(a.metrics[0].value).toBe('');
     expect(b.metrics[0].value).toBe('');
+  });
+
+  it('suggère la cible « Tickets terminés » depuis le total de tickets du board', () => {
+    const team = devTeam({
+      metrics: [{ id: 'm3', label: 'Tickets terminés', value: '', target: '', source: 'manual' }],
+    });
+
+    const [result] = applyPrefillToTeams([team], boards);
+
+    expect(result.metrics[0]).toMatchObject({ value: '3', target: '12' });
+  });
+
+  it('n\'écrase jamais une cible déjà renseignée', () => {
+    const team = devTeam({
+      metrics: [{ id: 'm3', label: 'Tickets terminés', value: '', target: '10', source: 'manual' }],
+    });
+
+    const [result] = applyPrefillToTeams([team], boards);
+
+    expect(result.metrics[0].target).toBe('10');
   });
 });
 

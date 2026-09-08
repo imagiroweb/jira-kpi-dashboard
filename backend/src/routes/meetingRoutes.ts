@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { Server } from 'socket.io';
 import { logger } from '../utils/logger';
 import { WeeklySprintMeeting, IWeeklySprintMeeting } from '../domain/meeting/entities/WeeklySprintMeeting';
 import {
@@ -8,11 +9,28 @@ import {
   WeeklyMeetingDraft
 } from '../domain/meeting/weeklySprintMeeting';
 import { authenticate } from '../middleware/authMiddleware';
+import { emitMeetingUpdate } from '../websocket/socketHandler';
 
 const router = Router();
 
 const DEFAULT_LIST_LIMIT = 30;
 const MAX_LIST_LIMIT = 100;
+
+// Même pattern que worklogRoutes : l'instance Socket.io est posée sur l'app Express au démarrage.
+const getIO = (req: Request): Server | null => {
+  return req.app.get('io') as Server | null;
+};
+
+/**
+ * Identifiant de l'onglet/session à l'origine d'un PATCH, transmis par le client (en-tête
+ * `X-Client-Origin`). Réémis tel quel dans l'événement socket pour que l'auteur de la
+ * modification ignore son propre écho (il l'a déjà appliquée localement).
+ */
+function clientOrigin(req: Request): string | undefined {
+  const header = req.headers['x-client-origin'];
+  const value = Array.isArray(header) ? header[0] : header;
+  return typeof value === 'string' && value.trim() ? value.trim().slice(0, 128) : undefined;
+}
 
 function today(): string {
   return new Date().toISOString().split('T')[0];
@@ -213,6 +231,17 @@ router.patch('/:id', authenticate, async (req: Request, res: Response) => {
 
     if (!meeting) {
       return fail(res, 404, 'Point hebdo non trouvé');
+    }
+
+    const io = getIO(req);
+    if (io) {
+      emitMeetingUpdate(io, String(meeting._id), {
+        meetingId: String(meeting._id),
+        patch,
+        updatedBy: author(req),
+        updatedAt: meeting.updatedAt,
+        origin: clientOrigin(req) ?? null
+      });
     }
 
     res.json({ success: true, meeting: serialize(meeting) });

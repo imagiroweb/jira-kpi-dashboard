@@ -21,6 +21,8 @@ import {
   X,
 } from 'lucide-react';
 import { meetingApi } from '../services/api';
+import { useSocketOptional } from '../hooks/useSocketContext';
+import type { MeetingUpdate } from '../hooks/useSocket';
 import {
   applyPrefillToTeams,
   buildMeetingReport,
@@ -32,7 +34,9 @@ import {
   createMetric,
   createRetroItem,
   createTeam,
+  findEngagedPointsValue,
   formatMeetingClock,
+  getMetricTargetMode,
   MEETING_ACTION_STATUSES,
   MEETING_BLOCKER_SEVERITIES,
   MEETING_INTERACTION_STATUSES,
@@ -107,6 +111,20 @@ export function PointHebdoPage() {
   const meetingIdRef = useRef<string | null>(null);
   meetingIdRef.current = meeting?.id ?? null;
 
+  /* ---------------- édition collaborative (Socket.io) ---------------- */
+
+  // Identifiant de cet onglet, généré une seule fois : permet d'ignorer l'écho de nos
+  // propres PATCH quand le serveur les rediffuse à tous les clients de la réunion.
+  const clientOriginRef = useRef<string | null>(null);
+  if (clientOriginRef.current === null) {
+    clientOriginRef.current =
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `tab-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  const socketCtx = useSocketOptional();
+
   /* ---------------- chargement ---------------- */
 
   useEffect(() => {
@@ -155,6 +173,43 @@ export function PointHebdoPage() {
     loadBoards();
   }, []);
 
+  // Rejoint la room temps réel du point ouvert (et la quitte au changement/démontage).
+  const meetingSocketId = meeting?.id ?? null;
+  useEffect(() => {
+    if (!socketCtx || !meetingSocketId) return;
+    socketCtx.subscribeToMeeting(meetingSocketId);
+    return () => {
+      socketCtx.unsubscribeFromMeeting(meetingSocketId);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socketCtx?.subscribeToMeeting, socketCtx?.unsubscribeFromMeeting, meetingSocketId]);
+
+  // Applique les modifications reçues des autres clients éditant le même point.
+  useEffect(() => {
+    if (!socketCtx) return;
+    return socketCtx.onMeetingUpdate((update: MeetingUpdate) => {
+      // Mauvais point (onglet basculé sur un autre entre-temps) : on ignore.
+      if (!meetingIdRef.current || update.meetingId !== meetingIdRef.current) return;
+      // Notre propre écho (le serveur rediffuse aussi à l'auteur) : déjà appliqué localement.
+      if (update.origin && update.origin === clientOriginRef.current) return;
+
+      const incoming = (update.patch ?? {}) as Record<string, unknown>;
+      const safePatch: WeeklyMeetingPatch = {};
+      (['sprint', 'teams', 'blockers', 'interactions', 'retro', 'actions'] as const).forEach((key) => {
+        if (!(key in incoming)) return;
+        // Une section en cours de saisie locale non encore enregistrée n'est jamais
+        // écrasée par une mise à jour distante : elle sera de toute façon renvoyée par le
+        // prochain enregistrement automatique.
+        if (key in pendingPatch.current) return;
+        (safePatch as Record<string, unknown>)[key] = incoming[key];
+      });
+
+      if (Object.keys(safePatch).length === 0) return;
+      setMeeting((current) => (current ? { ...current, ...safePatch } : current));
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [socketCtx?.onMeetingUpdate]);
+
   /* ---------------- sauvegarde ---------------- */
 
   const flushSave = useCallback(async () => {
@@ -163,7 +218,7 @@ export function PointHebdoPage() {
     pendingPatch.current = {};
     if (!meetingId || Object.keys(patch).length === 0) return;
     try {
-      await meetingApi.update(meetingId, patch);
+      await meetingApi.update(meetingId, patch, clientOriginRef.current ?? undefined);
       setSaveState('saved');
     } catch {
       setSaveState('error');
@@ -435,35 +490,29 @@ export function PointHebdoPage() {
         <div className="px-6 lg:px-8 pt-5 pb-3 flex flex-wrap items-start justify-between gap-6">
           <div className="flex-1 min-w-[280px] space-y-2">
             <div className="flex items-baseline gap-2 flex-wrap">
-              <span className="text-xs uppercase tracking-wider text-accent-400 flex items-center gap-1.5">
+              <span className="text-xs uppercase tracking-wider text-accent-400 flex items-center gap-1.5 shrink-0">
                 <CalendarClock className="w-3.5 h-3.5" /> Point hebdo
               </span>
               <input
-                aria-label="Nom du sprint"
-                className={`${ghostInputClass} w-auto text-lg font-bold`}
-                value={meeting.sprint.name}
-                onChange={(e) =>
-                  applyChange({ sprint: { ...meeting.sprint, name: e.target.value } })
-                }
-              />
-              <span className="text-xs text-surface-500">n°</span>
-              <input
-                aria-label="Numéro du sprint"
-                className={`${ghostInputClass} w-16 font-mono font-bold text-center`}
-                value={meeting.sprint.number}
-                onChange={(e) =>
-                  applyChange({ sprint: { ...meeting.sprint, number: e.target.value } })
-                }
-              />
-              <input
                 type="date"
                 aria-label="Date du point"
-                className={`${ghostInputClass} w-40 font-mono text-xs`}
+                className={`${ghostInputClass} w-32 font-mono text-xs shrink-0`}
                 value={meeting.sprint.date}
                 onChange={(e) =>
                   applyChange({ sprint: { ...meeting.sprint, date: e.target.value } })
                 }
               />
+              <span className="inline-flex items-center gap-1 shrink-0">
+                <span className="text-xs text-surface-500">Sprint n°</span>
+                <input
+                  aria-label="Numéro du sprint"
+                  className={`${ghostInputClass} w-12 font-mono font-bold text-center`}
+                  value={meeting.sprint.number}
+                  onChange={(e) =>
+                    applyChange({ sprint: { ...meeting.sprint, number: e.target.value } })
+                  }
+                />
+              </span>
             </div>
             <input
               aria-label="Objectif du sprint"
@@ -595,64 +644,99 @@ export function PointHebdoPage() {
                   >
                     {team.role.toUpperCase()}
                   </span>
-                  <input
-                    aria-label="Nom de l'équipe"
-                    className={`${ghostInputClass} flex-1 font-semibold`}
-                    value={team.name}
-                    onChange={(e) => updateTeam(team.id, { name: e.target.value })}
-                  />
+                  {boards.length > 0 ? (
+                    <select
+                      aria-label="Nom de l'équipe"
+                      className="flex-1 bg-surface-800 border border-surface-700 rounded-lg text-sm font-semibold px-2 py-1.5 text-surface-100"
+                      value={team.boardId ?? ''}
+                      onChange={(e) => {
+                        const boardId = e.target.value ? Number(e.target.value) : undefined;
+                        const board = boards.find((b) => b.id === boardId);
+                        updateTeam(team.id, { boardId, name: board ? board.name : team.name });
+                      }}
+                    >
+                      <option value="">Aucun board Jira associé</option>
+                      {boards.map((board) => (
+                        <option key={board.id} value={board.id}>
+                          {board.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <input
+                      aria-label="Nom de l'équipe"
+                      placeholder="Nom de l'équipe"
+                      className={`${ghostInputClass} flex-1 font-semibold`}
+                      value={team.name}
+                      onChange={(e) => updateTeam(team.id, { name: e.target.value })}
+                    />
+                  )}
                 </div>
-
-                {boards.length > 0 && (
-                  <select
-                    aria-label={`Board Jira de ${team.name}`}
-                    className="mb-3 bg-surface-800 border border-surface-700 rounded-lg text-[11px] px-2 py-1.5 text-surface-300 print:hidden"
-                    value={team.boardId ?? ''}
-                    onChange={(e) =>
-                      updateTeam(team.id, {
-                        boardId: e.target.value ? Number(e.target.value) : undefined,
-                      })
-                    }
-                  >
-                    <option value="">Aucun board Jira associé</option>
-                    {boards.map((board) => (
-                      <option key={board.id} value={board.id}>
-                        {board.name}
-                      </option>
-                    ))}
-                  </select>
-                )}
 
                 <div className="space-y-1">
                   {team.metrics.map((metric) => {
-                    const progress = computeMetricProgress(metric.value, metric.target);
+                    const targetMode = getMetricTargetMode(metric.label);
+                    const effectiveTarget =
+                      targetMode === 'auto-engaged-points'
+                        ? findEngagedPointsValue(team.metrics)
+                        : targetMode === 'hidden'
+                          ? ''
+                          : metric.target;
+                    const progress = computeMetricProgress(metric.value, effectiveTarget);
+                    const hasLabel = metric.label.trim() !== '';
                     return (
                       <div key={metric.id} className="border-t border-surface-800 first:border-t-0 pt-1">
                         <div className="flex items-center gap-1.5">
                           <input
                             aria-label="Indicateur"
-                            className={`${ghostInputClass} flex-1 text-[13px]`}
+                            placeholder="Nom de l'indicateur"
+                            title={
+                              hasLabel
+                                ? undefined
+                                : `Indicateur sans nom : impossible de savoir à quoi correspond la valeur ${
+                                    metric.value || '?'
+                                  }`
+                            }
+                            className={`w-28 shrink-0 truncate bg-transparent border rounded-lg px-2 py-1 text-[13px] font-semibold focus:outline-none focus:border-accent-500 transition-colors ${
+                              hasLabel
+                                ? 'border-surface-700/70 text-surface-200'
+                                : 'border-warning-500/50 bg-warning-500/10 placeholder-warning-300'
+                            }`}
                             value={metric.label}
                             onChange={(e) => updateMetric(team.id, metric.id, { label: e.target.value })}
                           />
                           <input
                             aria-label={`Valeur — ${metric.label}`}
                             inputMode="decimal"
-                            className={`${ghostInputClass} w-16 font-mono font-bold text-right ${
+                            className={`${ghostInputClass} w-14 font-mono font-bold text-right ${
                               metric.source === 'jira' ? 'text-accent-300' : ''
                             }`}
                             value={metric.value}
                             onChange={(e) => updateMetric(team.id, metric.id, { value: e.target.value })}
                           />
-                          <span className="text-surface-600 font-mono text-xs">/</span>
-                          <input
-                            aria-label={`Cible — ${metric.label}`}
-                            inputMode="decimal"
-                            placeholder="cible"
-                            className={`${ghostInputClass} w-14 font-mono text-xs text-surface-400`}
-                            value={metric.target}
-                            onChange={(e) => updateMetric(team.id, metric.id, { target: e.target.value })}
-                          />
+                          {targetMode !== 'hidden' && (
+                            <>
+                              <span className="text-surface-600 font-mono text-xs">/</span>
+                              {targetMode === 'auto-engaged-points' ? (
+                                <span
+                                  aria-label={`Cible — ${metric.label} (= Points engagés)`}
+                                  title="Cible = valeur de l'indicateur « Points engagés » de l'équipe"
+                                  className="w-14 font-mono text-xs text-surface-500 text-right px-2 py-1"
+                                >
+                                  {effectiveTarget || '—'}
+                                </span>
+                              ) : (
+                                <input
+                                  aria-label={`Cible — ${metric.label}`}
+                                  inputMode="decimal"
+                                  placeholder="cible"
+                                  className={`${ghostInputClass} w-14 font-mono text-xs text-surface-400`}
+                                  value={metric.target}
+                                  onChange={(e) => updateMetric(team.id, metric.id, { target: e.target.value })}
+                                />
+                              )}
+                            </>
+                          )}
                           <button
                             onClick={() =>
                               updateTeam(team.id, {

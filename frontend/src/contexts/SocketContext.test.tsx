@@ -1,9 +1,10 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
+import { useEffect, useState } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetStore, seedAuthenticatedUser } from '@/test/mocks/store';
 import { useStore } from '@/store/useStore';
 import { useSocketContext } from '@/hooks/useSocketContext';
-import type { Alert, SyncProgress } from '@/hooks/useSocket';
+import type { Alert, MeetingUpdate, SyncProgress } from '@/hooks/useSocket';
 
 const socketHarness = vi.hoisted(() => {
   const handlers: Record<string, Array<(...args: unknown[]) => void>> = {};
@@ -46,6 +47,16 @@ function ContextConsumer() {
       </button>
     </div>
   );
+}
+
+/** Consommateur dynamique d'un point hebdo, à la façon de PointHebdoPage. */
+function MeetingUpdateConsumer({ label }: { label: string }) {
+  const ctx = useSocketContext();
+  const [received, setReceived] = useState<MeetingUpdate | null>(null);
+
+  useEffect(() => ctx.onMeetingUpdate(setReceived), [ctx]);
+
+  return <div data-testid={label}>{received ? received.meetingId : 'aucun'}</div>;
 }
 
 describe('SocketProvider', () => {
@@ -132,6 +143,62 @@ describe('SocketProvider', () => {
     await waitFor(() => {
       expect(useStore.getState().dashboardLoading).toBe(false);
     });
+  });
+
+  it('diffuse meeting:update à plusieurs abonnés via onMeetingUpdate, et arrête après désabonnement', async () => {
+    const { unmount } = render(
+      <SocketProvider>
+        <MeetingUpdateConsumer label="a" />
+        <MeetingUpdateConsumer label="b" />
+      </SocketProvider>
+    );
+
+    const update: MeetingUpdate = {
+      meetingId: 'meeting-42',
+      patch: { sprint: { name: 'Sprint', number: '1', goal: '', date: '2026-09-08' } },
+      origin: 'tab-x',
+    };
+
+    act(() => {
+      socketHarness.mockSocket.trigger('meeting:update', update);
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('a').textContent).toBe('meeting-42');
+      expect(screen.getByTestId('b').textContent).toBe('meeting-42');
+    });
+
+    // Le démontage désabonne les listeners : un nouvel événement ne doit rien faire planter.
+    unmount();
+    expect(() => socketHarness.mockSocket.trigger('meeting:update', update)).not.toThrow();
+  });
+
+  it('expose subscribeToMeeting/unsubscribeFromMeeting via le contexte', async () => {
+    function MeetingSubscriber() {
+      const ctx = useSocketContext();
+      useEffect(() => {
+        ctx.subscribeToMeeting('meeting-1');
+        return () => ctx.unsubscribeFromMeeting('meeting-1');
+      }, [ctx]);
+      return null;
+    }
+
+    const { unmount } = render(
+      <SocketProvider>
+        <MeetingSubscriber />
+      </SocketProvider>
+    );
+
+    act(() => {
+      socketHarness.mockSocket.trigger('connect');
+    });
+
+    await waitFor(() => {
+      expect(socketHarness.mockSocket.emit).toHaveBeenCalledWith('subscribe:meeting', 'meeting-1');
+    });
+
+    unmount();
+    expect(socketHarness.mockSocket.emit).toHaveBeenCalledWith('unsubscribe:meeting', 'meeting-1');
   });
 
   it('permet d’ajouter une notification manuelle via notify.success', async () => {
