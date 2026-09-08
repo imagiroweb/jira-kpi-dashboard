@@ -27,12 +27,28 @@ export interface KPIUpdate {
   timestamp: Date;
 }
 
+/**
+ * Modification d'un point hebdo diffusée par un autre client (édition collaborative).
+ * `patch` reprend la forme de `WeeklyMeetingPatch` (sections `sprint`/`teams`/…), mais
+ * reste typé de façon large ici : la validation/filtrage se fait côté consommateur
+ * (jamais confiance aveugle dans une donnée reçue par socket).
+ */
+export interface MeetingUpdate {
+  meetingId: string;
+  patch: Record<string, unknown>;
+  updatedBy?: { id: string; email: string; name?: string } | null;
+  updatedAt?: string;
+  /** Identifiant d'onglet du client à l'origine du PATCH — pour ignorer son propre écho. */
+  origin?: string | null;
+}
+
 interface UseSocketOptions {
   onKPIUpdate?: (data: KPIUpdate) => void;
   onProjectUpdate?: (projectId: string, data: unknown) => void;
   onSyncProgress?: (progress: SyncProgress) => void;
   onAlert?: (alert: Alert) => void;
   onAnalysisComplete?: (analysis: unknown) => void;
+  onMeetingUpdate?: (update: MeetingUpdate) => void;
 }
 
 export function useSocket(options: UseSocketOptions = {}) {
@@ -131,6 +147,12 @@ export function useSocket(options: UseSocketOptions = {}) {
       optionsRef.current.onAnalysisComplete?.(data.analysis);
     });
 
+    // Meeting (Point hebdo) live update from another client
+    socket.on('meeting:update', (data: MeetingUpdate) => {
+      console.log('[WebSocket] Meeting Update:', data);
+      optionsRef.current.onMeetingUpdate?.(data);
+    });
+
     // Pong response
     socket.on('pong', (data: { timestamp: number }) => {
       setState(prev => ({ ...prev, lastPing: Date.now() - data.timestamp }));
@@ -157,6 +179,20 @@ export function useSocket(options: UseSocketOptions = {}) {
     }
   }, []);
 
+  // Subscribe to live updates for a specific weekly meeting (Point hebdo)
+  const subscribeToMeeting = useCallback((meetingId: string) => {
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('subscribe:meeting', meetingId);
+    }
+  }, []);
+
+  // Unsubscribe from a weekly meeting
+  const unsubscribeFromMeeting = useCallback((meetingId: string) => {
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('unsubscribe:meeting', meetingId);
+    }
+  }, []);
+
   // Request manual sync
   const requestSync = useCallback((projectKey?: string) => {
     if (socketRef.current?.connected) {
@@ -176,6 +212,8 @@ export function useSocket(options: UseSocketOptions = {}) {
     socket: socketRef.current,
     subscribeToProject,
     unsubscribeFromProject,
+    subscribeToMeeting,
+    unsubscribeFromMeeting,
     requestSync,
     ping,
   };

@@ -7,12 +7,18 @@ jest.mock('../utils/logger', () => ({
   }
 }));
 
+const mockVerifyToken = jest.fn();
+jest.mock('../application/services/AuthService', () => ({
+  authService: { verifyToken: (...args: unknown[]) => mockVerifyToken(...args) }
+}));
+
 import type { Server, Socket } from 'socket.io';
 import { logger } from '../utils/logger';
 import {
   setupSocketHandlers,
   emitKPIUpdate,
   emitProjectUpdate,
+  emitMeetingUpdate,
   emitSyncProgress,
   emitAlert,
   emitAnalysisComplete,
@@ -40,6 +46,7 @@ type IoMock = {
 type SocketMock = {
   id: string;
   handshake: { auth: Record<string, unknown> };
+  data: Record<string, unknown>;
   on: jest.Mock;
   join: jest.Mock;
   leave: jest.Mock;
@@ -56,11 +63,12 @@ function makeIoMock(): IoMock {
   return { emit: ioEmit, to, use, on, _toEmit: toEmit };
 }
 
-function makeSocketMock(id: string): SocketMock {
+function makeSocketMock(id: string, auth: Record<string, unknown> = {}): SocketMock {
   const handlers: Record<string, SocketEventHandler> = {};
   return {
     id,
-    handshake: { auth: {} },
+    handshake: { auth },
+    data: {},
     on: jest.fn((event: string, cb: SocketEventHandler) => {
       handlers[event] = cb;
     }),
@@ -75,9 +83,18 @@ function asServer(io: IoMock): Server {
   return io as unknown as Server;
 }
 
+/** Récupère la fonction middleware passée à `io.use` (authentification). */
+function getAuthMiddleware(io: IoMock) {
+  return io.use.mock.calls[0][0] as (
+    socket: SocketMock,
+    next: (err?: Error) => void
+  ) => void;
+}
+
 describe('socketHandler', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    mockVerifyToken.mockReset();
   });
 
   it('setupSocketHandlers enregistre middleware et handlers de connexion', () => {
@@ -85,6 +102,50 @@ describe('socketHandler', () => {
     setupSocketHandlers(asServer(io));
     expect(io.use).toHaveBeenCalledTimes(1);
     expect(io.on).toHaveBeenCalledWith('connection', expect.any(Function));
+  });
+
+  describe('authentification (io.use)', () => {
+    it('rejette une connexion sans token', () => {
+      const io = makeIoMock();
+      setupSocketHandlers(asServer(io));
+      const middleware = getAuthMiddleware(io);
+      const socket = makeSocketMock('sock-no-token');
+      const next = jest.fn();
+
+      middleware(socket, next);
+
+      expect(next).toHaveBeenCalledWith(expect.any(Error));
+      expect(mockVerifyToken).not.toHaveBeenCalled();
+    });
+
+    it('rejette une connexion avec un token invalide', () => {
+      mockVerifyToken.mockReturnValue(null);
+      const io = makeIoMock();
+      setupSocketHandlers(asServer(io));
+      const middleware = getAuthMiddleware(io);
+      const socket = makeSocketMock('sock-bad-token', { token: 'garbage' });
+      const next = jest.fn();
+
+      middleware(socket, next);
+
+      expect(mockVerifyToken).toHaveBeenCalledWith('garbage');
+      expect(next).toHaveBeenCalledWith(expect.any(Error));
+    });
+
+    it('accepte une connexion avec un token valide et attache l\'utilisateur au socket', () => {
+      const user = { userId: 'u1', email: 'alice@test.com' };
+      mockVerifyToken.mockReturnValue(user);
+      const io = makeIoMock();
+      setupSocketHandlers(asServer(io));
+      const middleware = getAuthMiddleware(io);
+      const socket = makeSocketMock('sock-ok', { token: 'valid-jwt' });
+      const next = jest.fn();
+
+      middleware(socket, next);
+
+      expect(next).toHaveBeenCalledWith();
+      expect(socket.data.user).toEqual(user);
+    });
   });
 
   it('gère subscribe/unsubscribe/ping/disconnect et met à jour les clients connectés', () => {
@@ -112,6 +173,30 @@ describe('socketHandler', () => {
     expect(getConnectedClients().find((c) => c.id === 'sock-1')).toBeUndefined();
   });
 
+  it('gère subscribe/unsubscribe:meeting et rejette un meetingId invalide', () => {
+    const io = makeIoMock();
+    setupSocketHandlers(asServer(io));
+    const connectionCb = io.on.mock.calls.find((c) => c[0] === 'connection')?.[1] as
+      | ((socket: Socket) => void)
+      | undefined;
+    const socket = makeSocketMock('sock-meeting');
+    connectionCb?.(socket as unknown as Socket);
+
+    socket._handlers['subscribe:meeting']('507f1f77bcf86cd799439055');
+    expect(socket.join).toHaveBeenCalledWith('meeting:507f1f77bcf86cd799439055');
+    expect(socket.emit).toHaveBeenCalledWith('subscribed:meeting', {
+      meetingId: '507f1f77bcf86cd799439055',
+      success: true
+    });
+
+    socket._handlers['unsubscribe:meeting']('507f1f77bcf86cd799439055');
+    expect(socket.leave).toHaveBeenCalledWith('meeting:507f1f77bcf86cd799439055');
+
+    socket.join.mockClear();
+    socket._handlers['subscribe:meeting']('not valid; drop table');
+    expect(socket.join).not.toHaveBeenCalled();
+  });
+
   it('émet les événements helpers vers les bons canaux', () => {
     const io = makeIoMock();
 
@@ -122,6 +207,10 @@ describe('socketHandler', () => {
     emitProjectUpdate(asServer(io), 'ABC', { y: 2 });
     expect(io.to).toHaveBeenCalledWith('project:ABC');
     expect(io._toEmit).toHaveBeenCalledWith('project:update', { y: 2 });
+
+    emitMeetingUpdate(asServer(io), 'm1', { z: 3 });
+    expect(io.to).toHaveBeenCalledWith('meeting:m1');
+    expect(io._toEmit).toHaveBeenCalledWith('meeting:update', { z: 3 });
 
     emitSyncProgress(asServer(io), { status: 'started', progress: 0, message: 'start' });
     expect(io.emit).toHaveBeenCalledWith('sync:progress', { status: 'started', progress: 0, message: 'start' });

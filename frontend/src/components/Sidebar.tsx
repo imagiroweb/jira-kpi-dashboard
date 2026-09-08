@@ -1,11 +1,11 @@
-import { LayoutDashboard, Users, Headphones, ChevronLeft, ChevronRight, LogOut, User, Wifi, WifiOff, RefreshCw, Flag, Megaphone, Package, ShieldCheck } from 'lucide-react';
+import { LayoutDashboard, Users, Headphones, ChevronLeft, ChevronRight, LogOut, User, Wifi, WifiOff, RefreshCw, Flag, Megaphone, Package, ShieldCheck, CalendarClock } from 'lucide-react';
 import { useState } from 'react';
 import { useStore } from '../store/useStore';
 import { useSocketOptional } from '../hooks/useSocketContext';
 import { syncApi } from '../services/api';
 
 // PageType is defined in the store, we just use the same type here
-export type PageType = 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'gestionUtilisateurs';
+export type PageType = 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'pointHebdo' | 'gestionUtilisateurs';
 
 interface SidebarProps {
   currentPage: PageType;
@@ -55,6 +55,12 @@ const navItems: NavItem[] = [
     label: 'Produit',
     icon: <Package className="w-5 h-5" />,
     description: 'Données Monday.com (boards, items)'
+  },
+  {
+    id: 'pointHebdo',
+    label: 'Point hebdo',
+    icon: <CalendarClock className="w-5 h-5" />,
+    description: 'Réunion sprint Dev & QA'
   },
   {
     id: 'gestionUtilisateurs',

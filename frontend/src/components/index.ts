@@ -14,6 +14,7 @@ export { UserDetailPage } from './UserDetailPage';
 export { EpicProgressPage } from './EpicProgressPage';
 export { MarketingDashboard } from './MarketingDashboard';
 export { ProduitDashboard } from './ProduitDashboard';
+export { PointHebdoPage } from './PointHebdoPage';
 export { UserManagementPage } from './UserManagementPage';
 export { RoleSelectionScreen } from './RoleSelectionScreen';
 

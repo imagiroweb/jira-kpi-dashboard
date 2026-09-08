@@ -1,5 +1,6 @@
 import { Server, Socket } from 'socket.io';
 import { logger } from '../utils/logger';
+import { authService } from '../application/services/AuthService';
 
 interface ConnectedClient {
   id: string;
@@ -10,11 +11,21 @@ interface ConnectedClient {
 const connectedClients = new Map<string, ConnectedClient>();
 
 export function setupSocketHandlers(io: Server): void {
-  // Middleware for authentication (optional)
+  // Authentification obligatoire : même JWT que l'API REST (Authorization: Bearer). Un
+  // client sans token valide n'établit jamais la connexion (les événements diffusés ici
+  // — dont les mises à jour de points hebdo — ne doivent pas être accessibles anonymement).
   io.use((socket, next) => {
-    const _token = socket.handshake.auth.token;
-    // TODO: Implement token validation if needed
-    logger.debug(`Socket auth attempt from ${socket.id}`);
+    const token = socket.handshake.auth?.token;
+    if (typeof token !== 'string' || !token) {
+      logger.warn(`Socket connection rejected (no token): ${socket.id}`);
+      return next(new Error('Authentification requise'));
+    }
+    const payload = authService.verifyToken(token);
+    if (!payload) {
+      logger.warn(`Socket connection rejected (invalid token): ${socket.id}`);
+      return next(new Error('Token invalide ou expiré'));
+    }
+    socket.data.user = payload;
     next();
   });
 
@@ -56,6 +67,24 @@ export function setupSocketHandlers(io: Server): void {
       }
       
       logger.info(`Client ${socket.id} unsubscribed from project ${projectId}`);
+    });
+
+    // Subscribe to live updates for a specific weekly meeting (Point hebdo)
+    socket.on('subscribe:meeting', (meetingId: string) => {
+      if (typeof meetingId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(meetingId)) {
+        logger.warn(`Client ${socket.id} sent an invalid meetingId for subscribe:meeting`);
+        return;
+      }
+      socket.join(`meeting:${meetingId}`);
+      logger.info(`Client ${socket.id} subscribed to meeting ${meetingId}`);
+      socket.emit('subscribed:meeting', { meetingId, success: true });
+    });
+
+    // Unsubscribe from a weekly meeting
+    socket.on('unsubscribe:meeting', (meetingId: string) => {
+      if (typeof meetingId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(meetingId)) return;
+      socket.leave(`meeting:${meetingId}`);
+      logger.info(`Client ${socket.id} unsubscribed from meeting ${meetingId}`);
     });
 
     // Subscribe to all KPI updates
@@ -113,6 +142,15 @@ export function emitKPIUpdate(io: Server, data: unknown): void {
 export function emitProjectUpdate(io: Server, projectId: string, data: unknown): void {
   io.to(`project:${projectId}`).emit('project:update', data);
   logger.debug(`Emitted update to project ${projectId}`);
+}
+
+/**
+ * Diffuse la modification d'un point hebdo aux autres clients qui l'ont ouvert
+ * (room `meeting:<id>`, jamais à tous les sockets — le contenu peut être sensible).
+ */
+export function emitMeetingUpdate(io: Server, meetingId: string, data: unknown): void {
+  io.to(`meeting:${meetingId}`).emit('meeting:update', data);
+  logger.debug(`Emitted meeting update for ${meetingId}`);
 }
 
 export function emitSyncProgress(io: Server, progress: {

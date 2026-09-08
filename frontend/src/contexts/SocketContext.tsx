@@ -1,5 +1,5 @@
 import React, { createContext, useCallback, useRef, ReactNode } from 'react';
-import { useSocket, SocketState, Alert, SyncProgress, KPIUpdate } from '../hooks/useSocket';
+import { useSocket, SocketState, Alert, SyncProgress, KPIUpdate, MeetingUpdate } from '../hooks/useSocket';
 import { NotificationToast } from '../components/NotificationToast';
 import { useNotifications } from '../hooks/useNotifications';
 import { useStore } from '../store/useStore';
@@ -7,6 +7,10 @@ import { useStore } from '../store/useStore';
 interface SocketContextValue extends SocketState {
   subscribeToProject: (projectId: string) => void;
   unsubscribeFromProject: (projectId: string) => void;
+  subscribeToMeeting: (meetingId: string) => void;
+  unsubscribeFromMeeting: (meetingId: string) => void;
+  /** Enregistre un listener pour les mises à jour temps réel d'un point hebdo ; retourne le désabonnement. */
+  onMeetingUpdate: (listener: (update: MeetingUpdate) => void) => () => void;
   requestSync: (projectKey?: string) => void;
   ping: () => void;
   // Notification helpers
@@ -70,14 +74,32 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     triggerKpiRefresh();
   }, [info, triggerKpiRefresh]);
 
+  // Registre des composants abonnés aux mises à jour de points hebdo (souvent un seul :
+  // PointHebdoPage). Permet à un consommateur dynamique de s'abonner via le contexte sans
+  // ouvrir une deuxième connexion socket.
+  const meetingListenersRef = useRef(new Set<(update: MeetingUpdate) => void>());
+
+  const handleMeetingUpdate = useCallback((update: MeetingUpdate) => {
+    meetingListenersRef.current.forEach((listener) => listener(update));
+  }, []);
+
+  const onMeetingUpdate = useCallback((listener: (update: MeetingUpdate) => void) => {
+    meetingListenersRef.current.add(listener);
+    return () => {
+      meetingListenersRef.current.delete(listener);
+    };
+  }, []);
+
   const socket = useSocket({
     onAlert: handleAlert,
     onSyncProgress: handleSyncProgress,
     onKPIUpdate: handleKPIUpdate,
+    onMeetingUpdate: handleMeetingUpdate,
   });
 
   const contextValue: SocketContextValue = {
     ...socket,
+    onMeetingUpdate,
     notify: {
       success,
       error,

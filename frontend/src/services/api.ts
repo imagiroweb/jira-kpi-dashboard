@@ -3,6 +3,11 @@ import {
   ApiResponse, 
   JiraProject
 } from '../types';
+import type {
+  WeeklyMeeting,
+  WeeklyMeetingPatch,
+  WeeklyMeetingSummary,
+} from '../domain/pointHebdoSprint';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -603,6 +608,55 @@ export const mondayApi = {
     boardId: string
   ): Promise<{ success: boolean; views?: MondayBoardView[] }> => {
     const { data } = await api.get(`/monday/boards/${boardId}/views`);
+    return data;
+  },
+};
+
+/** Point hebdo sprint : document de réunion partagé et éditable. */
+export const meetingApi = {
+  list: async (
+    limit = 30
+  ): Promise<{ success: boolean; count: number; meetings: WeeklyMeetingSummary[] }> => {
+    const { data } = await api.get('/meetings', { params: { limit } });
+    return data;
+  },
+  getLatest: async (): Promise<{ success: boolean; meeting: WeeklyMeeting }> => {
+    const { data } = await api.get('/meetings/latest');
+    return data;
+  },
+  getById: async (id: string): Promise<{ success: boolean; meeting: WeeklyMeeting }> => {
+    const { data } = await api.get(`/meetings/${id}`);
+    return data;
+  },
+  create: async (date?: string): Promise<{ success: boolean; meeting: WeeklyMeeting }> => {
+    const { data } = await api.post('/meetings', date ? { date } : {});
+    return data;
+  },
+  /** Crée le point suivant en reconduisant structure et actions non terminées. */
+  createNext: async (
+    id: string,
+    date?: string
+  ): Promise<{ success: boolean; meeting: WeeklyMeeting }> => {
+    const { data } = await api.post(`/meetings/${id}/next`, date ? { date } : {});
+    return data;
+  },
+  /**
+   * `origin` : identifiant d'onglet du client (voir PointHebdoPage), renvoyé tel quel dans
+   * l'événement socket `meeting:update` pour que l'auteur de la modification ignore son
+   * propre écho.
+   */
+  update: async (
+    id: string,
+    patch: WeeklyMeetingPatch,
+    origin?: string
+  ): Promise<{ success: boolean; meeting: WeeklyMeeting }> => {
+    const { data } = await api.patch(`/meetings/${id}`, patch, {
+      headers: origin ? { 'X-Client-Origin': origin } : undefined,
+    });
+    return data;
+  },
+  remove: async (id: string): Promise<{ success: boolean; message: string }> => {
+    const { data } = await api.delete(`/meetings/${id}`);
     return data;
   },
 };

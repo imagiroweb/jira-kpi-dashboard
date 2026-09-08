@@ -17,6 +17,7 @@ describe('getFirstVisiblePage', () => {
       epics: false,
       marketing: false,
       produit: false,
+      pointHebdo: false,
       gestionUtilisateurs: false,
     };
     expect(getFirstVisiblePage(visible)).toBe('dashboard');
@@ -30,6 +31,7 @@ describe('getFirstVisiblePage', () => {
       epics: false,
       marketing: false,
       produit: false,
+      pointHebdo: false,
       gestionUtilisateurs: false,
     };
     expect(getFirstVisiblePage(visible)).toBe('users');
@@ -43,6 +45,7 @@ describe('getFirstVisiblePage', () => {
       epics: false,
       marketing: false,
       produit: false,
+      pointHebdo: false,
       gestionUtilisateurs: false,
     };
     expect(getFirstVisiblePage(visible)).toBeNull();
@@ -56,6 +59,7 @@ describe('getFirstVisiblePage', () => {
       epics: false,
       marketing: true,
       produit: false,
+      pointHebdo: false,
       gestionUtilisateurs: false,
     };
     expect(getFirstVisiblePage(visible)).toBe('support');
@@ -175,6 +179,7 @@ describe('useStore (auth)', () => {
         epics: false,
         marketing: false,
         produit: false,
+        pointHebdo: false,
         gestionUtilisateurs: false,
       },
     });
@@ -189,6 +194,7 @@ describe('useStore (auth)', () => {
         epics: false,
         marketing: false,
         produit: false,
+        pointHebdo: false,
         gestionUtilisateurs: false,
       },
     });

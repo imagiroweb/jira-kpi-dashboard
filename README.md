@@ -34,6 +34,11 @@ Un tableau de bord moderne et temps réel pour visualiser les KPI de vos projets
 - Détail épic avec arborescence, temps, story points et **détail SP par statut** (modale)
 - Documentation : [docs/SUIVI_EPICS.md](docs/SUIVI_EPICS.md)
 
+### 🗓️ Point hebdo sprint (Dev & QA)
+- Document de réunion partagé : chiffres par équipe, blocages, interactions, rétro, actions
+- Minuteur de séance en quatre phases, chiffres préremplis depuis Jira, compte-rendu et impression
+- Documentation : [docs/point-hebdo-sprint.md](docs/point-hebdo-sprint.md)
+
 ## 🛠️ Stack Technique
 
 | Composant | Technologies |

@@ -32,6 +32,7 @@ export interface VisiblePages {
   epics: boolean;
   marketing: boolean;
   produit: boolean;
+  pointHebdo: boolean;
   gestionUtilisateurs: boolean;
 }
 
