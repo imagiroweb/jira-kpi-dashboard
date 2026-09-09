@@ -360,6 +360,154 @@ export function applyPrefillToTeams(
 }
 
 /* ------------------------------------------------------------------ *
+ * Burndown du sprint (reconstruit)
+ * ------------------------------------------------------------------ */
+
+export type ResolvedByDayRow = Record<string, string | number>;
+
+/** Réponse de `GET /api/jira/resolved-by-day?activeSprint=true&mode=points`. */
+export interface ResolvedByDayResult {
+  byDay: ResolvedByDayRow[];
+  dateRange: { from: string; to: string };
+}
+
+export interface BurndownPoint {
+  date: string;
+  /** Reste à faire en fin de journée ; null pour les jours encore à venir. */
+  remaining: number | null;
+  /** Trajectoire idéale, décroissante sur les jours ouvrés uniquement. */
+  ideal: number;
+}
+
+export interface TeamBurndown {
+  scopePoints: number;
+  completedPoints: number;
+  remainingPoints: number;
+  idealPoints: number;
+  /** Positif = en avance sur la trajectoire idéale, négatif = en retard. */
+  deltaPoints: number;
+  days: BurndownPoint[];
+}
+
+const MAX_SPRINT_DAYS = 200;
+
+function roundPoints(value: number): number {
+  return Math.round(value * 100) / 100;
+}
+
+/** Liste des jours d'un intervalle, bornes incluses, au format YYYY-MM-DD. */
+export function listDaysInclusive(from: string, to: string): string[] {
+  const start = new Date(`${from}T00:00:00Z`);
+  const end = new Date(`${to}T00:00:00Z`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) return [];
+
+  const days: string[] = [];
+  const cursor = new Date(start);
+  while (cursor <= end && days.length < MAX_SPRINT_DAYS) {
+    days.push(cursor.toISOString().slice(0, 10));
+    cursor.setUTCDate(cursor.getUTCDate() + 1);
+  }
+  return days;
+}
+
+/** Jour ouvré = du lundi au vendredi. */
+export function isWorkingDay(date: string): boolean {
+  const day = new Date(`${date}T00:00:00Z`).getUTCDay();
+  return day >= 1 && day <= 5;
+}
+
+/**
+ * Story points résolus pour une série donnée, en gérant les deux formats de
+ * `resolved-by-day` : séries nommées par équipe (`<nom>_points`) ou par board
+ * (`board_<id>`, qui porte déjà des points lorsque `mode=points`).
+ */
+export function readResolvedPointsForSeries(
+  row: ResolvedByDayRow,
+  seriesName: string | undefined,
+  boardId?: number
+): number {
+  if (seriesName) {
+    const named = row[`${seriesName}_points`];
+    if (typeof named === 'number') return named;
+  }
+  if (boardId != null) {
+    const byBoard = row[`board_${boardId}`];
+    if (typeof byBoard === 'number') return byBoard;
+  }
+  return 0;
+}
+
+function todayIso(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * Burndown approché d'une équipe : le périmètre est celui constaté aujourd'hui,
+ * duquel on retire le cumul des story points résolus jour après jour. Les
+ * changements de périmètre en cours de sprint ne sont donc pas visibles ; une
+ * courbe qui passe sous zéro signale des tickets résolus hors du périmètre
+ * actuel (typiquement sortis du sprint).
+ */
+export function computeTeamBurndown(params: {
+  scopePoints: number;
+  seriesName?: string;
+  boardId?: number;
+  resolved: ResolvedByDayResult | null;
+  today?: string;
+}): TeamBurndown | null {
+  const { scopePoints, seriesName, boardId, resolved, today = todayIso() } = params;
+  if (!resolved?.dateRange?.from || !resolved?.dateRange?.to) return null;
+
+  const days = listDaysInclusive(resolved.dateRange.from, resolved.dateRange.to);
+  if (days.length === 0) return null;
+
+  const resolvedByDate = new Map<string, number>();
+  for (const row of resolved.byDay ?? []) {
+    const date = typeof row.date === 'string' ? row.date : '';
+    if (!date) continue;
+    resolvedByDate.set(date, readResolvedPointsForSeries(row, seriesName, boardId));
+  }
+
+  const firstDay = days[0];
+  const lastDay = days[days.length - 1];
+  const reference = today < firstDay ? firstDay : today > lastDay ? lastDay : today;
+
+  const workingDayCount = days.filter(isWorkingDay).length || days.length;
+
+  let cumulative = 0;
+  let workingElapsed = 0;
+  let completedPoints = 0;
+  let remainingPoints = scopePoints;
+  let idealPoints = scopePoints;
+
+  const points: BurndownPoint[] = days.map((date) => {
+    cumulative += resolvedByDate.get(date) ?? 0;
+    if (isWorkingDay(date)) workingElapsed += 1;
+
+    const ideal = roundPoints(Math.max(0, scopePoints * (1 - workingElapsed / workingDayCount)));
+    const isPast = date <= reference;
+    const remaining = isPast ? roundPoints(scopePoints - cumulative) : null;
+
+    if (date === reference) {
+      completedPoints = roundPoints(cumulative);
+      remainingPoints = roundPoints(scopePoints - cumulative);
+      idealPoints = ideal;
+    }
+
+    return { date, remaining, ideal };
+  });
+
+  return {
+    scopePoints: roundPoints(scopePoints),
+    completedPoints,
+    remainingPoints,
+    idealPoints,
+    deltaPoints: roundPoints(idealPoints - remainingPoints),
+    days: points
+  };
+}
+
+/* ------------------------------------------------------------------ *
  * Compte-rendu
  * ------------------------------------------------------------------ */
 

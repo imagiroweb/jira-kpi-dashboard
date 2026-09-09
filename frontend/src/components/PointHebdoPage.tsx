@@ -18,8 +18,18 @@ import {
   Sparkles,
   Target,
   Trash2,
+  TrendingDown,
   X,
 } from 'lucide-react';
+import {
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
 import { meetingApi } from '../services/api';
 import { useSocketOptional } from '../hooks/useSocketContext';
 import type { MeetingUpdate } from '../hooks/useSocket';
@@ -28,6 +38,7 @@ import {
   buildMeetingReport,
   computeMetricProgress,
   computePhaseRemainingSeconds,
+  computeTeamBurndown,
   createAction,
   createBlocker,
   createInteraction,
@@ -52,7 +63,9 @@ import {
   type MeetingRetroColumn,
   type MeetingTeam,
   type MeetingTeamRole,
+  type ResolvedByDayResult,
   type SprintBoardResult,
+  type TeamBurndown,
   type WeeklyMeeting,
   type WeeklyMeetingPatch,
   type WeeklyMeetingSummary,
@@ -105,6 +118,8 @@ export function PointHebdoPage() {
   const [copied, setCopied] = useState(false);
   const [boards, setBoards] = useState<ConfiguredBoard[]>([]);
   const [prefilling, setPrefilling] = useState(false);
+  const [sprintBoards, setSprintBoards] = useState<SprintBoardResult[] | null>(null);
+  const [resolvedByDay, setResolvedByDay] = useState<ResolvedByDayResult | null>(null);
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingPatch = useRef<WeeklyMeetingPatch>({});
@@ -327,26 +342,39 @@ export function PointHebdoPage() {
     }
   };
 
+  /** Chiffres du sprint en cours de chaque board : périmètre, statuts, tickets. */
+  const fetchSprintBoards = useCallback(async (): Promise<SprintBoardResult[]> => {
+    const res = await fetch(`${API_BASE_URL}/jira/dashboard/sprint-issues-all`);
+    if (!res.ok) throw new Error('Jira indisponible');
+    const json = await res.json();
+    if (!json.success || !Array.isArray(json.boards)) throw new Error('Réponse Jira invalide');
+
+    return json.boards.map(
+      (row: { boardId: number; name?: string; sprint?: Omit<SprintBoardResult, 'boardId'> }) => ({
+        boardId: row.boardId,
+        name: row.name,
+        ...(row.sprint ?? {}),
+      })
+    );
+  }, []);
+
+  /** Story points résolus jour par jour sur le sprint en cours : base du burndown. */
+  const fetchResolvedPointsByDay = useCallback(async (): Promise<ResolvedByDayResult> => {
+    const res = await fetch(`${API_BASE_URL}/jira/resolved-by-day?activeSprint=true&mode=points`);
+    if (!res.ok) throw new Error('Historique indisponible');
+    const json = await res.json();
+    if (!json.success || !Array.isArray(json.byDay) || !json.dateRange) {
+      throw new Error('Réponse Jira invalide');
+    }
+    return { byDay: json.byDay, dateRange: json.dateRange };
+  }, []);
+
   const prefillFromJira = useCallback(
     async (teams: MeetingTeam[], { silent = false }: { silent?: boolean } = {}) => {
       setPrefilling(true);
       try {
-        const res = await fetch(`${API_BASE_URL}/jira/dashboard/sprint-issues-all`);
-        if (!res.ok) throw new Error('Jira indisponible');
-        const json = await res.json();
-        if (!json.success || !Array.isArray(json.boards)) throw new Error('Réponse Jira invalide');
-
-        const results: SprintBoardResult[] = json.boards.map(
-          (row: {
-            boardId: number;
-            name?: string;
-            sprint?: Omit<SprintBoardResult, 'boardId'>;
-          }) => ({
-            boardId: row.boardId,
-            name: row.name,
-            ...(row.sprint ?? {}),
-          })
-        );
+        const results = await fetchSprintBoards();
+        setSprintBoards(results);
         applyChange({ teams: applyPrefillToTeams(teams, results) });
       } catch {
         if (!silent) setError('Préremplissage impossible : vérifiez la configuration Jira.');
@@ -354,24 +382,66 @@ export function PointHebdoPage() {
         setPrefilling(false);
       }
     },
-    [applyChange]
+    [applyChange, fetchSprintBoards]
   );
 
   /**
-   * Point fraîchement créé ou reconduit : les chiffres des équipes rattachées à
-   * un board Jira sont remplis à l'ouverture, une seule fois.
+   * Un seul chargement Jira par point, au premier affichage : il alimente le
+   * burndown et, si le point est encore vierge, remplit les chiffres des équipes
+   * rattachées à un board. L'échec reste silencieux, le burndown est alors masqué.
    */
-  const autoPrefilledId = useRef<string | null>(null);
+  const jiraLoadedId = useRef<string | null>(null);
   useEffect(() => {
-    if (!meeting || autoPrefilledId.current === meeting.id) return;
+    if (!meeting || jiraLoadedId.current === meeting.id) return;
     const linkedTeams = meeting.teams.filter((team) => team.boardId != null);
-    const alreadyFilled = linkedTeams.some((team) =>
+    if (linkedTeams.length === 0) return;
+    jiraLoadedId.current = meeting.id;
+
+    const teamsSnapshot = meeting.teams;
+    const shouldPrefill = !linkedTeams.some((team) =>
       team.metrics.some((metric) => metric.value.trim() !== '')
     );
-    if (linkedTeams.length === 0 || alreadyFilled) return;
-    autoPrefilledId.current = meeting.id;
-    void prefillFromJira(meeting.teams, { silent: true });
-  }, [meeting, prefillFromJira]);
+
+    let cancelled = false;
+    void (async () => {
+      const [boardsResult, resolvedResult] = await Promise.allSettled([
+        fetchSprintBoards(),
+        fetchResolvedPointsByDay(),
+      ]);
+      if (cancelled) return;
+      if (resolvedResult.status === 'fulfilled') setResolvedByDay(resolvedResult.value);
+      if (boardsResult.status === 'fulfilled') {
+        setSprintBoards(boardsResult.value);
+        if (shouldPrefill) {
+          applyChange({ teams: applyPrefillToTeams(teamsSnapshot, boardsResult.value) });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [meeting, applyChange, fetchSprintBoards, fetchResolvedPointsByDay]);
+
+  /** Une courbe par équipe rattachée à un board dont le périmètre est connu. */
+  const teamBurndowns = useMemo(() => {
+    if (!meeting || !resolvedByDay || !sprintBoards) return [];
+    const sprintByBoardId = new Map(sprintBoards.map((board) => [board.boardId, board]));
+
+    return meeting.teams.flatMap((team) => {
+      if (team.boardId == null) return [];
+      const sprintBoard = sprintByBoardId.get(team.boardId);
+      const scopePoints = sprintBoard?.storyPointsByStatus?.total;
+      if (scopePoints == null) return [];
+
+      const burndown = computeTeamBurndown({
+        scopePoints,
+        seriesName: sprintBoard?.name ?? boards.find((b) => b.id === team.boardId)?.name,
+        boardId: team.boardId,
+        resolved: resolvedByDay,
+      });
+      return burndown ? [{ team, burndown }] : [];
+    });
+  }, [meeting, resolvedByDay, sprintBoards, boards]);
 
   const copyReport = async () => {
     if (!meeting) return;
@@ -786,6 +856,25 @@ export function PointHebdoPage() {
               </article>
             ))}
           </div>
+
+          {teamBurndowns.length > 0 && (
+            <div className="mt-6">
+              <h3 className="flex items-center gap-2 text-sm font-semibold text-surface-300 mb-1">
+                <TrendingDown className="w-4 h-4 text-accent-400" />
+                Burndown du sprint en cours
+              </h3>
+              <p className="text-[11px] text-surface-500 mb-3">
+                Reconstitué à partir du périmètre actuel du sprint moins les story points
+                résolus jour après jour : les tickets ajoutés ou retirés en cours de sprint
+                ne sont pas retracés.
+              </p>
+              <div className="grid gap-4 lg:grid-cols-2">
+                {teamBurndowns.map(({ team, burndown }) => (
+                  <BurndownCard key={team.id} team={team} burndown={burndown} />
+                ))}
+              </div>
+            </div>
+          )}
         </section>
 
         {/* Phase 2 — blocages */}
@@ -1200,6 +1289,90 @@ function SectionHead({
       <span className="flex-1" />
       <div className="flex gap-2 print:hidden">{children}</div>
     </div>
+  );
+}
+
+/** Étiquette d'axe compacte : 15/09 plutôt que 2026-09-15. */
+function formatBurndownDay(date: string): string {
+  return `${date.slice(8, 10)}/${date.slice(5, 7)}`;
+}
+
+function BurndownCard({ team, burndown }: { team: MeetingTeam; burndown: TeamBurndown }) {
+  const onTrack = burndown.deltaPoints >= 0;
+
+  return (
+    <article className="card-glass p-4 print:break-inside-avoid">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
+        <h4 className="text-sm font-semibold text-surface-100">{team.name || 'Équipe sans nom'}</h4>
+        <span className="font-mono text-[11px] text-surface-500">
+          périmètre {burndown.scopePoints} SP
+        </span>
+      </div>
+
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-surface-400 mb-3">
+        <span aria-label={`Reste à faire — ${team.name}`}>
+          Reste <strong className="font-mono text-surface-50">{burndown.remainingPoints} SP</strong>
+        </span>
+        <span>
+          Idéal <strong className="font-mono text-surface-300">{burndown.idealPoints} SP</strong>
+        </span>
+        <span
+          aria-label={`Écart à la trajectoire idéale — ${team.name}`}
+          className={onTrack ? 'text-success-400' : 'text-danger-400'}
+        >
+          {onTrack
+            ? `en avance de ${burndown.deltaPoints} SP`
+            : `en retard de ${Math.abs(burndown.deltaPoints)} SP`}
+        </span>
+      </div>
+
+      <div className="h-44">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={burndown.days} margin={{ top: 4, right: 8, bottom: 0, left: -20 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
+            <XAxis
+              dataKey="date"
+              tickFormatter={formatBurndownDay}
+              tick={{ fontSize: 10, fill: '#64748b' }}
+              interval="preserveStartEnd"
+              minTickGap={12}
+            />
+            <YAxis tick={{ fontSize: 10, fill: '#64748b' }} allowDecimals={false} />
+            <Tooltip
+              contentStyle={{
+                background: '#0f172a',
+                border: '1px solid #334155',
+                borderRadius: 8,
+                fontSize: 12,
+              }}
+              labelFormatter={(date) => formatBurndownDay(String(date))}
+              formatter={(value: unknown, name: unknown): [string, string] => [
+                typeof value === 'number' ? `${value} SP` : '—',
+                String(name),
+              ]}
+            />
+            <Line
+              type="monotone"
+              dataKey="ideal"
+              name="Idéal"
+              stroke="#475569"
+              strokeDasharray="4 4"
+              strokeWidth={1.5}
+              dot={false}
+            />
+            <Line
+              type="monotone"
+              dataKey="remaining"
+              name="Reste à faire"
+              stroke="#22d3ee"
+              strokeWidth={2}
+              dot={false}
+              connectNulls={false}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </article>
   );
 }
 

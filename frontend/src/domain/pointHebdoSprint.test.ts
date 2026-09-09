@@ -6,16 +6,21 @@ import {
   computeBoardPrefillTargets,
   computeMetricProgress,
   computePhaseRemainingSeconds,
+  computeTeamBurndown,
   createAction,
   createTeam,
   findEngagedPointsValue,
   formatMeetingClock,
   getMetricTargetMode,
+  isWorkingDay,
+  listDaysInclusive,
   MEETING_PHASES,
   MEETING_TOTAL_BUDGET_SECONDS,
   parseMetricNumber,
+  readResolvedPointsForSeries,
   type MeetingMetric,
   type MeetingTeam,
+  type ResolvedByDayResult,
   type SprintBoardResult,
   type WeeklyMeeting,
 } from './pointHebdoSprint';
@@ -258,6 +263,183 @@ describe('applyPrefillToTeams', () => {
     const [result] = applyPrefillToTeams([team], boards);
 
     expect(result.metrics[0].target).toBe('10');
+  });
+});
+
+describe('listDaysInclusive', () => {
+  it('liste les jours bornes incluses', () => {
+    expect(listDaysInclusive('2026-09-07', '2026-09-10')).toEqual([
+      '2026-09-07',
+      '2026-09-08',
+      '2026-09-09',
+      '2026-09-10',
+    ]);
+  });
+
+  it('gère un intervalle d\'un seul jour', () => {
+    expect(listDaysInclusive('2026-09-07', '2026-09-07')).toEqual(['2026-09-07']);
+  });
+
+  it('traverse un changement de mois', () => {
+    expect(listDaysInclusive('2026-08-31', '2026-09-01')).toEqual(['2026-08-31', '2026-09-01']);
+  });
+
+  it('retourne une liste vide sur un intervalle inversé ou invalide', () => {
+    expect(listDaysInclusive('2026-09-10', '2026-09-07')).toEqual([]);
+    expect(listDaysInclusive('pas-une-date', '2026-09-07')).toEqual([]);
+  });
+});
+
+describe('isWorkingDay', () => {
+  it('reconnaît les jours ouvrés et le week-end', () => {
+    expect(isWorkingDay('2026-09-07')).toBe(true); // lundi
+    expect(isWorkingDay('2026-09-11')).toBe(true); // vendredi
+    expect(isWorkingDay('2026-09-12')).toBe(false); // samedi
+    expect(isWorkingDay('2026-09-13')).toBe(false); // dimanche
+  });
+});
+
+describe('readResolvedPointsForSeries', () => {
+  it('lit les séries nommées par équipe', () => {
+    const row = { date: '2026-09-07', 'Board Dev': 3, 'Board Dev_points': 8 };
+
+    expect(readResolvedPointsForSeries(row, 'Board Dev', 7)).toBe(8);
+  });
+
+  it('retombe sur les séries par board du format historique', () => {
+    const row = { date: '2026-09-07', board_7: 5 };
+
+    expect(readResolvedPointsForSeries(row, 'Board Dev', 7)).toBe(5);
+  });
+
+  it('retourne 0 quand la série est absente', () => {
+    expect(readResolvedPointsForSeries({ date: '2026-09-07' }, 'Board Dev', 7)).toBe(0);
+    expect(readResolvedPointsForSeries({ date: '2026-09-07', board_7: 5 }, 'Board Dev')).toBe(0);
+  });
+});
+
+describe('computeTeamBurndown', () => {
+  // Sprint du lundi 7 au vendredi 18 septembre 2026 : 10 jours ouvrés sur 12 jours.
+  const dateRange = { from: '2026-09-07', to: '2026-09-18' };
+
+  function resolvedWith(pointsByDate: Record<string, number>): ResolvedByDayResult {
+    return {
+      dateRange,
+      byDay: listDaysInclusive(dateRange.from, dateRange.to).map((date) => ({
+        date,
+        'Board Dev_points': pointsByDate[date] ?? 0,
+      })),
+    };
+  }
+
+  it('part du périmètre et retire le cumul des points résolus', () => {
+    const burndown = computeTeamBurndown({
+      scopePoints: 40,
+      seriesName: 'Board Dev',
+      resolved: resolvedWith({ '2026-09-07': 5, '2026-09-08': 3 }),
+      today: '2026-09-09',
+    });
+
+    expect(burndown?.days.slice(0, 3).map((d) => d.remaining)).toEqual([35, 32, 32]);
+    expect(burndown?.completedPoints).toBe(8);
+    expect(burndown?.remainingPoints).toBe(32);
+  });
+
+  it('laisse les jours à venir sans valeur pour arrêter la courbe à aujourd\'hui', () => {
+    const burndown = computeTeamBurndown({
+      scopePoints: 40,
+      seriesName: 'Board Dev',
+      resolved: resolvedWith({ '2026-09-07': 5 }),
+      today: '2026-09-08',
+    });
+
+    expect(burndown?.days[1].remaining).toBe(35);
+    expect(burndown?.days[2].remaining).toBeNull();
+    expect(burndown?.days.every((d) => typeof d.ideal === 'number')).toBe(true);
+  });
+
+  it('fait décroître la trajectoire idéale sur les jours ouvrés seulement', () => {
+    const burndown = computeTeamBurndown({
+      scopePoints: 40,
+      seriesName: 'Board Dev',
+      resolved: resolvedWith({}),
+      today: '2026-09-18',
+    });
+
+    // 40 SP sur 10 jours ouvrés = 4 SP par jour ouvré ; le week-end ne fait rien descendre.
+    const byDate = new Map(burndown?.days.map((d) => [d.date, d.ideal]));
+    expect(byDate.get('2026-09-07')).toBe(36);
+    expect(byDate.get('2026-09-11')).toBe(20);
+    expect(byDate.get('2026-09-12')).toBe(20); // samedi
+    expect(byDate.get('2026-09-13')).toBe(20); // dimanche
+    expect(byDate.get('2026-09-14')).toBe(16);
+    expect(byDate.get('2026-09-18')).toBe(0);
+  });
+
+  it('mesure l\'écart à la trajectoire idéale', () => {
+    const enAvance = computeTeamBurndown({
+      scopePoints: 40,
+      seriesName: 'Board Dev',
+      resolved: resolvedWith({ '2026-09-07': 10 }),
+      today: '2026-09-07',
+    });
+    const enRetard = computeTeamBurndown({
+      scopePoints: 40,
+      seriesName: 'Board Dev',
+      resolved: resolvedWith({ '2026-09-07': 1 }),
+      today: '2026-09-07',
+    });
+
+    expect(enAvance?.deltaPoints).toBe(6); // idéal 36, reste 30
+    expect(enRetard?.deltaPoints).toBe(-3); // idéal 36, reste 39
+  });
+
+  it('se cale sur le dernier jour quand le sprint est terminé', () => {
+    const burndown = computeTeamBurndown({
+      scopePoints: 40,
+      seriesName: 'Board Dev',
+      resolved: resolvedWith({ '2026-09-07': 40 }),
+      today: '2026-10-01',
+    });
+
+    expect(burndown?.remainingPoints).toBe(0);
+    expect(burndown?.days.every((d) => d.remaining !== null)).toBe(true);
+  });
+
+  it('se cale sur le premier jour quand le sprint n\'a pas commencé', () => {
+    const burndown = computeTeamBurndown({
+      scopePoints: 40,
+      seriesName: 'Board Dev',
+      resolved: resolvedWith({}),
+      today: '2026-09-01',
+    });
+
+    expect(burndown?.remainingPoints).toBe(40);
+    expect(burndown?.days[1].remaining).toBeNull();
+  });
+
+  it('laisse la courbe passer sous zéro quand le périmètre a changé', () => {
+    const burndown = computeTeamBurndown({
+      scopePoints: 10,
+      seriesName: 'Board Dev',
+      resolved: resolvedWith({ '2026-09-07': 14 }),
+      today: '2026-09-07',
+    });
+
+    expect(burndown?.remainingPoints).toBe(-4);
+  });
+
+  it('retourne null sans plage de dates exploitable', () => {
+    expect(
+      computeTeamBurndown({ scopePoints: 40, seriesName: 'Board Dev', resolved: null })
+    ).toBeNull();
+    expect(
+      computeTeamBurndown({
+        scopePoints: 40,
+        seriesName: 'Board Dev',
+        resolved: { byDay: [], dateRange: { from: '', to: '' } },
+      })
+    ).toBeNull();
   });
 });
 

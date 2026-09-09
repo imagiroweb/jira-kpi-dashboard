@@ -418,6 +418,93 @@ describe('PointHebdoPage', () => {
     });
   });
 
+  describe('burndown du sprint', () => {
+    const SPRINT_BOARDS = {
+      success: true,
+      boards: [
+        {
+          boardId: 7,
+          name: 'Board Dev',
+          sprint: {
+            statusCounts: { total: 10, todo: 2, inProgress: 3, qa: 1, resolved: 4 },
+            storyPointsByStatus: { total: 45, todo: 5, inProgress: 15, qa: 5, resolved: 20 },
+            issues: [],
+          },
+        },
+      ],
+    };
+
+    /** Dates calées sur le jour courant : le burndown s'arrête à aujourd'hui. */
+    function dayOffset(offset: number): string {
+      const base = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
+      base.setUTCDate(base.getUTCDate() + offset);
+      return base.toISOString().slice(0, 10);
+    }
+
+    function resolvedByDay(pointsByDate: Record<string, number>) {
+      return {
+        success: true,
+        dateRange: { from: dayOffset(-3), to: dayOffset(8) },
+        byDay: Array.from({ length: 12 }, (_, index) => {
+          const date = dayOffset(index - 3);
+          return { date, 'Board Dev': 0, 'Board Dev_points': pointsByDate[date] ?? 0 };
+        }),
+      };
+    }
+
+    it('affiche une courbe par équipe avec le reste à faire du jour', async () => {
+      mockFetch({
+        'configured-boards': { success: true, boards: [{ id: 7, name: 'Board Dev' }] },
+        'sprint-issues-all': SPRINT_BOARDS,
+        'resolved-by-day': resolvedByDay({
+          [dayOffset(-2)]: 12,
+          [dayOffset(0)]: 3,
+          [dayOffset(4)]: 99, // jour à venir : ignoré
+        }),
+      });
+
+      await renderPage();
+
+      expect(await screen.findByText('Burndown du sprint en cours')).toBeInTheDocument();
+      expect(screen.getByText('périmètre 45 SP')).toBeInTheDocument();
+      // 45 SP de périmètre moins les 15 SP résolus jusqu'à aujourd'hui.
+      expect(screen.getByLabelText('Reste à faire — Équipe Dev')).toHaveTextContent('30 SP');
+      expect(
+        screen.getByLabelText('Écart à la trajectoire idéale — Équipe Dev')
+      ).toBeInTheDocument();
+    });
+
+    it('demande les story points du sprint actif', async () => {
+      const fetchMock = mockFetch({
+        'configured-boards': { success: true, boards: [{ id: 7, name: 'Board Dev' }] },
+        'sprint-issues-all': SPRINT_BOARDS,
+        'resolved-by-day': resolvedByDay({}),
+      });
+
+      await renderPage();
+
+      await waitFor(() =>
+        expect(
+          fetchMock.mock.calls.some(([url]) =>
+            url.includes('resolved-by-day?activeSprint=true&mode=points')
+          )
+        ).toBe(true)
+      );
+    });
+
+    it('reste masqué quand l\'historique Jira est indisponible', async () => {
+      mockFetch({
+        'configured-boards': { success: true, boards: [{ id: 7, name: 'Board Dev' }] },
+        'sprint-issues-all': SPRINT_BOARDS,
+      });
+
+      await renderPage();
+
+      await waitFor(() => expect(mockUpdate).not.toHaveBeenCalled());
+      expect(screen.queryByText('Burndown du sprint en cours')).not.toBeInTheDocument();
+    });
+  });
+
   describe('compte-rendu et historique', () => {
     it('copie le compte-rendu dans le presse-papier', async () => {
       const writeText = vi.fn().mockResolvedValue(undefined);

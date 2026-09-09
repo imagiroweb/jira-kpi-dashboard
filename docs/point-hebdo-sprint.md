@@ -70,6 +70,40 @@ Dans les deux cas, une valeur saisie à la main n’est **jamais** écrasée : s
 celles déjà issues de Jira (`source: 'jira'`) sont mises à jour. Toute saisie manuelle repasse
 l’indicateur en `source: 'manual'`.
 
+### Burndown du sprint
+
+Sous les chiffres, une courbe par équipe rattachée à un board montre la fonte des story points du
+sprint en cours. Jira Cloud n’expose pas les données de son propre burndown : la courbe est donc
+**reconstituée** côté client par `computeTeamBurndown`, à partir de deux appels déjà utilisés
+ailleurs dans l’application :
+
+| Donnée | Source |
+|--------|--------|
+| Périmètre du sprint (point de départ) | `storyPointsByStatus.total` de `GET /api/jira/dashboard/sprint-issues-all` |
+| Points résolus par jour | `GET /api/jira/resolved-by-day?activeSprint=true&mode=points` |
+| Dates de début et de fin du sprint | `dateRange` de la même réponse |
+
+Le reste à faire d’un jour vaut le périmètre moins le cumul des points résolus jusqu’à ce jour. La
+courbe s’arrête à aujourd’hui — les jours à venir n’ont pas de valeur — et la trajectoire idéale
+décroît linéairement sur les **jours ouvrés** seulement, ce qui la met à plat le week-end. L’écart
+affiché à côté du graphique compare le reste à faire à cette trajectoire : « en avance » si le
+reste est inférieur à l’idéal, « en retard » sinon.
+
+La réponse de `resolved-by-day` prend deux formes selon la configuration ; les séries sont lues par
+nom d’équipe (`<board>_points`) avec repli sur le format historique par board (`board_<id>`).
+
+Deux limites assumées de cette reconstitution :
+
+- le périmètre utilisé est celui **constaté aujourd’hui**, appliqué rétroactivement à tout le
+  sprint : un ticket ajouté ou retiré en cours de route ne crée pas la marche d’escalier qu’on voit
+  dans le burndown de Jira ;
+- pour la même raison, une courbe qui passe **sous zéro** signale des points résolus qui ne font
+  plus partie du périmètre actuel (typiquement des tickets sortis du sprint). La valeur n’est pas
+  ramenée à zéro, justement pour rendre cette incohérence visible.
+
+Le bloc reste masqué si l’un des deux appels échoue, si aucune équipe n’est rattachée à un board ou
+si le périmètre du sprint est inconnu ; l’échec est silencieux et ne bloque pas la séance.
+
 ### Sauvegarde
 
 Chaque modification met à jour l’état local puis planifie un `PATCH` après 500 ms d’inactivité ;
@@ -132,6 +166,6 @@ démarrage du backend, la clé étant réécrite par le seed.
 
 - **Backend** : `weeklySprintMeeting.test.ts` (structure, reconduction, validation) et
   `meetingRoutes.test.ts` (routes, codes 400/401/404/500).
-- **Frontend** : `pointHebdoSprint.test.ts` (minuteur, avancement, préremplissage, compte-rendu) et
-  `PointHebdoPage.test.tsx` (affichage, sauvegarde automatique, édition des sections, minuteur,
-  préremplissage, historique, nouveau point).
+- **Frontend** : `pointHebdoSprint.test.ts` (minuteur, avancement, préremplissage, burndown,
+  compte-rendu) et `PointHebdoPage.test.tsx` (affichage, sauvegarde automatique, édition des
+  sections, minuteur, préremplissage, burndown, historique, nouveau point).
