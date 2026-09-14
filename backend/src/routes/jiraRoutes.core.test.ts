@@ -9,6 +9,7 @@ import {
   TEST_EPIC_PROGRESS_RESULT,
   TEST_EPIC_SEARCH_RESULT,
   TEST_JIRA_PROJECTS,
+  TEST_QA_BOARDS,
   TEST_RESOLVED_BY_DAY_POINTS,
   TEST_RESOLVED_BY_DAY_TICKETS,
   TEST_SPRINT_ISSUES_ALL_BOARDS,
@@ -37,6 +38,7 @@ describe('jiraRoutes — core (TI)', () => {
     mockWorklogAppService.getConfiguredProjects.mockResolvedValue(['PROJ', 'ABC', 'UNKNOWN']);
     mockWorklogAppService.getProjects.mockResolvedValue(TEST_JIRA_PROJECTS);
     mockWorklogAppService.getConfiguredBoards.mockResolvedValue(TEST_CONFIGURED_BOARDS);
+    mockWorklogAppService.getQaBoards.mockResolvedValue(TEST_QA_BOARDS);
     mockWorklogAppService.getSprintIssuesForAllConfiguredBoards.mockResolvedValue(
       TEST_SPRINT_ISSUES_ALL_BOARDS
     );
@@ -93,6 +95,13 @@ describe('jiraRoutes — core (TI)', () => {
       expect(mockWorklogAppService.getConfiguredBoards).toHaveBeenCalled();
     });
 
+    it('expose les boards QA dans une liste distincte', async () => {
+      const res = await request(app).get('/api/jira/configured-boards');
+
+      expect(res.body.qaBoards).toEqual(TEST_QA_BOARDS);
+      expect(res.body.boards).not.toContainEqual(TEST_QA_BOARDS[0]);
+    });
+
     it('retourne 500 si getConfiguredBoards échoue', async () => {
       mockWorklogAppService.getConfiguredBoards.mockRejectedValue(new Error('boards fail'));
 
@@ -101,6 +110,27 @@ describe('jiraRoutes — core (TI)', () => {
       expect(res.status).toBe(500);
       expect(res.body.success).toBe(false);
       expect(res.body.error).toBe('boards fail');
+    });
+  });
+
+  describe('GET /api/jira/sprint-burndown', () => {
+    it('propage includeQa=true au service', async () => {
+      mockWorklogAppService.getSprintBurndowns.mockResolvedValue([{ boardId: 810, unit: 'points' }]);
+
+      const res = await request(app).get('/api/jira/sprint-burndown').query({ includeQa: 'true' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.boards).toEqual([{ boardId: 810, unit: 'points' }]);
+      expect(mockWorklogAppService.getSprintBurndowns).toHaveBeenCalledWith({ includeQa: true });
+    });
+
+    it('retourne 500 si getSprintBurndowns échoue', async () => {
+      mockWorklogAppService.getSprintBurndowns.mockRejectedValue(new Error('burn fail'));
+
+      const res = await request(app).get('/api/jira/sprint-burndown');
+
+      expect(res.status).toBe(500);
+      expect(res.body.success).toBe(false);
     });
   });
 
@@ -115,7 +145,8 @@ describe('jiraRoutes — core (TI)', () => {
       expect(res.body.boards).toEqual(TEST_SPRINT_ISSUES_ALL_BOARDS);
       expect(mockWorklogAppService.getSprintIssuesForAllConfiguredBoards).toHaveBeenCalledWith(
         '2026-04-01',
-        '2026-04-15'
+        '2026-04-15',
+        { includeQa: false }
       );
     });
 
@@ -124,7 +155,18 @@ describe('jiraRoutes — core (TI)', () => {
 
       expect(mockWorklogAppService.getSprintIssuesForAllConfiguredBoards).toHaveBeenCalledWith(
         undefined,
-        undefined
+        undefined,
+        { includeQa: false }
+      );
+    });
+
+    it('propage includeQa=true au service', async () => {
+      await request(app).get('/api/jira/dashboard/sprint-issues-all').query({ includeQa: 'true' });
+
+      expect(mockWorklogAppService.getSprintIssuesForAllConfiguredBoards).toHaveBeenCalledWith(
+        undefined,
+        undefined,
+        { includeQa: true }
       );
     });
 

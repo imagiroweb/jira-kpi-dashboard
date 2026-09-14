@@ -632,7 +632,7 @@ export const meetingApi = {
     const { data } = await api.post('/meetings', date ? { date } : {});
     return data;
   },
-  /** Crée le point suivant en reconduisant structure et actions non terminées. */
+  /** Crée le point suivant en reconduisant structure, actions, blocages et interactions ouverts. */
   createNext: async (
     id: string,
     date?: string

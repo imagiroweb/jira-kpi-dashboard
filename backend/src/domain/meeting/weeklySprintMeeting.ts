@@ -9,6 +9,7 @@ import {
   IMeetingMetric,
   IMeetingRetro,
   IMeetingRetroItem,
+  IMeetingRowAuthor,
   IMeetingSprint,
   IMeetingTeam,
   MEETING_ACTION_STATUSES,
@@ -34,11 +35,11 @@ export const DEFAULT_DEV_METRIC_LABELS = [
 ] as const;
 
 export const DEFAULT_QA_METRIC_LABELS = [
-  'Cas de test exécutés',
-  'Taux de réussite (%)',
-  'Bugs détectés',
-  'Bugs critiques',
-  'Couverture (%)'
+  'Tickets en cours',
+  'Tickets en QA',
+  'Tickets terminés',
+  'Bugs ouverts',
+  'Bugs détectés'
 ] as const;
 
 const MAX_TEAMS = 20;
@@ -96,7 +97,8 @@ export function buildDefaultMeeting(date: string): WeeklyMeetingDraft {
 
 /**
  * Prépare le point suivant : on conserve la structure d'équipes, les libellés
- * d'indicateurs, leurs cibles et les actions non terminées ; le reste repart à zéro.
+ * d'indicateurs, leurs cibles, les blocages non levés, les interactions non OK
+ * et les actions non terminées ; le reste repart à zéro.
  */
 export function buildNextMeetingDraft(
   previous: WeeklyMeetingDraft,
@@ -125,8 +127,27 @@ export function buildNextMeetingDraft(
         source: metric.source
       }))
     })),
-    blockers: [],
-    interactions: [],
+    blockers: previous.blockers
+      .filter((blocker) => !blocker.resolved)
+      .map((blocker) => ({
+        id: createMeetingRowId(),
+        severity: blocker.severity,
+        text: blocker.text,
+        need: blocker.need,
+        owner: blocker.owner,
+        resolved: false,
+        ...(blocker.createdBy ? { createdBy: blocker.createdBy } : {})
+      })),
+    interactions: previous.interactions
+      .filter((interaction) => interaction.status !== 'OK')
+      .map((interaction) => ({
+        id: createMeetingRowId(),
+        from: interaction.from,
+        to: interaction.to,
+        subject: interaction.subject,
+        status: interaction.status,
+        ...(interaction.createdBy ? { createdBy: interaction.createdBy } : {})
+      })),
     retro: { keep: [], stop: [], try: [] },
     actions: previous.actions
       .filter((action) => action.status !== 'Fait')
@@ -135,7 +156,8 @@ export function buildNextMeetingDraft(
         text: action.text,
         owner: action.owner,
         due: action.due,
-        status: action.status
+        status: action.status,
+        ...(action.createdBy ? { createdBy: action.createdBy } : {})
       }))
   };
 }
@@ -175,6 +197,37 @@ function parseList<T>(raw: unknown, max: number, parseItem: (item: unknown) => T
     parsed.push(value);
   }
   return parsed;
+}
+
+function parseIdList(raw: unknown, max: number): string[] | null {
+  if (raw == null) return [];
+  if (!Array.isArray(raw) || raw.length > max) return null;
+  const ids: string[] = [];
+  for (const item of raw) {
+    const id = parseId(item);
+    if (id == null) return null;
+    ids.push(id);
+  }
+  return ids;
+}
+
+function parseRowAuthor(raw: unknown): IMeetingRowAuthor | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const { id, name } = raw as Record<string, unknown>;
+  const parsedId = parseId(id);
+  const parsedName = parseText(name, MAX_SHORT_TEXT);
+  if (parsedId == null || parsedName == null || !parsedName) return undefined;
+  return { id: parsedId, name: parsedName };
+}
+
+function withRowAuthors<T>(row: T, source: Record<string, unknown>): T {
+  const createdBy = parseRowAuthor(source.createdBy);
+  const updatedBy = parseRowAuthor(source.updatedBy);
+  return {
+    ...row,
+    ...(createdBy ? { createdBy } : {}),
+    ...(updatedBy ? { updatedBy } : {})
+  };
 }
 
 function parseSprint(raw: unknown): IMeetingSprint | null {
@@ -260,14 +313,17 @@ function parseBlocker(raw: unknown): IMeetingBlocker | null {
   ) {
     return null;
   }
-  return {
-    id: parsedId,
-    severity: parsedSeverity,
-    text: parsedText,
-    need: parsedNeed,
-    owner: parsedOwner,
-    resolved: resolved === true
-  };
+  return withRowAuthors(
+    {
+      id: parsedId,
+      severity: parsedSeverity,
+      text: parsedText,
+      need: parsedNeed,
+      owner: parsedOwner,
+      resolved: resolved === true
+    },
+    raw as Record<string, unknown>
+  );
 }
 
 function parseInteraction(raw: unknown): IMeetingInteraction | null {
@@ -291,13 +347,16 @@ function parseInteraction(raw: unknown): IMeetingInteraction | null {
   ) {
     return null;
   }
-  return {
-    id: parsedId,
-    from: parsedFrom,
-    to: parsedTo,
-    subject: parsedSubject,
-    status: parsedStatus
-  };
+  return withRowAuthors(
+    {
+      id: parsedId,
+      from: parsedFrom,
+      to: parsedTo,
+      subject: parsedSubject,
+      status: parsedStatus
+    },
+    raw as Record<string, unknown>
+  );
 }
 
 function parseRetroItem(raw: unknown): IMeetingRetroItem | null {
@@ -307,18 +366,6 @@ function parseRetroItem(raw: unknown): IMeetingRetroItem | null {
   const parsedText = parseText(text, MAX_LONG_TEXT);
   if (parsedId == null || parsedText == null) return null;
   return { id: parsedId, text: parsedText };
-}
-
-function parseRetro(raw: unknown): IMeetingRetro | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const source = raw as Record<string, unknown>;
-  const retro: IMeetingRetro = { keep: [], stop: [], try: [] };
-  for (const column of MEETING_RETRO_COLUMNS) {
-    const items = parseList(source[column] ?? [], MAX_ROWS, parseRetroItem);
-    if (items == null) return null;
-    retro[column] = items;
-  }
-  return retro;
 }
 
 function parseAction(raw: unknown): IMeetingAction | null {
@@ -338,20 +385,215 @@ function parseAction(raw: unknown): IMeetingAction | null {
   ) {
     return null;
   }
+  return withRowAuthors(
+    {
+      id: parsedId,
+      text: parsedText,
+      owner: parsedOwner,
+      due: parsedDue,
+      status: parsedStatus
+    },
+    raw as Record<string, unknown>
+  );
+}
+
+export interface MeetingListOps<T> {
+  upsert: T[];
+  remove: string[];
+}
+
+export interface MeetingTeamsOps extends MeetingListOps<IMeetingTeam> {
+  removeMetrics: string[];
+}
+
+export interface MeetingRetroOps {
+  keep: MeetingListOps<IMeetingRetroItem>;
+  stop: MeetingListOps<IMeetingRetroItem>;
+  try: MeetingListOps<IMeetingRetroItem>;
+}
+
+export type WeeklyMeetingPatch = {
+  sprint?: IMeetingSprint;
+  teams?: MeetingTeamsOps;
+  blockers?: MeetingListOps<IMeetingBlocker>;
+  interactions?: MeetingListOps<IMeetingInteraction>;
+  retro?: MeetingRetroOps;
+  actions?: MeetingListOps<IMeetingAction>;
+};
+
+function parseListOps<T>(
+  raw: unknown,
+  max: number,
+  parseItem: (item: unknown) => T | null
+): MeetingListOps<T> | null {
+  if (Array.isArray(raw)) {
+    const upsert = parseList(raw, max, parseItem);
+    return upsert == null ? null : { upsert, remove: [] };
+  }
+  if (!raw || typeof raw !== 'object') return null;
+  const source = raw as Record<string, unknown>;
+  if (!('upsert' in source) && !('remove' in source)) return null;
+  const upsert = parseList(source.upsert ?? [], max, parseItem);
+  const remove = parseIdList(source.remove ?? [], max);
+  if (upsert == null || remove == null) return null;
+  return { upsert, remove };
+}
+
+function parseTeamsOps(raw: unknown): MeetingTeamsOps | null {
+  if (Array.isArray(raw)) {
+    const upsert = parseList(raw, MAX_TEAMS, parseTeam);
+    return upsert == null ? null : { upsert, remove: [], removeMetrics: [] };
+  }
+  if (!raw || typeof raw !== 'object') return null;
+  const source = raw as Record<string, unknown>;
+  if (!('upsert' in source) && !('remove' in source) && !('removeMetrics' in source)) return null;
+  const upsert = parseList(source.upsert ?? [], MAX_TEAMS, parseTeam);
+  const remove = parseIdList(source.remove ?? [], MAX_TEAMS);
+  const removeMetrics = parseIdList(source.removeMetrics ?? [], MAX_METRICS_PER_TEAM * MAX_TEAMS);
+  if (upsert == null || remove == null || removeMetrics == null) return null;
+  return { upsert, remove, removeMetrics };
+}
+
+function parseRetroOps(raw: unknown): MeetingRetroOps | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const source = raw as Record<string, unknown>;
+  const retro: MeetingRetroOps = {
+    keep: { upsert: [], remove: [] },
+    stop: { upsert: [], remove: [] },
+    try: { upsert: [], remove: [] }
+  };
+  let hasColumn = false;
+  for (const column of MEETING_RETRO_COLUMNS) {
+    if (!(column in source)) continue;
+    const ops = parseListOps(source[column], MAX_ROWS, parseRetroItem);
+    if (ops == null) return null;
+    retro[column] = ops;
+    hasColumn = true;
+  }
+  return hasColumn ? retro : null;
+}
+
+/**
+ * Fusionne une liste par id : upsert remplace ou ajoute, remove retire.
+ * Les lignes absentes de upsert ne sont pas considérées comme supprimées.
+ */
+export function mergeMeetingRows<T extends { id: string }>(
+  current: T[],
+  ops: MeetingListOps<T>
+): T[] {
+  const remove = new Set(ops.remove);
+  const upserts = new Map(ops.upsert.map((row) => [row.id, row]));
+  const result: T[] = [];
+  const seen = new Set<string>();
+
+  for (const row of current) {
+    if (remove.has(row.id)) continue;
+    result.push(upserts.get(row.id) ?? row);
+    seen.add(row.id);
+  }
+  for (const row of ops.upsert) {
+    if (remove.has(row.id) || seen.has(row.id)) continue;
+    result.push(row);
+    seen.add(row.id);
+  }
+  return result;
+}
+
+export function mergeMeetingTeams(current: IMeetingTeam[], ops: MeetingTeamsOps): IMeetingTeam[] {
+  const currentById = new Map(current.map((team) => [team.id, team]));
+  const upserts = ops.upsert.map((incoming) => {
+    const existing = currentById.get(incoming.id);
+    if (!existing) return incoming;
+    return {
+      ...incoming,
+      metrics: mergeMeetingRows(existing.metrics, { upsert: incoming.metrics, remove: ops.removeMetrics })
+    };
+  });
+  return mergeMeetingRows(current, { upsert: upserts, remove: ops.remove }).map((team) => ({
+    ...team,
+    metrics: team.metrics.filter((metric) => !ops.removeMetrics.includes(metric.id))
+  }));
+}
+
+export function mergeMeetingRetro(current: IMeetingRetro, ops: MeetingRetroOps): IMeetingRetro {
   return {
-    id: parsedId,
-    text: parsedText,
-    owner: parsedOwner,
-    due: parsedDue,
-    status: parsedStatus
+    keep: mergeMeetingRows(current.keep, ops.keep),
+    stop: mergeMeetingRows(current.stop, ops.stop),
+    try: mergeMeetingRows(current.try, ops.try)
   };
 }
 
-export type WeeklyMeetingPatch = Partial<WeeklyMeetingDraft>;
+export function applyMeetingPatch(
+  current: WeeklyMeetingDraft,
+  patch: WeeklyMeetingPatch
+): WeeklyMeetingDraft {
+  return {
+    sprint: patch.sprint ?? current.sprint,
+    teams: patch.teams ? mergeMeetingTeams(current.teams, patch.teams) : current.teams,
+    blockers: patch.blockers ? mergeMeetingRows(current.blockers, patch.blockers) : current.blockers,
+    interactions: patch.interactions
+      ? mergeMeetingRows(current.interactions, patch.interactions)
+      : current.interactions,
+    retro: patch.retro ? mergeMeetingRetro(current.retro, patch.retro) : current.retro,
+    actions: patch.actions ? mergeMeetingRows(current.actions, patch.actions) : current.actions
+  };
+}
+
+type RowWithAuthor = { id: string; createdBy?: IMeetingRowAuthor; updatedBy?: IMeetingRowAuthor };
+
+function stampListAuthors<T extends RowWithAuthor>(
+  current: T[],
+  ops: MeetingListOps<T>,
+  author: IMeetingRowAuthor
+): MeetingListOps<T> {
+  const existingById = new Map(current.map((row) => [row.id, row]));
+  return {
+    remove: ops.remove,
+    upsert: ops.upsert.map((row) => {
+      const existing = existingById.get(row.id);
+      return {
+        ...row,
+        createdBy: existing?.createdBy ?? author,
+        updatedBy: author
+      };
+    })
+  };
+}
+
+/** Pose createdBy à la création et updatedBy à chaque édition. Ne fait pas confiance au client. */
+export function stampMeetingPatchAuthors(
+  current: WeeklyMeetingDraft,
+  patch: WeeklyMeetingPatch,
+  author: IMeetingRowAuthor
+): WeeklyMeetingPatch {
+  return {
+    ...patch,
+    blockers: patch.blockers ? stampListAuthors(current.blockers, patch.blockers, author) : undefined,
+    interactions: patch.interactions
+      ? stampListAuthors(current.interactions, patch.interactions, author)
+      : undefined,
+    actions: patch.actions ? stampListAuthors(current.actions, patch.actions, author) : undefined
+  };
+}
+
+export function snapshotFromPatch(
+  next: WeeklyMeetingDraft,
+  patch: WeeklyMeetingPatch
+): Partial<WeeklyMeetingDraft> {
+  const snapshot: Partial<WeeklyMeetingDraft> = {};
+  if (patch.sprint) snapshot.sprint = next.sprint;
+  if (patch.teams) snapshot.teams = next.teams;
+  if (patch.blockers) snapshot.blockers = next.blockers;
+  if (patch.interactions) snapshot.interactions = next.interactions;
+  if (patch.retro) snapshot.retro = next.retro;
+  if (patch.actions) snapshot.actions = next.actions;
+  return snapshot;
+}
 
 /**
  * Valide une mise à jour partielle : seules les sections présentes dans le corps
  * de la requête sont retournées. Renvoie null si une section est mal formée.
+ * Un tableau plat est accepté (rétrocompatibilité) et traité comme un upsert sans remove.
  */
 export function parseWeeklyMeetingPatch(body: unknown): WeeklyMeetingPatch | null {
   if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
@@ -364,27 +606,27 @@ export function parseWeeklyMeetingPatch(body: unknown): WeeklyMeetingPatch | nul
     patch.sprint = sprint;
   }
   if ('teams' in source) {
-    const teams = parseList(source.teams, MAX_TEAMS, parseTeam);
+    const teams = parseTeamsOps(source.teams);
     if (teams == null) return null;
     patch.teams = teams;
   }
   if ('blockers' in source) {
-    const blockers = parseList(source.blockers, MAX_ROWS, parseBlocker);
+    const blockers = parseListOps(source.blockers, MAX_ROWS, parseBlocker);
     if (blockers == null) return null;
     patch.blockers = blockers;
   }
   if ('interactions' in source) {
-    const interactions = parseList(source.interactions, MAX_ROWS, parseInteraction);
+    const interactions = parseListOps(source.interactions, MAX_ROWS, parseInteraction);
     if (interactions == null) return null;
     patch.interactions = interactions;
   }
   if ('retro' in source) {
-    const retro = parseRetro(source.retro);
+    const retro = parseRetroOps(source.retro);
     if (retro == null) return null;
     patch.retro = retro;
   }
   if ('actions' in source) {
-    const actions = parseList(source.actions, MAX_ROWS, parseAction);
+    const actions = parseListOps(source.actions, MAX_ROWS, parseAction);
     if (actions == null) return null;
     patch.actions = actions;
   }

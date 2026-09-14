@@ -9,6 +9,7 @@ export class JiraClient {
   private readonly client: AxiosInstance;
   private readonly projectKeys: string[];
   private readonly boardIds: number[];
+  private readonly qaBoardIds: number[];
   
   constructor() {
     const baseURL = process.env.JIRA_URL;
@@ -19,8 +20,12 @@ export class JiraClient {
       throw new Error('Missing Jira configuration: JIRA_BASE_URL, JIRA_EMAIL, or JIRA_API_TOKEN');
     }
 
+    const parseBoardIds = (raw?: string): number[] =>
+      raw?.split(',').map(id => parseInt(id.trim(), 10)).filter(id => !isNaN(id)) || [];
+
     this.projectKeys = process.env.JIRA_PROJECT_KEY?.split(',').map(k => k.trim()) || [];
-    this.boardIds = process.env.JIRA_BOARD_ID?.split(',').map(id => parseInt(id.trim(), 10)).filter(id => !isNaN(id)) || [];
+    this.boardIds = parseBoardIds(process.env.JIRA_BOARD_ID);
+    this.qaBoardIds = parseBoardIds(process.env.JIRA_QA_BOARD_ID);
 
     this.client = axios.create({
       baseURL,
@@ -63,6 +68,15 @@ export class JiraClient {
 
   get configuredBoardIds(): number[] {
     return this.boardIds;
+  }
+
+  /**
+   * Boards QA (JIRA_QA_BOARD_ID) : volontairement tenus à l'écart de
+   * `configuredBoardIds` pour ne pas apparaître sur les tableaux de bord sprint,
+   * dont les indicateurs sont en story points. Seul le point hebdo les utilise.
+   */
+  get configuredQaBoardIds(): number[] {
+    return this.qaBoardIds;
   }
 
   /**
@@ -411,6 +425,24 @@ export class JiraClient {
   /**
    * Get sprints for a board
    */
+  /**
+   * Burndown officiel Jira Software (ajouts / retraits / résolutions).
+   * API interne GreenHopper, celle que le graphique sprint utilise.
+   */
+  async getScopeChangeBurndown(
+    boardId: number,
+    sprintId: number,
+    statisticFieldId?: string
+  ): Promise<JiraScopeChangeBurndown> {
+    const params: Record<string, string | number> = { rapidViewId: boardId, sprintId };
+    if (statisticFieldId) params.statisticFieldId = statisticFieldId;
+    const response = await this.client.get<JiraScopeChangeBurndown>(
+      '/rest/greenhopper/1.0/rapid/charts/scopechangeburndownchart',
+      { params }
+    );
+    return response.data;
+  }
+
   async getBoardSprints(boardId: number, state?: 'active' | 'closed' | 'future'): Promise<JiraSprint[]> {
     const params: Record<string, string | number> = {};
     if (state) params.state = state;
@@ -542,6 +574,22 @@ export interface JiraBoard {
   location?: {
     projectKey: string;
   };
+}
+
+/** Réponse GreenHopper `scopechangeburndownchart`. */
+export interface JiraScopeChangeBurndown {
+  changes: Record<
+    string,
+    Array<{
+      key: string;
+      added?: boolean;
+      column?: { done?: boolean; notDone?: boolean; newStatus?: string };
+      statC?: { newValue?: number; oldValue?: number };
+    }>
+  >;
+  startTime: number;
+  endTime?: number;
+  now?: number;
 }
 
 export interface JiraSprint {

@@ -10,10 +10,12 @@ const sprintMetricsCalculator = new SprintMetricsCalculator();
 const mockJiraClient = {
   configuredProjectKeys: ['ABC'],
   configuredBoardIds: [1],
+  configuredQaBoardIds: [] as number[],
   getProjects: jest.fn(),
   getAllProjects: jest.fn(),
   getBoard: jest.fn(),
   getBoardSprints: jest.fn(),
+  getScopeChangeBurndown: jest.fn(),
   getBoardConfiguration: jest.fn(),
   getFilterJql: jest.fn(),
   searchIssuesWithPagination: jest.fn(),
@@ -124,6 +126,7 @@ describe('WorklogApplicationService (phase D — Jira orchestration)', () => {
 
     mockJiraClient.configuredProjectKeys = ['ABC'];
     mockJiraClient.configuredBoardIds = [1];
+    mockJiraClient.configuredQaBoardIds = [];
     mockJiraClient.getBoard.mockImplementation(async (id: number) => ({
       id,
       name: `Board-${id}`,
@@ -459,6 +462,33 @@ describe('WorklogApplicationService (phase D — Jira orchestration)', () => {
     expect(batch[0].success).toBe(true);
     expect(batch[1].success).toBe(false);
     expect(batch[1].error).toMatch(/batch-fail/);
+  });
+
+  it('getSprintIssuesForAllConfiguredBoards inclut les boards QA sans dupliquer un ID déjà configuré', async () => {
+    mockJiraClient.configuredBoardIds = [1];
+    mockJiraClient.configuredQaBoardIds = [1, 946];
+    mockJiraClient.getBoard.mockImplementation(async (id: number) => ({
+      id,
+      name: id === 946 ? 'Licornes' : 'B1',
+      location: { projectKey: 'P' }
+    }));
+
+    const emptySprint: SprintIssuesResult = {
+      issues: [],
+      statusCounts: { total: 0, todo: 0, inProgress: 0, qa: 0, resolved: 0 },
+      storyPointsByStatus: { total: 0, todo: 0, inProgress: 0, qa: 0, resolved: 0 },
+      totalStoryPoints: 0,
+      backlog: { ticketCount: 0, storyPoints: 0 }
+    };
+    const spy = jest.spyOn(service, 'getSprintIssuesForBoard').mockResolvedValue(emptySprint);
+
+    const batch = await service.getSprintIssuesForAllConfiguredBoards(undefined, undefined, {
+      includeQa: true
+    });
+    spy.mockRestore();
+
+    expect(batch.map((row) => row.boardId)).toEqual([1, 946]);
+    expect(batch[1].name).toBe('Licornes');
   });
 
   it('getSupportBoardKPI avec issues vides termine sans erreur', async () => {

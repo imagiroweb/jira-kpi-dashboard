@@ -34,11 +34,21 @@ import { meetingApi } from '../services/api';
 import { useSocketOptional } from '../hooks/useSocketContext';
 import type { MeetingUpdate } from '../hooks/useSocket';
 import {
+  applyMeetingWritePatch,
+  applyPrefillToTeam,
   applyPrefillToTeams,
+  applyRemoteSnapshot,
+  applyTeamBoard,
+  applyTeamRole,
   buildMeetingReport,
+  buildOwnerRecap,
+  isMeetingWritePatchEmpty,
+  meetingRowAuthorFromUser,
+  mergeMeetingWritePatches,
+  rowAuthorLabel,
+  stampAuthorsFromServer,
   computeMetricProgress,
   computePhaseRemainingSeconds,
-  computeTeamBurndown,
   createAction,
   createBlocker,
   createInteraction,
@@ -61,15 +71,17 @@ import {
   type MeetingInteraction,
   type MeetingInteractionStatus,
   type MeetingRetroColumn,
+  type MeetingRowAuthor,
   type MeetingTeam,
   type MeetingTeamRole,
-  type ResolvedByDayResult,
   type SprintBoardResult,
   type TeamBurndown,
   type WeeklyMeeting,
   type WeeklyMeetingPatch,
+  type WeeklyMeetingSnapshotPatch,
   type WeeklyMeetingSummary,
 } from '../domain/pointHebdoSprint';
+import { useStore } from '../store/useStore';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -108,6 +120,8 @@ interface ConfiguredBoard {
 }
 
 export function PointHebdoPage() {
+  const user = useStore((state) => state.user);
+  const rowAuthor = meetingRowAuthorFromUser(user);
   const [meeting, setMeeting] = useState<WeeklyMeeting | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -117,12 +131,16 @@ export function PointHebdoPage() {
   const [reportText, setReportText] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [boards, setBoards] = useState<ConfiguredBoard[]>([]);
+  const [qaBoards, setQaBoards] = useState<ConfiguredBoard[]>([]);
   const [prefilling, setPrefilling] = useState(false);
   const [sprintBoards, setSprintBoards] = useState<SprintBoardResult[] | null>(null);
-  const [resolvedByDay, setResolvedByDay] = useState<ResolvedByDayResult | null>(null);
+  const [sprintBurndowns, setSprintBurndowns] = useState<
+    Array<{ boardId: number } & TeamBurndown> | null
+  >(null);
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const pendingPatch = useRef<WeeklyMeetingPatch>({});
+  const inFlightPatch = useRef<WeeklyMeetingPatch>({});
   const meetingIdRef = useRef<string | null>(null);
   meetingIdRef.current = meeting?.id ?? null;
 
@@ -181,6 +199,14 @@ export function PointHebdoPage() {
             }))
           );
         }
+        if (json.success && Array.isArray(json.qaBoards)) {
+          setQaBoards(
+            json.qaBoards.map((b: { id: number; name?: string }) => ({
+              id: b.id,
+              name: b.name || `Board ${b.id}`,
+            }))
+          );
+        }
       } catch {
         // Jira non configuré : le préremplissage reste simplement indisponible.
       }
@@ -208,19 +234,12 @@ export function PointHebdoPage() {
       // Notre propre écho (le serveur rediffuse aussi à l'auteur) : déjà appliqué localement.
       if (update.origin && update.origin === clientOriginRef.current) return;
 
-      const incoming = (update.patch ?? {}) as Record<string, unknown>;
-      const safePatch: WeeklyMeetingPatch = {};
-      (['sprint', 'teams', 'blockers', 'interactions', 'retro', 'actions'] as const).forEach((key) => {
-        if (!(key in incoming)) return;
-        // Une section en cours de saisie locale non encore enregistrée n'est jamais
-        // écrasée par une mise à jour distante : elle sera de toute façon renvoyée par le
-        // prochain enregistrement automatique.
-        if (key in pendingPatch.current) return;
-        (safePatch as Record<string, unknown>)[key] = incoming[key];
-      });
-
-      if (Object.keys(safePatch).length === 0) return;
-      setMeeting((current) => (current ? { ...current, ...safePatch } : current));
+      const incoming = (update.patch ?? {}) as WeeklyMeetingSnapshotPatch;
+      setMeeting((current) =>
+        current
+          ? applyRemoteSnapshot(current, incoming, pendingPatch.current, inFlightPatch.current)
+          : current
+      );
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socketCtx?.onMeetingUpdate]);
@@ -231,11 +250,21 @@ export function PointHebdoPage() {
     const meetingId = meetingIdRef.current;
     const patch = pendingPatch.current;
     pendingPatch.current = {};
-    if (!meetingId || Object.keys(patch).length === 0) return;
+    inFlightPatch.current = patch;
+    if (!meetingId || isMeetingWritePatchEmpty(patch)) {
+      inFlightPatch.current = {};
+      return;
+    }
     try {
-      await meetingApi.update(meetingId, patch, clientOriginRef.current ?? undefined);
+      const res = await meetingApi.update(meetingId, patch, clientOriginRef.current ?? undefined);
+      inFlightPatch.current = {};
+      if (res.success && isMeetingWritePatchEmpty(pendingPatch.current)) {
+        setMeeting((current) => (current ? stampAuthorsFromServer(current, res.meeting) : current));
+      }
       setSaveState('saved');
     } catch {
+      pendingPatch.current = mergeMeetingWritePatches(inFlightPatch.current, pendingPatch.current);
+      inFlightPatch.current = {};
       setSaveState('error');
     }
   }, []);
@@ -243,8 +272,8 @@ export function PointHebdoPage() {
   /** Applique une modification locale puis planifie l'enregistrement. */
   const applyChange = useCallback(
     (patch: WeeklyMeetingPatch) => {
-      setMeeting((current) => (current ? { ...current, ...patch } : current));
-      pendingPatch.current = { ...pendingPatch.current, ...patch };
+      setMeeting((current) => (current ? applyMeetingWritePatch(current, patch) : current));
+      pendingPatch.current = mergeMeetingWritePatches(pendingPatch.current, patch);
       setSaveState('pending');
 
       if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -326,7 +355,7 @@ export function PointHebdoPage() {
   const startNextMeeting = async () => {
     if (!meeting) return;
     const confirmed = window.confirm(
-      'Démarrer un nouveau point ?\n\nLes libellés d\'indicateurs, les cibles et les actions non terminées sont conservés ; les valeurs, blocages, interactions et la rétro repartent à zéro.'
+      'Démarrer un nouveau point ?\n\nLes libellés d\'indicateurs, les cibles, les actions non terminées, les points bloquants non levés et les interactions non OK sont conservés ; les valeurs et la rétro repartent à zéro.'
     );
     if (!confirmed) return;
     try {
@@ -344,7 +373,7 @@ export function PointHebdoPage() {
 
   /** Chiffres du sprint en cours de chaque board : périmètre, statuts, tickets. */
   const fetchSprintBoards = useCallback(async (): Promise<SprintBoardResult[]> => {
-    const res = await fetch(`${API_BASE_URL}/jira/dashboard/sprint-issues-all`);
+    const res = await fetch(`${API_BASE_URL}/jira/dashboard/sprint-issues-all?includeQa=true`);
     if (!res.ok) throw new Error('Jira indisponible');
     const json = await res.json();
     if (!json.success || !Array.isArray(json.boards)) throw new Error('Réponse Jira invalide');
@@ -358,15 +387,13 @@ export function PointHebdoPage() {
     );
   }, []);
 
-  /** Story points résolus jour par jour sur le sprint en cours : base du burndown. */
-  const fetchResolvedPointsByDay = useCallback(async (): Promise<ResolvedByDayResult> => {
-    const res = await fetch(`${API_BASE_URL}/jira/resolved-by-day?activeSprint=true&mode=points`);
-    if (!res.ok) throw new Error('Historique indisponible');
+  /** Burndown fidèle (ajouts / retraits / résolutions) du sprint actif. */
+  const fetchSprintBurndowns = useCallback(async (): Promise<Array<{ boardId: number } & TeamBurndown>> => {
+    const res = await fetch(`${API_BASE_URL}/jira/sprint-burndown?includeQa=true`);
+    if (!res.ok) throw new Error('Burndown indisponible');
     const json = await res.json();
-    if (!json.success || !Array.isArray(json.byDay) || !json.dateRange) {
-      throw new Error('Réponse Jira invalide');
-    }
-    return { byDay: json.byDay, dateRange: json.dateRange };
+    if (!json.success || !Array.isArray(json.boards)) throw new Error('Réponse Jira invalide');
+    return json.boards;
   }, []);
 
   const prefillFromJira = useCallback(
@@ -375,7 +402,7 @@ export function PointHebdoPage() {
       try {
         const results = await fetchSprintBoards();
         setSprintBoards(results);
-        applyChange({ teams: applyPrefillToTeams(teams, results) });
+        applyChange({ teams: { upsert: applyPrefillToTeams(teams, results), remove: [] } });
       } catch {
         if (!silent) setError('Préremplissage impossible : vérifiez la configuration Jira.');
       } finally {
@@ -404,44 +431,37 @@ export function PointHebdoPage() {
 
     let cancelled = false;
     void (async () => {
-      const [boardsResult, resolvedResult] = await Promise.allSettled([
+      const [boardsResult, burndownResult] = await Promise.allSettled([
         fetchSprintBoards(),
-        fetchResolvedPointsByDay(),
+        fetchSprintBurndowns(),
       ]);
       if (cancelled) return;
-      if (resolvedResult.status === 'fulfilled') setResolvedByDay(resolvedResult.value);
+      if (burndownResult.status === 'fulfilled') setSprintBurndowns(burndownResult.value);
       if (boardsResult.status === 'fulfilled') {
         setSprintBoards(boardsResult.value);
         if (shouldPrefill) {
-          applyChange({ teams: applyPrefillToTeams(teamsSnapshot, boardsResult.value) });
+          applyChange({
+            teams: { upsert: applyPrefillToTeams(teamsSnapshot, boardsResult.value), remove: [] },
+          });
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [meeting, applyChange, fetchSprintBoards, fetchResolvedPointsByDay]);
+  }, [meeting, applyChange, fetchSprintBoards, fetchSprintBurndowns]);
 
-  /** Une courbe par équipe rattachée à un board dont le périmètre est connu. */
+  /** Une courbe par équipe rattachée à un board dont le burndown fidèle est connu. */
   const teamBurndowns = useMemo(() => {
-    if (!meeting || !resolvedByDay || !sprintBoards) return [];
-    const sprintByBoardId = new Map(sprintBoards.map((board) => [board.boardId, board]));
+    if (!meeting || !sprintBurndowns) return [];
+    const byBoardId = new Map(sprintBurndowns.map((row) => [row.boardId, row]));
 
     return meeting.teams.flatMap((team) => {
       if (team.boardId == null) return [];
-      const sprintBoard = sprintByBoardId.get(team.boardId);
-      const scopePoints = sprintBoard?.storyPointsByStatus?.total;
-      if (scopePoints == null) return [];
-
-      const burndown = computeTeamBurndown({
-        scopePoints,
-        seriesName: sprintBoard?.name ?? boards.find((b) => b.id === team.boardId)?.name,
-        boardId: team.boardId,
-        resolved: resolvedByDay,
-      });
+      const burndown = byBoardId.get(team.boardId);
       return burndown ? [{ team, burndown }] : [];
     });
-  }, [meeting, resolvedByDay, sprintBoards, boards]);
+  }, [meeting, sprintBurndowns]);
 
   const copyReport = async () => {
     if (!meeting) return;
@@ -457,10 +477,26 @@ export function PointHebdoPage() {
 
   /* ---------------- mutations de contenu ---------------- */
 
+  const stampAuthor = <T extends { createdBy?: MeetingRowAuthor }>(row: T): T =>
+    row.createdBy || !rowAuthor ? row : { ...row, createdBy: rowAuthor };
+
+  const droppedMetricIds = (previous: MeetingTeam, next: MeetingTeam) =>
+    previous.metrics.filter((metric) => !next.metrics.some((row) => row.id === metric.id)).map(
+      (metric) => metric.id
+    );
+
   const updateTeam = (teamId: string, changes: Partial<MeetingTeam>) => {
     if (!meeting) return;
+    const team = meeting.teams.find((row) => row.id === teamId);
+    if (!team) return;
+    const next = { ...team, ...changes };
+    const removed = droppedMetricIds(team, next);
     applyChange({
-      teams: meeting.teams.map((team) => (team.id === teamId ? { ...team, ...changes } : team)),
+      teams: {
+        upsert: [next],
+        remove: [],
+        ...(removed.length > 0 ? { removeMetrics: removed } : {}),
+      },
     });
   };
 
@@ -470,58 +506,52 @@ export function PointHebdoPage() {
     changes: Partial<{ label: string; value: string; target: string }>
   ) => {
     if (!meeting) return;
+    const team = meeting.teams.find((row) => row.id === teamId);
+    if (!team) return;
     applyChange({
-      teams: meeting.teams.map((team) =>
-        team.id !== teamId
-          ? team
-          : {
-              ...team,
-              metrics: team.metrics.map((metric) =>
-                metric.id === metricId
-                  ? { ...metric, ...changes, source: 'manual' as const }
-                  : metric
-              ),
-            }
-      ),
+      teams: {
+        upsert: [
+          {
+            ...team,
+            metrics: team.metrics.map((metric) =>
+              metric.id === metricId
+                ? { ...metric, ...changes, source: 'manual' as const }
+                : metric
+            ),
+          },
+        ],
+        remove: [],
+      },
     });
   };
 
   const updateBlocker = (blockerId: string, changes: Partial<MeetingBlocker>) => {
     if (!meeting) return;
-    applyChange({
-      blockers: meeting.blockers.map((blocker) =>
-        blocker.id === blockerId ? { ...blocker, ...changes } : blocker
-      ),
-    });
+    const blocker = meeting.blockers.find((row) => row.id === blockerId);
+    if (!blocker) return;
+    applyChange({ blockers: { upsert: [{ ...blocker, ...changes }], remove: [] } });
   };
 
   const updateInteraction = (interactionId: string, changes: Partial<MeetingInteraction>) => {
     if (!meeting) return;
-    applyChange({
-      interactions: meeting.interactions.map((interaction) =>
-        interaction.id === interactionId ? { ...interaction, ...changes } : interaction
-      ),
-    });
+    const interaction = meeting.interactions.find((row) => row.id === interactionId);
+    if (!interaction) return;
+    applyChange({ interactions: { upsert: [{ ...interaction, ...changes }], remove: [] } });
   };
 
   const updateAction = (actionId: string, changes: Partial<MeetingAction>) => {
     if (!meeting) return;
-    applyChange({
-      actions: meeting.actions.map((action) =>
-        action.id === actionId ? { ...action, ...changes } : action
-      ),
-    });
+    const action = meeting.actions.find((row) => row.id === actionId);
+    if (!action) return;
+    applyChange({ actions: { upsert: [{ ...action, ...changes }], remove: [] } });
   };
 
   const updateRetroItem = (column: MeetingRetroColumn, itemId: string, text: string) => {
     if (!meeting) return;
+    const item = meeting.retro[column].find((row) => row.id === itemId);
+    if (!item) return;
     applyChange({
-      retro: {
-        ...meeting.retro,
-        [column]: meeting.retro[column].map((item) =>
-          item.id === itemId ? { ...item, text } : item
-        ),
-      },
+      retro: { [column]: { upsert: [{ ...item, text }], remove: [] } },
     });
   };
 
@@ -529,6 +559,12 @@ export function PointHebdoPage() {
     () => meeting?.blockers.filter((blocker) => !blocker.resolved).length ?? 0,
     [meeting]
   );
+
+  const ownerRecap = useMemo(
+    () => (meeting ? buildOwnerRecap(meeting) : []),
+    [meeting]
+  );
+  const ownerRecapCount = ownerRecap.reduce((total, group) => total + group.items.length, 0);
 
   /* ---------------- rendu ---------------- */
 
@@ -685,11 +721,33 @@ export function PointHebdoPage() {
               Préremplir depuis Jira
             </button>
             <button
-              onClick={() => applyChange({ teams: [...meeting.teams, createTeam('dev')] })}
+              onClick={() => applyChange({ teams: { upsert: [createTeam('dev')], remove: [] } })}
               className="btn-secondary !py-1.5 !px-3 text-xs"
             >
               <Plus className="w-3.5 h-3.5 text-accent-400" /> Ajouter une équipe
             </button>
+            {qaBoards.length > 0 && (
+              <button
+                onClick={() => {
+                  const used = new Set(meeting.teams.map((team) => team.boardId));
+                  const free = qaBoards.find((board) => !used.has(board.id));
+                  let team = createTeam('qa');
+                  if (free) {
+                    team = applyTeamBoard(team, free, 'qa');
+                    const sprint = sprintBoards?.find((board) => board.boardId === free.id);
+                    team = applyPrefillToTeam(team, sprint);
+                  }
+                  const nextTeams = [...meeting.teams, team];
+                  applyChange({ teams: { upsert: [team], remove: [] } });
+                  if (free && !sprintBoards?.some((board) => board.boardId === free.id)) {
+                    void prefillFromJira(nextTeams);
+                  }
+                }}
+                className="btn-secondary !py-1.5 !px-3 text-xs"
+              >
+                <Plus className="w-3.5 h-3.5 text-accent-400" /> Ajouter QA
+              </button>
+            )}
           </SectionHead>
 
           <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -700,7 +758,9 @@ export function PointHebdoPage() {
                     aria-label="Type d'équipe"
                     className="bg-surface-800 border border-surface-700 rounded-md text-[11px] px-1.5 py-1 text-surface-200"
                     value={team.role}
-                    onChange={(e) => updateTeam(team.id, { role: e.target.value as MeetingTeamRole })}
+                    onChange={(e) =>
+                      updateTeam(team.id, applyTeamRole(team, e.target.value as MeetingTeamRole))
+                    }
                   >
                     <option value="dev">Dev</option>
                     <option value="qa">QA</option>
@@ -714,23 +774,66 @@ export function PointHebdoPage() {
                   >
                     {team.role.toUpperCase()}
                   </span>
-                  {boards.length > 0 ? (
+                  {boards.length + qaBoards.length > 0 ? (
                     <select
                       aria-label="Nom de l'équipe"
                       className="flex-1 bg-surface-800 border border-surface-700 rounded-lg text-sm font-semibold px-2 py-1.5 text-surface-100"
                       value={team.boardId ?? ''}
                       onChange={(e) => {
                         const boardId = e.target.value ? Number(e.target.value) : undefined;
-                        const board = boards.find((b) => b.id === boardId);
-                        updateTeam(team.id, { boardId, name: board ? board.name : team.name });
+                        const board =
+                          boards.find((b) => b.id === boardId) ??
+                          qaBoards.find((b) => b.id === boardId);
+                        const kind: MeetingTeamRole = qaBoards.some((b) => b.id === boardId)
+                          ? 'qa'
+                          : 'dev';
+                        let next = applyTeamBoard(team, board ?? null, board ? kind : team.role);
+                        if (board) {
+                          const sprint = sprintBoards?.find((row) => row.boardId === board.id);
+                          next = applyPrefillToTeam(next, sprint);
+                        }
+                        const nextTeams = meeting.teams.map((row) =>
+                          row.id === team.id ? next : row
+                        );
+                        applyChange({
+                          teams: {
+                            upsert: [next],
+                            remove: [],
+                            ...(droppedMetricIds(team, next).length > 0
+                              ? { removeMetrics: droppedMetricIds(team, next) }
+                              : {}),
+                          },
+                        });
+                        if (board && !sprintBoards?.some((row) => row.boardId === board.id)) {
+                          void prefillFromJira(nextTeams);
+                        }
                       }}
                     >
                       <option value="">Aucun board Jira associé</option>
-                      {boards.map((board) => (
-                        <option key={board.id} value={board.id}>
-                          {board.name}
-                        </option>
-                      ))}
+                      {boards.length > 0 && qaBoards.length > 0 ? (
+                        <>
+                          <optgroup label="Équipes Dev">
+                            {boards.map((board) => (
+                              <option key={board.id} value={board.id}>
+                                {board.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                          <optgroup label="QA">
+                            {qaBoards.map((board) => (
+                              <option key={board.id} value={board.id}>
+                                {board.name}
+                              </option>
+                            ))}
+                          </optgroup>
+                        </>
+                      ) : (
+                        [...boards, ...qaBoards].map((board) => (
+                          <option key={board.id} value={board.id}>
+                            {board.name}
+                          </option>
+                        ))
+                      )}
                     </select>
                   ) : (
                     <input
@@ -809,8 +912,17 @@ export function PointHebdoPage() {
                           )}
                           <button
                             onClick={() =>
-                              updateTeam(team.id, {
-                                metrics: team.metrics.filter((m) => m.id !== metric.id),
+                              applyChange({
+                                teams: {
+                                  upsert: [
+                                    {
+                                      ...team,
+                                      metrics: team.metrics.filter((m) => m.id !== metric.id),
+                                    },
+                                  ],
+                                  remove: [],
+                                  removeMetrics: [metric.id],
+                                },
                               })
                             }
                             className="text-surface-600 hover:text-danger-400 transition-colors print:hidden"
@@ -845,7 +957,7 @@ export function PointHebdoPage() {
                   <button
                     onClick={() => {
                       if (window.confirm('Retirer cette équipe et ses chiffres ?')) {
-                        applyChange({ teams: meeting.teams.filter((t) => t.id !== team.id) });
+                        applyChange({ teams: { upsert: [], remove: [team.id] } });
                       }
                     }}
                     className="text-xs text-surface-500 hover:text-danger-400"
@@ -864,9 +976,10 @@ export function PointHebdoPage() {
                 Burndown du sprint en cours
               </h3>
               <p className="text-[11px] text-surface-500 mb-3">
-                Reconstitué à partir du périmètre actuel du sprint moins les story points
-                résolus jour après jour : les tickets ajoutés ou retirés en cours de sprint
-                ne sont pas retracés.
+                Historique Jira du sprint : le périmètre monte ou descend quand on ajoute
+                ou retire des éléments, le reste à faire descend quand on termine. Story
+                points pour le Dev, tickets pour le QA. La guideline part du périmètre de
+                début de sprint.
               </p>
               <div className="grid gap-4 lg:grid-cols-2">
                 {teamBurndowns.map(({ team, burndown }) => (
@@ -885,7 +998,9 @@ export function PointHebdoPage() {
             badge={openBlockerCount > 0 ? `${openBlockerCount} en cours` : undefined}
           >
             <button
-              onClick={() => applyChange({ blockers: [...meeting.blockers, createBlocker()] })}
+              onClick={() =>
+                applyChange({ blockers: { upsert: [stampAuthor(createBlocker())], remove: [] } })
+              }
               className="btn-secondary !py-1.5 !px-3 text-xs"
             >
               <Plus className="w-3.5 h-3.5 text-accent-400" /> Ajouter un blocage
@@ -895,7 +1010,7 @@ export function PointHebdoPage() {
           {meeting.blockers.length === 0 ? (
             <EmptyState>
               Aucun blocage listé. Dès qu'un lead signale un point qui freine, ajoutez-le ici avec ce
-              qu'il faut pour le lever.
+              qu'il faut pour le lever. Les blocages non levés sont reconduits au prochain point.
             </EmptyState>
           ) : (
             <div className="space-y-2">
@@ -958,10 +1073,11 @@ export function PointHebdoPage() {
                       />
                       Levé
                     </label>
+                    <RowAuthorBadge row={blocker} />
                     <button
                       onClick={() =>
                         applyChange({
-                          blockers: meeting.blockers.filter((b) => b.id !== blocker.id),
+                          blockers: { upsert: [], remove: [blocker.id] },
                         })
                       }
                       className="text-surface-600 hover:text-danger-400 print:hidden"
@@ -981,7 +1097,9 @@ export function PointHebdoPage() {
           <SectionHead title="Interactions entre équipes" budget="10 min">
             <button
               onClick={() =>
-                applyChange({ interactions: [...meeting.interactions, createInteraction()] })
+                applyChange({
+                  interactions: { upsert: [stampAuthor(createInteraction())], remove: [] },
+                })
               }
               className="btn-secondary !py-1.5 !px-3 text-xs"
             >
@@ -992,7 +1110,8 @@ export function PointHebdoPage() {
           {meeting.interactions.length === 0 ? (
             <EmptyState>
               Aucune interaction notée. Utilisez cette zone pour les dépendances et passages de
-              relais entre Dev et QA (attentes, environnements, specs, retours…).
+              relais entre Dev et QA (attentes, environnements, specs, retours…). Les interactions
+              non « OK » sont reconduites au prochain point.
             </EmptyState>
           ) : (
             <div className="space-y-2">
@@ -1045,17 +1164,20 @@ export function PointHebdoPage() {
                       ))}
                     </select>
                   </Field>
-                  <button
-                    onClick={() =>
-                      applyChange({
-                        interactions: meeting.interactions.filter((i) => i.id !== interaction.id),
-                      })
-                    }
-                    className="mt-5 text-surface-600 hover:text-danger-400 print:hidden"
-                    aria-label="Supprimer l'interaction"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-2 mt-5">
+                    <RowAuthorBadge row={interaction} />
+                    <button
+                      onClick={() =>
+                        applyChange({
+                          interactions: { upsert: [], remove: [interaction.id] },
+                        })
+                      }
+                      className="text-surface-600 hover:text-danger-400 print:hidden"
+                      aria-label="Supprimer l'interaction"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1086,10 +1208,7 @@ export function PointHebdoPage() {
                         onClick={() =>
                           applyChange({
                             retro: {
-                              ...meeting.retro,
-                              [column.key]: meeting.retro[column.key].filter(
-                                (entry) => entry.id !== item.id
-                              ),
+                              [column.key]: { upsert: [], remove: [item.id] },
                             },
                           })
                         }
@@ -1105,8 +1224,7 @@ export function PointHebdoPage() {
                   onClick={() =>
                     applyChange({
                       retro: {
-                        ...meeting.retro,
-                        [column.key]: [...meeting.retro[column.key], createRetroItem()],
+                        [column.key]: { upsert: [createRetroItem()], remove: [] },
                       },
                     })
                   }
@@ -1172,25 +1290,112 @@ export function PointHebdoPage() {
                       </option>
                     ))}
                   </select>
-                  <button
-                    onClick={() =>
-                      applyChange({ actions: meeting.actions.filter((a) => a.id !== action.id) })
-                    }
-                    className="text-surface-600 hover:text-danger-400 print:hidden"
-                    aria-label="Supprimer l'action"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <RowAuthorBadge row={action} />
+                    <button
+                      onClick={() =>
+                        applyChange({ actions: { upsert: [], remove: [action.id] } })
+                      }
+                      className="text-surface-600 hover:text-danger-400 print:hidden"
+                      aria-label="Supprimer l'action"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
                 </div>
               ))
             )}
             <button
-              onClick={() => applyChange({ actions: [...meeting.actions, createAction()] })}
+              onClick={() =>
+                applyChange({ actions: { upsert: [stampAuthor(createAction())], remove: [] } })
+              }
               className="w-full border-t border-surface-700/60 py-2.5 text-sm font-semibold text-accent-400 hover:bg-accent-500/10 transition-colors print:hidden"
             >
               + Ajouter une action
             </button>
           </div>
+        </section>
+
+        <section id="recap-responsables" className="scroll-mt-44 mt-10" aria-labelledby="recap-responsables-title">
+          <div className="flex flex-wrap items-baseline gap-3 mb-4">
+            <h2 id="recap-responsables-title" className="text-lg font-bold">
+              À faire par responsable
+            </h2>
+            {ownerRecapCount > 0 && (
+              <span className="badge badge-warning">{ownerRecapCount} ouvert(s)</span>
+            )}
+          </div>
+          {ownerRecap.length === 0 ? (
+            <EmptyState>
+              Aucun suivi ouvert. Les points bloquants non levés et les actions encore à faire
+              apparaissent ici, regroupés par responsable.
+            </EmptyState>
+          ) : (
+            <div className="card-glass overflow-x-auto">
+              <table className="w-full min-w-[640px] text-sm" aria-label="À faire par responsable">
+                <thead>
+                  <tr className="text-left text-[11px] font-semibold text-surface-400 bg-surface-800/60">
+                    <th className="px-4 py-2 font-semibold">Responsable</th>
+                    <th className="px-4 py-2 font-semibold">Type</th>
+                    <th className="px-4 py-2 font-semibold">À faire</th>
+                    <th className="px-4 py-2 font-semibold">Statut</th>
+                    <th className="px-4 py-2 font-semibold">Détail</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ownerRecap.map((group) =>
+                    group.items.map((item, index) => (
+                      <tr
+                        key={item.id}
+                        className="border-t border-surface-800 align-top print:break-inside-avoid"
+                      >
+                        {index === 0 ? (
+                          <th
+                            scope="row"
+                            rowSpan={group.items.length}
+                            className="px-4 py-2.5 font-semibold text-surface-100 whitespace-nowrap"
+                          >
+                            {group.owner}
+                            <span className="ml-2 text-[11px] font-medium text-surface-500">
+                              {group.items.length}
+                            </span>
+                          </th>
+                        ) : null}
+                        <td className="px-4 py-2.5">
+                          <span
+                            className={`inline-flex rounded-full border px-2 py-0.5 text-[11px] font-semibold ${
+                              item.kind === 'blocker'
+                                ? 'border-warning-500/40 bg-warning-500/10 text-warning-300'
+                                : 'border-accent-500/40 bg-accent-500/10 text-accent-300'
+                            }`}
+                          >
+                            {item.kindLabel}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-surface-100">{item.title}</td>
+                        <td className="px-4 py-2.5">
+                          {item.kind === 'blocker' ? (
+                            <span
+                              className={`inline-flex rounded-lg border px-2 py-0.5 text-[11px] font-bold ${
+                                SEVERITY_STYLES[item.status as MeetingBlockerSeverity]
+                              }`}
+                            >
+                              {item.status}
+                            </span>
+                          ) : (
+                            <span className={ACTION_STATUS_STYLES[item.status as MeetingActionStatus]}>
+                              {item.status}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2.5 text-surface-400">{item.detail || '—'}</td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
         </section>
       </main>
 
@@ -1299,30 +1504,37 @@ function formatBurndownDay(date: string): string {
 
 function BurndownCard({ team, burndown }: { team: MeetingTeam; burndown: TeamBurndown }) {
   const onTrack = burndown.deltaPoints >= 0;
+  const unitLabel = burndown.unit === 'tickets' ? 'tickets' : 'SP';
 
   return (
     <article className="card-glass p-4 print:break-inside-avoid">
       <div className="flex flex-wrap items-baseline justify-between gap-2 mb-2">
         <h4 className="text-sm font-semibold text-surface-100">{team.name || 'Équipe sans nom'}</h4>
         <span className="font-mono text-[11px] text-surface-500">
-          périmètre {burndown.scopePoints} SP
+          périmètre actuel {burndown.scopePoints} {unitLabel}
         </span>
       </div>
 
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-surface-400 mb-3">
         <span aria-label={`Reste à faire — ${team.name}`}>
-          Reste <strong className="font-mono text-surface-50">{burndown.remainingPoints} SP</strong>
+          Reste{' '}
+          <strong className="font-mono text-surface-50">
+            {burndown.remainingPoints} {unitLabel}
+          </strong>
         </span>
         <span>
-          Idéal <strong className="font-mono text-surface-300">{burndown.idealPoints} SP</strong>
+          Idéal{' '}
+          <strong className="font-mono text-surface-300">
+            {burndown.idealPoints} {unitLabel}
+          </strong>
         </span>
         <span
           aria-label={`Écart à la trajectoire idéale — ${team.name}`}
           className={onTrack ? 'text-success-400' : 'text-danger-400'}
         >
           {onTrack
-            ? `en avance de ${burndown.deltaPoints} SP`
-            : `en retard de ${Math.abs(burndown.deltaPoints)} SP`}
+            ? `en avance de ${burndown.deltaPoints} ${unitLabel}`
+            : `en retard de ${Math.abs(burndown.deltaPoints)} ${unitLabel}`}
         </span>
       </div>
 
@@ -1347,9 +1559,17 @@ function BurndownCard({ team, burndown }: { team: MeetingTeam; burndown: TeamBur
               }}
               labelFormatter={(date) => formatBurndownDay(String(date))}
               formatter={(value: unknown, name: unknown): [string, string] => [
-                typeof value === 'number' ? `${value} SP` : '—',
+                typeof value === 'number' ? `${value} ${unitLabel}` : '—',
                 String(name),
               ]}
+            />
+            <Line
+              type="stepAfter"
+              dataKey="scope"
+              name="Périmètre"
+              stroke="#64748b"
+              strokeWidth={1.5}
+              dot={false}
             />
             <Line
               type="monotone"
@@ -1373,6 +1593,23 @@ function BurndownCard({ team, burndown }: { team: MeetingTeam; burndown: TeamBur
         </ResponsiveContainer>
       </div>
     </article>
+  );
+}
+
+function RowAuthorBadge({
+  row,
+}: {
+  row: { createdBy?: MeetingRowAuthor; updatedBy?: MeetingRowAuthor };
+}) {
+  const label = rowAuthorLabel(row);
+  if (!label) return null;
+  return (
+    <span
+      className="text-[10px] font-semibold uppercase tracking-wide text-surface-500"
+      title={`Ajouté par ${label}`}
+    >
+      {label}
+    </span>
   );
 }
 

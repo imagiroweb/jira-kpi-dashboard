@@ -16,7 +16,9 @@ export class SprintIssue {
     private readonly _statusCategory: StatusCategory,
     private readonly _statusCategoryKey: StatusCategoryKey,
     private readonly _storyPoints: number | null,
-    private readonly _originalEstimate: TimeSpent | null
+    private readonly _originalEstimate: TimeSpent | null,
+    /** Date de résolution Jira brute (ISO avec fuseau), null si non résolue. */
+    private readonly _resolutionDate: string | null
   ) {}
 
   static create(props: {
@@ -28,6 +30,7 @@ export class SprintIssue {
     statusCategoryKey?: StatusCategoryKey;
     storyPoints?: number | null;
     originalEstimateSeconds?: number | null;
+    resolutionDate?: string | null;
   }): SprintIssue {
     return new SprintIssue(
       props.issueKey,
@@ -37,7 +40,8 @@ export class SprintIssue {
       props.statusCategory || 'Unknown',
       props.statusCategoryKey || 'undefined',
       props.storyPoints ?? null,
-      props.originalEstimateSeconds ? TimeSpent.fromSeconds(props.originalEstimateSeconds) : null
+      props.originalEstimateSeconds ? TimeSpent.fromSeconds(props.originalEstimateSeconds) : null,
+      props.resolutionDate ?? null
     );
   }
 
@@ -50,6 +54,7 @@ export class SprintIssue {
   get statusCategoryKey(): StatusCategoryKey { return this._statusCategoryKey; }
   get storyPoints(): number | null { return this._storyPoints; }
   get originalEstimate(): TimeSpent | null { return this._originalEstimate; }
+  get resolutionDate(): string | null { return this._resolutionDate; }
 
   /**
    * Get project key from issue key

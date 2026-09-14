@@ -1,15 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyMeetingWritePatch,
   applyPrefillToTeams,
+  applyRemoteRows,
+  applyRemoteSnapshot,
   buildMeetingReport,
+  buildOwnerRecap,
+  UNASSIGNED_OWNER_LABEL,
   computeBoardPrefill,
   computeBoardPrefillTargets,
   computeMetricProgress,
   computePhaseRemainingSeconds,
   computeTeamBurndown,
+  buildTicketResolvedByDay,
+  applyTeamBoard,
+  applyTeamRole,
+  canReplaceDefaultMetrics,
   createAction,
   createTeam,
+  DEFAULT_QA_METRIC_LABELS,
   findEngagedPointsValue,
+  LEGACY_QA_METRIC_LABELS,
   formatMeetingClock,
   getMetricTargetMode,
   isWorkingDay,
@@ -18,6 +29,7 @@ import {
   MEETING_TOTAL_BUDGET_SECONDS,
   parseMetricNumber,
   readResolvedPointsForSeries,
+  readResolvedTicketsForSeries,
   type MeetingMetric,
   type MeetingTeam,
   type ResolvedByDayResult,
@@ -152,7 +164,9 @@ describe('getMetricTargetMode', () => {
 
   it('« Tickets en cours » et « Bugs ouverts » : pas de cible', () => {
     expect(getMetricTargetMode('Tickets en cours')).toBe('hidden');
+    expect(getMetricTargetMode('Tickets en QA')).toBe('hidden');
     expect(getMetricTargetMode('Bugs ouverts')).toBe('hidden');
+    expect(getMetricTargetMode('Bugs détectés')).toBe('hidden');
   });
 
   it('les autres indicateurs (dont « Tickets terminés » et les personnalisés) restent en saisie libre', () => {
@@ -318,6 +332,55 @@ describe('readResolvedPointsForSeries', () => {
   });
 });
 
+describe('readResolvedTicketsForSeries', () => {
+  it('lit le compte de tickets sur le nom d\'équipe', () => {
+    const row = { date: '2026-09-07', Licornes: 4, Licornes_points: 0 };
+
+    expect(readResolvedTicketsForSeries(row, 'Licornes', 946)).toBe(4);
+  });
+
+  it('retombe sur le format historique par board', () => {
+    expect(readResolvedTicketsForSeries({ date: '2026-09-07', board_946: 3 }, 'Licornes', 946)).toBe(
+      3
+    );
+  });
+});
+
+describe('buildTicketResolvedByDay', () => {
+  const dateRange = { from: '2026-09-07', to: '2026-09-10' };
+
+  it('compte les tickets résolus par jour et remplit les jours vides', () => {
+    const result = buildTicketResolvedByDay(
+      [
+        { resolutionDate: '2026-09-07T09:00:00.000Z' },
+        { resolutionDate: '2026-09-07T18:00:00.000Z' },
+        { resolutionDate: '2026-09-09T12:00:00.000Z' },
+        { resolutionDate: null },
+      ],
+      dateRange,
+      'Licornes'
+    );
+
+    expect(result.byDay.map((row) => [row.date, row.Licornes])).toEqual([
+      ['2026-09-07', 2],
+      ['2026-09-08', 0],
+      ['2026-09-09', 1],
+      ['2026-09-10', 0],
+    ]);
+  });
+
+  it('ramène une résolution hors plage sur le premier ou le dernier jour', () => {
+    const result = buildTicketResolvedByDay(
+      [{ resolutionDate: '2026-09-01' }, { resolutionDate: '2026-09-20' }],
+      dateRange,
+      'Licornes'
+    );
+
+    expect(result.byDay[0].Licornes).toBe(1);
+    expect(result.byDay[3].Licornes).toBe(1);
+  });
+});
+
 describe('computeTeamBurndown', () => {
   // Sprint du lundi 7 au vendredi 18 septembre 2026 : 10 jours ouvrés sur 12 jours.
   const dateRange = { from: '2026-09-07', to: '2026-09-18' };
@@ -343,6 +406,27 @@ describe('computeTeamBurndown', () => {
     expect(burndown?.days.slice(0, 3).map((d) => d.remaining)).toEqual([35, 32, 32]);
     expect(burndown?.completedPoints).toBe(8);
     expect(burndown?.remainingPoints).toBe(32);
+    expect(burndown?.unit).toBe('points');
+  });
+
+  it('burndown tickets : retire le cumul des tickets résolus', () => {
+    const burndown = computeTeamBurndown({
+      scopePoints: 20,
+      seriesName: 'Licornes',
+      unit: 'tickets',
+      resolved: {
+        dateRange,
+        byDay: listDaysInclusive(dateRange.from, dateRange.to).map((date) => ({
+          date,
+          Licornes: date === '2026-09-07' ? 5 : date === '2026-09-08' ? 2 : 0,
+        })),
+      },
+      today: '2026-09-09',
+    });
+
+    expect(burndown?.unit).toBe('tickets');
+    expect(burndown?.days.slice(0, 3).map((d) => d.remaining)).toEqual([15, 13, 13]);
+    expect(burndown?.remainingPoints).toBe(13);
   });
 
   it('laisse les jours à venir sans valeur pour arrêter la courbe à aujourd\'hui', () => {
@@ -540,19 +624,204 @@ describe('buildMeetingReport', () => {
     expect(report).toContain('## Points bloquants\n- aucun');
     expect(report).toContain('## Interactions entre équipes\n- aucune');
     expect(report).toContain('Actions :\n- aucune');
+    expect(report).toContain('## À faire par responsable\n- aucun suivi ouvert');
+  });
+
+  it('regroupe le récapitulatif par responsable', () => {
+    const report = buildMeetingReport(meeting());
+
+    expect(report).toContain('Léa :');
+    expect(report).toContain('- [Point bloquant · Critique] Env. de recette KO — À lever : Intervention Ops');
+    expect(report).toContain('Sam :');
+    expect(report).toContain('- [Action · En cours] Automatiser le déploiement — 2026-09-15');
+  });
+});
+
+describe('buildOwnerRecap', () => {
+  it('regroupe blocages ouverts et actions non faites, sans les lignes closes', () => {
+    const recap = buildOwnerRecap({
+      blockers: [
+        {
+          id: 'b1',
+          severity: 'Critique',
+          text: 'Env. KO',
+          need: 'Ops',
+          owner: 'Léa',
+          resolved: false,
+        },
+        {
+          id: 'b2',
+          severity: 'Faible',
+          text: 'Doc',
+          need: '',
+          owner: 'Léa',
+          resolved: true,
+        },
+      ],
+      actions: [
+        { id: 'a1', text: 'Automatiser', owner: 'Sam', due: '2026-09-15', status: 'En cours' },
+        { id: 'a2', text: 'Documenter', owner: 'Léa', due: '', status: 'Fait' },
+        { id: 'a3', text: 'Relancer Ops', owner: 'léa', due: '', status: 'À faire' },
+      ],
+    });
+
+    expect(recap.map((group) => group.owner)).toEqual(['Léa', 'Sam']);
+    expect(recap[0].items.map((item) => [item.kind, item.title, item.status])).toEqual([
+      ['blocker', 'Env. KO', 'Critique'],
+      ['action', 'Relancer Ops', 'À faire'],
+    ]);
+    expect(recap[1].items.map((item) => item.title)).toEqual(['Automatiser']);
+  });
+
+  it('place les lignes sans responsable à la fin', () => {
+    const recap = buildOwnerRecap({
+      blockers: [
+        { id: 'b1', severity: 'Moyen', text: 'Accès manquant', need: '', owner: '', resolved: false },
+      ],
+      actions: [
+        { id: 'a1', text: 'Préparer la démo', owner: 'Sam', due: '', status: 'À faire' },
+      ],
+    });
+
+    expect(recap.map((group) => group.owner)).toEqual(['Sam', UNASSIGNED_OWNER_LABEL]);
+  });
+
+  it('ignore les lignes vides encore en saisie', () => {
+    expect(
+      buildOwnerRecap({
+        blockers: [{ id: 'b1', severity: 'Moyen', text: '  ', need: '', owner: 'Léa', resolved: false }],
+        actions: [{ id: 'a1', text: '   ', owner: 'Léa', due: '', status: 'À faire' }],
+      })
+    ).toEqual([]);
+  });
+});
+
+describe('fusion collaborative', () => {
+  it('ajoute une ligne distante sans retirer une ligne dirty locale', () => {
+    const local = [
+      { id: 'local', text: 'En cours de saisie' },
+      { id: 'shared', text: 'Ancien' },
+    ];
+    const remote = [
+      { id: 'shared', text: 'Mis à jour ailleurs' },
+      { id: 'lea', text: 'Ajout Léa' },
+    ];
+
+    expect(applyRemoteRows(local, remote, new Set(['local']), new Set())).toEqual([
+      { id: 'shared', text: 'Mis à jour ailleurs' },
+      { id: 'lea', text: 'Ajout Léa' },
+      { id: 'local', text: 'En cours de saisie' },
+    ]);
+  });
+
+  it('n\'applique pas une suppression distante d\'une ligne encore dirty', () => {
+    expect(
+      applyMeetingWritePatch(
+        {
+          id: 'm1',
+          sprint: { name: 'Sprint', number: '1', goal: '', date: '2026-09-08' },
+          teams: [],
+          blockers: [
+            { id: 'b1', severity: 'Moyen', text: 'Local', need: '', owner: '', resolved: false },
+          ],
+          interactions: [],
+          retro: { keep: [], stop: [], try: [] },
+          actions: [],
+        },
+        { blockers: { upsert: [], remove: ['b2'] } }
+      ).blockers
+    ).toEqual([
+      { id: 'b1', severity: 'Moyen', text: 'Local', need: '', owner: '', resolved: false },
+    ]);
+  });
+
+  it('ignore le sprint distant tant qu\'une saisie locale est en vol', () => {
+    const meeting: WeeklyMeeting = {
+      id: 'm1',
+      sprint: { name: 'Sprint', number: '1', goal: 'Local', date: '2026-09-08' },
+      teams: [],
+      blockers: [],
+      interactions: [],
+      retro: { keep: [], stop: [], try: [] },
+      actions: [],
+    };
+
+    const next = applyRemoteSnapshot(
+      meeting,
+      { sprint: { name: 'Sprint', number: '1', goal: 'Distant', date: '2026-09-08' } },
+      { sprint: meeting.sprint },
+      {}
+    );
+
+    expect(next.sprint.goal).toBe('Local');
   });
 });
 
 describe('fabriques de lignes', () => {
-  it('crée une équipe QA avec ses indicateurs par défaut', () => {
+  it('crée une équipe QA avec les indicateurs du board Jira', () => {
     const team = createTeam('qa');
 
     expect(team.role).toBe('qa');
     expect(team.name).toBe('QA');
-    expect(team.metrics.map((m) => m.label)).toContain('Cas de test exécutés');
+    expect(team.metrics.map((m) => m.label)).toEqual([...DEFAULT_QA_METRIC_LABELS]);
   });
 
   it('crée des lignes avec des identifiants distincts', () => {
     expect(createAction().id).not.toBe(createAction().id);
+  });
+});
+
+describe('applyTeamRole / applyTeamBoard', () => {
+  it('remplace le jeu Dev vide par les indicateurs QA', () => {
+    const next = applyTeamRole(createTeam('dev'), 'qa');
+
+    expect(next.role).toBe('qa');
+    expect(next.metrics.map((m) => m.label)).toEqual([...DEFAULT_QA_METRIC_LABELS]);
+  });
+
+  it('conserve une saisie manuelle quand on change seulement le type', () => {
+    const team = createTeam('dev');
+    team.metrics[0].value = '12';
+
+    const next = applyTeamRole(team, 'qa');
+
+    expect(next.role).toBe('qa');
+    expect(next.metrics.map((m) => m.label)).toEqual(team.metrics.map((m) => m.label));
+    expect(next.metrics[0].value).toBe('12');
+  });
+
+  it('rattache Licorne : rôle QA, nom du board, indicateurs Jira', () => {
+    const next = applyTeamBoard(createTeam('dev'), { id: 946, name: 'Licornes' }, 'qa');
+
+    expect(next.boardId).toBe(946);
+    expect(next.name).toBe('Licornes');
+    expect(next.role).toBe('qa');
+    expect(next.metrics.map((m) => m.label)).toEqual([...DEFAULT_QA_METRIC_LABELS]);
+  });
+
+  it('migre l\'ancien jeu QA manuel encore vide vers les compteurs du board', () => {
+    const legacy: MeetingTeam = {
+      ...createTeam('qa'),
+      metrics: LEGACY_QA_METRIC_LABELS.map((label) => ({
+        id: label,
+        label,
+        value: '',
+        target: '',
+        source: 'manual' as const,
+      })),
+    };
+
+    expect(canReplaceDefaultMetrics(legacy)).toBe(true);
+    const next = applyTeamBoard(legacy, { id: 946, name: 'Licornes' }, 'qa');
+    expect(next.metrics.map((m) => m.label)).toEqual([...DEFAULT_QA_METRIC_LABELS]);
+  });
+
+  it('détache le board sans toucher au reste', () => {
+    const team = applyTeamBoard(createTeam('qa'), { id: 946, name: 'Licornes' }, 'qa');
+    const next = applyTeamBoard(team, null, 'qa');
+
+    expect(next.boardId).toBeUndefined();
+    expect(next.name).toBe('Licornes');
+    expect(next.metrics.map((m) => m.label)).toEqual([...DEFAULT_QA_METRIC_LABELS]);
   });
 });
