@@ -337,6 +337,7 @@ docker-compose -f docker-compose.dev.yml up -d
 | `JIRA_API_TOKEN` | Token API Jira | ✅ |
 | `JIRA_PROJECT_KEY` | Clé du projet (ex: PROJ) | ❌ |
 | `JIRA_BOARD_ID` | ID du board Agile | ❌ |
+| `JIRA_QA_BOARD_ID` | IDs boards QA (point hebdo), séparés par des virgules | ❌ |
 | `MONGODB_URI` | URI de connexion MongoDB | ✅ |
 | `JWT_SECRET` | Clé secrète pour JWT (32+ chars) | ✅ |
 | `JWT_EXPIRES_IN` | Durée validité token (ex: 24h) | ❌ |

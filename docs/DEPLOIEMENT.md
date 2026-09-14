@@ -123,6 +123,7 @@ services:
       - JIRA_API_TOKEN=${JIRA_API_TOKEN}
       - JIRA_PROJECT_KEY=${JIRA_PROJECT_KEY}
       - JIRA_BOARD_ID=${JIRA_BOARD_ID}
+      - JIRA_QA_BOARD_ID=${JIRA_QA_BOARD_ID}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost}
@@ -181,6 +182,7 @@ volumes:
 
 - `MONGO_PASSWORD`
 - `JIRA_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY`, `JIRA_BOARD_ID`
+- `JIRA_QA_BOARD_ID` (boards QA pour le point hebdo, ex. `946` — séparés de `JIRA_BOARD_ID`)
 - `CORS_ORIGIN` (ex. `https://ton-domaine.com`)
 - `JWT_SECRET` (recommandé en prod, min. 32 caractères)
 - Optionnel : `JWT_EXPIRES_IN` (défaut `24h`), `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`
