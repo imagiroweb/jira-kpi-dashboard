@@ -36,6 +36,12 @@ export interface IMeetingTeam {
   metrics: IMeetingMetric[];
 }
 
+/** Auteur d'une ligne (blocage, interaction, action) — pas de verrou, affichage seulement. */
+export interface IMeetingRowAuthor {
+  id: string;
+  name: string;
+}
+
 export interface IMeetingBlocker {
   id: string;
   severity: MeetingBlockerSeverity;
@@ -43,6 +49,8 @@ export interface IMeetingBlocker {
   need: string;
   owner: string;
   resolved: boolean;
+  createdBy?: IMeetingRowAuthor;
+  updatedBy?: IMeetingRowAuthor;
 }
 
 export interface IMeetingInteraction {
@@ -51,6 +59,8 @@ export interface IMeetingInteraction {
   to: string;
   subject: string;
   status: MeetingInteractionStatus;
+  createdBy?: IMeetingRowAuthor;
+  updatedBy?: IMeetingRowAuthor;
 }
 
 export interface IMeetingRetroItem {
@@ -71,6 +81,8 @@ export interface IMeetingAction {
   /** Échéance au format YYYY-MM-DD, vide si non fixée. */
   due: string;
   status: MeetingActionStatus;
+  createdBy?: IMeetingRowAuthor;
+  updatedBy?: IMeetingRowAuthor;
 }
 
 export interface IMeetingSprint {
@@ -122,6 +134,14 @@ const TeamSchema = new Schema<IMeetingTeam>(
   { _id: false }
 );
 
+const RowAuthorSchema = new Schema<IMeetingRowAuthor>(
+  {
+    id: { type: String, required: true },
+    name: { type: String, default: '' }
+  },
+  { _id: false }
+);
+
 const BlockerSchema = new Schema<IMeetingBlocker>(
   {
     id: { type: String, required: true },
@@ -129,7 +149,9 @@ const BlockerSchema = new Schema<IMeetingBlocker>(
     text: { type: String, default: '' },
     need: { type: String, default: '' },
     owner: { type: String, default: '' },
-    resolved: { type: Boolean, default: false }
+    resolved: { type: Boolean, default: false },
+    createdBy: { type: RowAuthorSchema },
+    updatedBy: { type: RowAuthorSchema }
   },
   { _id: false }
 );
@@ -140,7 +162,9 @@ const InteractionSchema = new Schema<IMeetingInteraction>(
     from: { type: String, default: '' },
     to: { type: String, default: '' },
     subject: { type: String, default: '' },
-    status: { type: String, enum: MEETING_INTERACTION_STATUSES, default: 'À traiter' }
+    status: { type: String, enum: MEETING_INTERACTION_STATUSES, default: 'À traiter' },
+    createdBy: { type: RowAuthorSchema },
+    updatedBy: { type: RowAuthorSchema }
   },
   { _id: false }
 );
@@ -168,7 +192,9 @@ const ActionSchema = new Schema<IMeetingAction>(
     text: { type: String, default: '' },
     owner: { type: String, default: '' },
     due: { type: String, default: '' },
-    status: { type: String, enum: MEETING_ACTION_STATUSES, default: 'À faire' }
+    status: { type: String, enum: MEETING_ACTION_STATUSES, default: 'À faire' },
+    createdBy: { type: RowAuthorSchema },
+    updatedBy: { type: RowAuthorSchema }
   },
   { _id: false }
 );

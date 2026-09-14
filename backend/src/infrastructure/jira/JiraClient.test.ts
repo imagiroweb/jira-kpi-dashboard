@@ -32,6 +32,7 @@ describe('JiraClient', () => {
     process.env.JIRA_API_TOKEN = 'secret-token';
     delete process.env.JIRA_PROJECT_KEY;
     delete process.env.JIRA_BOARD_ID;
+    delete process.env.JIRA_QA_BOARD_ID;
     delete process.env.JIRA_HOURS_PER_DAY;
     delete process.env.JIRA_DAYS_PER_WEEK;
   };
@@ -65,6 +66,19 @@ describe('JiraClient', () => {
     const client = new JiraClient();
     expect(client.configuredProjectKeys).toEqual(['ABC', 'DEF']);
     expect(client.configuredBoardIds).toEqual([1, 3]);
+  });
+
+  it('expose configuredQaBoardIds, distinct des boards configurés', () => {
+    process.env.JIRA_BOARD_ID = '1,2';
+    process.env.JIRA_QA_BOARD_ID = ' 946 ';
+    const client = new JiraClient();
+    expect(client.configuredBoardIds).toEqual([1, 2]);
+    expect(client.configuredQaBoardIds).toEqual([946]);
+  });
+
+  it('configuredQaBoardIds est vide quand JIRA_QA_BOARD_ID est absent', () => {
+    delete process.env.JIRA_QA_BOARD_ID;
+    expect(new JiraClient().configuredQaBoardIds).toEqual([]);
   });
 
   it('getBoard retourne les données ou null si erreur', async () => {
@@ -140,6 +154,25 @@ describe('JiraClient', () => {
     const sprints = await new JiraClient().getBoardSprints(5, 'active');
     expect(mockGet).toHaveBeenCalledWith('/rest/agile/1.0/board/5/sprint', { params: { state: 'active' } });
     expect(sprints[0].id).toBe(10);
+  });
+
+  it('getScopeChangeBurndown appelle GreenHopper avec board et sprint', async () => {
+    mockGet.mockResolvedValueOnce({
+      data: { changes: {}, startTime: 1, now: 2 }
+    });
+    const chart = await new JiraClient().getScopeChangeBurndown(810, 2752);
+    expect(mockGet).toHaveBeenCalledWith(
+      '/rest/greenhopper/1.0/rapid/charts/scopechangeburndownchart',
+      { params: { rapidViewId: 810, sprintId: 2752 } }
+    );
+    expect(chart.startTime).toBe(1);
+
+    mockGet.mockResolvedValueOnce({ data: { changes: {}, startTime: 1 } });
+    await new JiraClient().getScopeChangeBurndown(843, 2752, 'field_customfield_10127');
+    expect(mockGet).toHaveBeenCalledWith(
+      '/rest/greenhopper/1.0/rapid/charts/scopechangeburndownchart',
+      { params: { rapidViewId: 843, sprintId: 2752, statisticFieldId: 'field_customfield_10127' } }
+    );
   });
 
   it('searchApproximateCount lit count ou 0', async () => {

@@ -42,14 +42,21 @@ router.get('/configured-projects', async (req: Request, res: Response) => {
 /**
  * Get configured boards with names
  * GET /api/jira/configured-boards
+ * Réponse : `boards` (JIRA_BOARD_ID) et `qaBoards` (JIRA_QA_BOARD_ID, point hebdo uniquement).
  */
 router.get('/configured-boards', async (req: Request, res: Response) => {
   try {
-    const boards = await worklogAppService.getConfiguredBoards();
-    
+    const [boards, qaBoards] = await Promise.all([
+      worklogAppService.getConfiguredBoards(),
+      worklogAppService.getQaBoards()
+    ]);
+
+    // `qaBoards` est une liste distincte : les consommateurs historiques ne lisent
+    // que `boards` et restent donc inchangés.
     res.json({
       success: true,
-      boards
+      boards,
+      qaBoards
     });
   } catch (error) {
     logger.error('Error fetching configured boards:', error);
@@ -62,15 +69,36 @@ router.get('/configured-boards', async (req: Request, res: Response) => {
 });
 
 /**
+ * Burndown fidèle du sprint actif (ou dernier clos) par board.
+ * GET /api/jira/sprint-burndown?includeQa=true
+ */
+router.get('/sprint-burndown', async (req: Request, res: Response) => {
+  try {
+    const includeQa = req.query.includeQa === 'true';
+    const boards = await worklogAppService.getSprintBurndowns({ includeQa });
+    res.json({ success: true, boards });
+  } catch (error) {
+    logger.error('Error fetching sprint burndowns:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch sprint burndowns',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
  * Sprint dashboard: all configured boards at once (parallel server-side fetches).
  * GET /api/jira/dashboard/sprint-issues-all
  * Query: from, to (optional) — same semantics as GET /board/:boardId/sprint-issues
+ *        includeQa=true — ajoute les boards JIRA_QA_BOARD_ID (point hebdo).
  */
 router.get('/dashboard/sprint-issues-all', async (req: Request, res: Response) => {
   try {
     const from = req.query.from as string | undefined;
     const to = req.query.to as string | undefined;
-    const boards = await worklogAppService.getSprintIssuesForAllConfiguredBoards(from, to);
+    const includeQa = req.query.includeQa === 'true';
+    const boards = await worklogAppService.getSprintIssuesForAllConfiguredBoards(from, to, { includeQa });
     res.json({
       success: true,
       boards

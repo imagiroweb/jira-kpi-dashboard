@@ -4,8 +4,10 @@ const mockJiraClient = {
   getProjects: jest.fn(),
   configuredProjectKeys: ['ABC'],
   configuredBoardIds: [10],
+  configuredQaBoardIds: [] as number[],
   getBoard: jest.fn(),
   getBoardSprints: jest.fn(),
+  getScopeChangeBurndown: jest.fn(),
   getTimeTrackingConfig: jest.fn()
 };
 
@@ -50,9 +52,11 @@ describe('WorklogApplicationService', () => {
     mockJiraClient.getProjects.mockReset().mockResolvedValue([]);
     mockJiraClient.getBoard.mockReset().mockResolvedValue({ id: 10, name: 'Board', location: { projectKey: 'ABC' } });
     mockJiraClient.getBoardSprints.mockReset().mockResolvedValue([]);
+    mockJiraClient.getScopeChangeBurndown.mockReset();
     mockJiraClient.getTimeTrackingConfig.mockReset().mockResolvedValue({ workingHoursPerDay: 8, workingDaysPerWeek: 5 });
     mockJiraClient.configuredProjectKeys = ['ABC'];
     mockJiraClient.configuredBoardIds = [10];
+    mockJiraClient.configuredQaBoardIds = [];
   });
 
   it('searchWorklogs délègue au repository avec les filtres', async () => {
@@ -215,6 +219,29 @@ describe('WorklogApplicationService', () => {
     await expect(service.getConfiguredBoards()).resolves.toEqual([]);
   });
 
+  it('getQaBoards lit JIRA_QA_BOARD_ID sans toucher aux boards configurés', async () => {
+    mockJiraClient.configuredBoardIds = [10];
+    mockJiraClient.configuredQaBoardIds = [946];
+    mockJiraClient.getBoard.mockImplementation(async (id: number) => ({
+      id,
+      name: id === 946 ? 'Licornes' : 'Cook',
+      location: { projectKey: 'AD' }
+    }));
+
+    await expect(service.getQaBoards()).resolves.toEqual([
+      { id: 946, name: 'Licornes', projectKey: 'AD' }
+    ]);
+    await expect(service.getConfiguredBoards()).resolves.toEqual([
+      { id: 10, name: 'Cook', projectKey: 'AD' }
+    ]);
+  });
+
+  it('getQaBoards retourne une liste vide sans board QA configuré', async () => {
+    mockJiraClient.configuredQaBoardIds = [];
+    await expect(service.getQaBoards()).resolves.toEqual([]);
+    expect(mockJiraClient.getBoard).not.toHaveBeenCalled();
+  });
+
   it('getActiveSprintDateRange retourne null ou la plage depuis les sprints', async () => {
     mockJiraClient.configuredBoardIds = [];
     await expect(service.getActiveSprintDateRange()).resolves.toBeNull();
@@ -233,5 +260,47 @@ describe('WorklogApplicationService', () => {
     });
     const range = await service.getActiveSprintDateRange();
     expect(range).toEqual({ from: '2026-04-01', to: '2026-04-15' });
+  });
+
+  it('getSprintBurndowns rejoue GreenHopper et isole un board en erreur', async () => {
+    mockJiraClient.configuredBoardIds = [10];
+    mockJiraClient.configuredQaBoardIds = [946];
+    mockJiraClient.getBoard.mockImplementation(async (id: number) => ({
+      id,
+      name: id === 946 ? 'Licornes' : 'Cook',
+      location: { projectKey: 'AD' }
+    }));
+    mockJiraClient.getBoardSprints.mockResolvedValue([
+      {
+        id: 2752,
+        name: 'ADO26-3637',
+        startDate: '2026-08-31T07:30:00.000Z',
+        endDate: '2026-09-13T23:00:00.000Z'
+      }
+    ]);
+    mockJiraClient.getScopeChangeBurndown.mockImplementation(async (boardId: number) => {
+      if (boardId === 946) throw new Error('gh-fail');
+      return {
+        startTime: Date.parse('2026-08-31T09:30:00.000Z'),
+        now: Date.parse('2026-09-01T12:00:00.000Z'),
+        changes: {
+          [String(Date.parse('2026-08-31T09:30:40.000Z'))]: [
+            { key: 'A-1', added: true, statC: { newValue: 5 } }
+          ]
+        }
+      };
+    });
+
+    const boards = await service.getSprintBurndowns({ includeQa: true });
+    expect(boards).toHaveLength(1);
+    expect(boards[0].boardId).toBe(10);
+    expect(boards[0].unit).toBe('points');
+    expect(boards[0].days[0].remaining).toBe(5);
+    expect(boards[0].days[0].scope).toBe(5);
+    expect(mockJiraClient.getScopeChangeBurndown).toHaveBeenCalledWith(
+      10,
+      2752,
+      'field_customfield_10127'
+    );
   });
 });

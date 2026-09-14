@@ -2,6 +2,7 @@ import { container } from '../../infrastructure/Container';
 import { DateRange } from '../../domain/worklog/value-objects/DateRange';
 import { Worklog } from '../../domain/worklog/entities/Worklog';
 import { SprintIssue } from '../../domain/sprint/entities/SprintIssue';
+import { buildFaithfulBurndown, BurndownUnit, FaithfulBurndown } from '../../domain/sprint/sprintBurndown';
 import { globalCache } from '../../infrastructure/cache/CacheDecorator';
 import { worklogHoursDailyService, bucketHoursByCalendarDate } from './WorklogHoursDailyService';
 import { logger } from '../../utils/logger';
@@ -757,39 +758,61 @@ export class WorklogApplicationService {
    */
   async getConfiguredBoards(): Promise<Array<{ id: number; name: string; projectKey: string | null }>> {
     try {
-      const jiraClient = container().jiraClient;
-      const boardIds = jiraClient.configuredBoardIds;
-      
+      const boardIds = container().jiraClient.configuredBoardIds;
       logger.info(`Configured board IDs from .env: [${boardIds.join(', ')}]`);
-      
-      const boards: Array<{ id: number; name: string; projectKey: string | null }> = [];
-      
-      for (const boardId of boardIds) {
-        const board = await jiraClient.getBoard(boardId);
-        if (board) {
-          logger.info(`Board ${boardId}: "${board.name}" (Project: ${board.location?.projectKey || 'N/A'})`);
-          boards.push({
-            id: board.id,
-            name: board.name,
-            projectKey: board.location?.projectKey || null
-          });
-        } else {
-          logger.warn(`Board ${boardId} not found or access denied`);
-          // Fallback: board exists but couldn't be fetched with details
-          boards.push({
-            id: boardId,
-            name: `Board ${boardId}`,
-            projectKey: null
-          });
-        }
-      }
-      
+      const boards = await this.fetchBoardsById(boardIds);
       logger.info(`Total configured boards: ${boards.length}`);
       return boards;
     } catch (error) {
       logger.warn('Could not get configured boards - Jira not configured');
       return [];
     }
+  }
+
+  /**
+   * Boards QA (JIRA_QA_BOARD_ID). Séparés des boards configurés : leur sprint se
+   * mesure en nombre de tickets, pas en story points, et ils n'ont donc pas leur
+   * place sur les tableaux de bord sprint. Seul le point hebdo les propose.
+   */
+  async getQaBoards(): Promise<Array<{ id: number; name: string; projectKey: string | null }>> {
+    try {
+      const boardIds = container().jiraClient.configuredQaBoardIds ?? [];
+      if (boardIds.length === 0) return [];
+      logger.info(`QA board IDs from .env: [${boardIds.join(', ')}]`);
+      return await this.fetchBoardsById(boardIds);
+    } catch (error) {
+      logger.warn('Could not get QA boards - Jira not configured');
+      return [];
+    }
+  }
+
+  private async fetchBoardsById(
+    boardIds: number[]
+  ): Promise<Array<{ id: number; name: string; projectKey: string | null }>> {
+    const jiraClient = container().jiraClient;
+    const boards: Array<{ id: number; name: string; projectKey: string | null }> = [];
+
+    for (const boardId of boardIds) {
+      const board = await jiraClient.getBoard(boardId);
+      if (board) {
+        logger.info(`Board ${boardId}: "${board.name}" (Project: ${board.location?.projectKey || 'N/A'})`);
+        boards.push({
+          id: board.id,
+          name: board.name,
+          projectKey: board.location?.projectKey || null
+        });
+      } else {
+        logger.warn(`Board ${boardId} not found or access denied`);
+        // Fallback: board exists but couldn't be fetched with details
+        boards.push({
+          id: boardId,
+          name: `Board ${boardId}`,
+          projectKey: null
+        });
+      }
+    }
+
+    return boards;
   }
 
   /**
@@ -1398,7 +1421,8 @@ export class WorklogApplicationService {
    */
   async getSprintIssuesForAllConfiguredBoards(
     from?: string,
-    to?: string
+    to?: string,
+    options?: { includeQa?: boolean }
   ): Promise<
     Array<{
       boardId: number;
@@ -1410,14 +1434,21 @@ export class WorklogApplicationService {
     }>
   > {
     const configured = await this.getConfiguredBoards();
-    if (configured.length === 0) {
+    const qa = options?.includeQa ? await this.getQaBoards() : [];
+    const seen = new Set<number>();
+    const boardsToFetch = [...configured, ...qa].filter((board) => {
+      if (seen.has(board.id)) return false;
+      seen.add(board.id);
+      return true;
+    });
+    if (boardsToFetch.length === 0) {
       return [];
     }
     const settled = await Promise.allSettled(
-      configured.map((b) => this.getSprintIssuesForBoard(b.id, from, to))
+      boardsToFetch.map((b) => this.getSprintIssuesForBoard(b.id, from, to))
     );
     return settled.map((result, i) => {
-      const b = configured[i];
+      const b = boardsToFetch[i];
       if (result.status === 'fulfilled') {
         return {
           boardId: b.id,
@@ -1438,6 +1469,79 @@ export class WorklogApplicationService {
         sprint: this.emptySprintIssuesResult()
       };
     });
+  }
+
+  /**
+   * Burndown fidèle du sprint actif (ou dernier clos) pour chaque board.
+   * Rejoue l'historique GreenHopper : les ajouts / retraits apparaissent comme
+   * des marches. Les boards QA sont en tickets, les autres en story points.
+   */
+  async getSprintBurndowns(options?: { includeQa?: boolean }): Promise<SprintBurndownBoardResult[]> {
+    const configured = await this.getConfiguredBoards();
+    const qa = options?.includeQa ? await this.getQaBoards() : [];
+    const qaIds = new Set(qa.map((board) => board.id));
+    const seen = new Set<number>();
+    const boards = [...configured, ...qa].filter((board) => {
+      if (seen.has(board.id)) return false;
+      seen.add(board.id);
+      return true;
+    });
+
+    const jiraClient = container().jiraClient;
+    const settled = await Promise.allSettled(
+      boards.map(async (board) => {
+        const sprint = await this.resolveActiveOrLastClosedSprint(board.id);
+        if (!sprint?.startDate || !sprint.endDate) {
+          throw new Error(`Aucun sprint daté pour le board ${board.id}`);
+        }
+        const unit = qaIds.has(board.id) ? 'tickets' as const : 'points' as const;
+        // Le board peut être configuré en « temps restant » (ex. Calson) : sans override,
+        // GreenHopper ne remonte aucun story point et la courbe reste à zéro.
+        const storyPointsField = process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10127';
+        const chart = await jiraClient.getScopeChangeBurndown(
+          board.id,
+          sprint.id,
+          unit === 'points' ? `field_${storyPointsField}` : undefined
+        );
+        const burndown = buildFaithfulBurndown({
+          chart,
+          dateRange: { from: sprint.startDate.split('T')[0], to: sprint.endDate.split('T')[0] },
+          unit
+        });
+        return {
+          boardId: board.id,
+          name: board.name,
+          sprintId: sprint.id,
+          sprintName: sprint.name,
+          dateRange: { from: sprint.startDate.split('T')[0], to: sprint.endDate.split('T')[0] },
+          ...burndown
+        };
+      })
+    );
+
+    return settled.flatMap((result, index) => {
+      if (result.status === 'fulfilled') return [result.value];
+      const err = result.reason instanceof Error ? result.reason.message : String(result.reason);
+      logger.warn(`[Sprint burndown] Board ${boards[index].id} failed: ${err}`);
+      return [];
+    });
+  }
+
+  private async resolveActiveOrLastClosedSprint(
+    boardId: number
+  ): Promise<{ id: number; name: string; startDate?: string; endDate?: string } | null> {
+    const jiraClient = container().jiraClient;
+    let sprints = await jiraClient.getBoardSprints(boardId, 'active');
+    if (sprints.length === 0) {
+      const closed = await jiraClient.getBoardSprints(boardId, 'closed');
+      const withEnd = closed
+        .filter((sprint) => sprint.endDate)
+        .sort(
+          (a, b) => new Date(b.endDate!).getTime() - new Date(a.endDate!).getTime()
+        );
+      if (withEnd.length > 0) sprints = [withEnd[0]];
+    }
+    return sprints[0] ?? null;
   }
 
   /**
@@ -1574,7 +1678,9 @@ export class WorklogApplicationService {
 
     // Get issues from selected sprints
     const storyPointsField = process.env.JIRA_STORY_POINTS_FIELD || 'customfield_10127';
-    const fields = `key,summary,issuetype,status,timeoriginalestimate,${storyPointsField}`;
+    // resolutiondate : permet de reconstituer un burndown en nombre de tickets pour les
+    // boards sans story points (boards QA), voir le point hebdo.
+    const fields = `key,summary,issuetype,status,timeoriginalestimate,resolutiondate,${storyPointsField}`;
     
     const issueMap = new Map<string, { key: string; fields?: Record<string, unknown> }>(); // Deduplicate by issue key
     for (const sprint of sprintsToUse) {
@@ -1611,7 +1717,8 @@ export class WorklogApplicationService {
         statusCategory: category,
         statusCategoryKey: categoryKey,
         storyPoints,
-        originalEstimateSeconds: typeof fieldsData.timeoriginalestimate === 'number' ? fieldsData.timeoriginalestimate : null
+        originalEstimateSeconds: typeof fieldsData.timeoriginalestimate === 'number' ? fieldsData.timeoriginalestimate : null,
+        resolutionDate: typeof fieldsData.resolutiondate === 'string' ? fieldsData.resolutiondate : null
       });
     });
 
@@ -1678,7 +1785,8 @@ export class WorklogApplicationService {
         statusCategory: i.statusCategory,
         statusCategoryKey: i.statusCategoryKey,
         storyPoints: i.storyPoints,
-        originalEstimateSeconds: i.originalEstimate?.toSeconds ?? null
+        originalEstimateSeconds: i.originalEstimate?.toSeconds ?? null,
+        resolutionDate: i.resolutionDate
       })),
       statusCounts: metrics.statusCounts,
       storyPointsByStatus: metrics.storyPointsByStatus,
@@ -2509,6 +2617,8 @@ export interface SprintIssuesResult {
     statusCategoryKey: string;
     storyPoints: number | null;
     originalEstimateSeconds: number | null;
+    /** Date de résolution Jira (ISO), null si le ticket n'est pas résolu. */
+    resolutionDate?: string | null;
   }>;
   statusCounts: {
     total: number;
@@ -2530,6 +2640,15 @@ export interface SprintIssuesResult {
     ticketCount: number;
     storyPoints: number;
   };
+}
+
+export interface SprintBurndownBoardResult extends FaithfulBurndown {
+  boardId: number;
+  name: string;
+  sprintId: number;
+  sprintName: string;
+  dateRange: { from: string; to: string };
+  unit: BurndownUnit;
 }
 
 export interface VelocityHistoryResult {

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderWithProviders } from '@/test/render';
 import { TEST_USER } from '@/test/fixtures/users';
 import { createMockSocketContextValue } from '@/test/mocks/socket';
-import type { WeeklyMeeting } from '../domain/pointHebdoSprint';
+import { applyMeetingWritePatch, type WeeklyMeeting } from '../domain/pointHebdoSprint';
 
 vi.mock('../services/api', () => ({
   meetingApi: {
@@ -70,7 +70,7 @@ describe('PointHebdoPage', () => {
     mockGetLatest.mockResolvedValue({ success: true, meeting: buildMeeting() });
     mockUpdate.mockImplementation(async (_id, patch) => ({
       success: true,
-      meeting: { ...buildMeeting(), ...patch } as WeeklyMeeting,
+      meeting: applyMeetingWritePatch(buildMeeting(), patch),
     }));
     mockFetch({
       'configured-boards': { success: true, boards: [{ id: 7, name: 'Board Dev' }] },
@@ -127,6 +127,46 @@ describe('PointHebdoPage', () => {
 
       expect(await screen.findByText('Serveur indisponible')).toBeInTheDocument();
     });
+
+    it('regroupe en bas de page les suivis ouverts par responsable', async () => {
+      mockGetLatest.mockResolvedValue({
+        success: true,
+        meeting: buildMeeting({
+          blockers: [
+            {
+              id: 'b1',
+              severity: 'Critique',
+              text: 'Env. de recette KO',
+              need: 'Intervention Ops',
+              owner: 'Léa',
+              resolved: false,
+            },
+            {
+              id: 'b2',
+              severity: 'Faible',
+              text: 'Doc à jour',
+              need: '',
+              owner: 'Léa',
+              resolved: true,
+            },
+          ],
+          actions: [
+            { id: 'a1', text: 'Automatiser le déploiement', owner: 'Sam', due: '2026-09-15', status: 'En cours' },
+            { id: 'a2', text: 'Documenter', owner: 'Léa', due: '', status: 'Fait' },
+          ],
+        }),
+      });
+      await renderPage();
+
+      const recap = screen.getByRole('table', { name: 'À faire par responsable' });
+      expect(within(recap).getByText('Léa')).toBeInTheDocument();
+      expect(within(recap).getByText('Env. de recette KO')).toBeInTheDocument();
+      expect(within(recap).getByText('À lever : Intervention Ops')).toBeInTheDocument();
+      expect(within(recap).getByText('Sam')).toBeInTheDocument();
+      expect(within(recap).getByText('Automatiser le déploiement')).toBeInTheDocument();
+      expect(within(recap).queryByText('Doc à jour')).not.toBeInTheDocument();
+      expect(within(recap).queryByText('Documenter')).not.toBeInTheDocument();
+    });
   });
 
   describe('sauvegarde automatique', () => {
@@ -141,7 +181,10 @@ describe('PointHebdoPage', () => {
         expect(mockUpdate).toHaveBeenCalledWith(
           'meeting-1',
           expect.objectContaining({
-            teams: [expect.objectContaining({ metrics: [expect.objectContaining({ value: '33' })] })],
+            teams: {
+              upsert: [expect.objectContaining({ metrics: [expect.objectContaining({ value: '33' })] })],
+              remove: [],
+            },
           }),
           expect.any(String)
         )
@@ -245,6 +288,39 @@ describe('PointHebdoPage', () => {
 
       expect(screen.getByLabelText('Objectif du sprint')).toHaveValue('Mon édition en cours');
     });
+
+    it('conserve un blocage en cours de saisie quand un autre client en ajoute un', async () => {
+      const socket = createMockSocketContextValue();
+      await renderPage({ socket });
+
+      fireEvent.click(screen.getByRole('button', { name: /Ajouter un blocage/ }));
+      fireEvent.change(screen.getByLabelText('Blocage'), {
+        target: { value: 'Mon blocage local' },
+      });
+
+      act(() => {
+        socket.triggerMeetingUpdate({
+          meetingId: 'meeting-1',
+          patch: {
+            blockers: [
+              {
+                id: 'b-remote',
+                severity: 'Critique',
+                text: 'Blocage de Léa',
+                need: 'Ops',
+                owner: 'Léa',
+                resolved: false,
+                createdBy: { id: 'u-lea', name: 'lea' },
+              },
+            ],
+          },
+          origin: 'autre-onglet',
+        });
+      });
+
+      expect(screen.getByDisplayValue('Mon blocage local')).toBeInTheDocument();
+      expect(screen.getByDisplayValue('Blocage de Léa')).toBeInTheDocument();
+    });
   });
 
   describe('édition des sections', () => {
@@ -257,7 +333,9 @@ describe('PointHebdoPage', () => {
       await waitFor(() =>
         expect(mockUpdate).toHaveBeenCalledWith(
           'meeting-1',
-          expect.objectContaining({ blockers: [expect.objectContaining({ severity: 'Moyen' })] }),
+          expect.objectContaining({
+            blockers: { upsert: [expect.objectContaining({ severity: 'Moyen' })], remove: [] },
+          }),
           expect.any(String)
         )
       );
@@ -298,7 +376,9 @@ describe('PointHebdoPage', () => {
       await waitFor(() =>
         expect(mockUpdate).toHaveBeenCalledWith(
           'meeting-1',
-          expect.objectContaining({ retro: expect.objectContaining({ keep: [expect.anything()] }) }),
+          expect.objectContaining({
+            retro: { keep: { upsert: [expect.anything()], remove: [] } },
+          }),
           expect.any(String)
         )
       );
@@ -312,7 +392,13 @@ describe('PointHebdoPage', () => {
       await waitFor(() =>
         expect(mockUpdate).toHaveBeenCalledWith(
           'meeting-1',
-          expect.objectContaining({ teams: [expect.objectContaining({ metrics: [] })] }),
+          expect.objectContaining({
+            teams: expect.objectContaining({
+              upsert: [expect.objectContaining({ metrics: [] })],
+              remove: [],
+              removeMetrics: [expect.any(String)],
+            }),
+          }),
           expect.any(String)
         )
       );
@@ -404,6 +490,107 @@ describe('PointHebdoPage', () => {
       expect(screen.getByLabelText('Valeur — Points engagés')).toHaveValue('30');
     });
 
+    it('propose le board QA Licornes à côté des équipes Dev', async () => {
+      mockFetch({
+        'configured-boards': {
+          success: true,
+          boards: [
+            { id: 7, name: 'Board Dev' },
+            { id: 8, name: 'Board Cook' },
+            { id: 9, name: 'Board Support' },
+          ],
+          qaBoards: [{ id: 946, name: 'Licornes' }],
+        },
+      });
+
+      await renderPage();
+
+      expect(screen.getByRole('button', { name: /Ajouter QA/ })).toBeInTheDocument();
+      const selector = screen.getByLabelText('Nom de l\'équipe');
+      expect(within(selector).getByRole('option', { name: 'Licornes' })).toBeInTheDocument();
+      expect(within(selector).getByRole('option', { name: 'Board Dev' })).toBeInTheDocument();
+    });
+
+    it('rattache Licornes avec les indicateurs du board QA', async () => {
+      mockFetch({
+        'configured-boards': {
+          success: true,
+          boards: [{ id: 7, name: 'Board Dev' }],
+          qaBoards: [{ id: 946, name: 'Licornes' }],
+        },
+        'sprint-issues-all': {
+          success: true,
+          boards: [
+            {
+              boardId: 946,
+              name: 'Licornes',
+              sprint: {
+                statusCounts: { total: 8, todo: 1, inProgress: 2, qa: 3, resolved: 2 },
+                storyPointsByStatus: { total: 0, todo: 0, inProgress: 0, qa: 0, resolved: 0 },
+                issues: [
+                  { issueType: 'Bug', statusCategoryKey: 'indeterminate' },
+                  { issueType: 'Bug', statusCategoryKey: 'done' },
+                ],
+              },
+            },
+          ],
+        },
+      });
+      mockGetLatest.mockResolvedValue({
+        success: true,
+        meeting: {
+          ...buildMeeting(),
+          teams: [
+            {
+              id: 't-qa',
+              name: 'QA',
+              role: 'qa' as const,
+              metrics: [
+                { id: 'm1', label: 'Cas de test exécutés', value: '', target: '', source: 'manual' as const },
+                { id: 'm2', label: 'Taux de réussite (%)', value: '', target: '', source: 'manual' as const },
+                { id: 'm3', label: 'Bugs détectés', value: '', target: '', source: 'manual' as const },
+                { id: 'm4', label: 'Bugs critiques', value: '', target: '', source: 'manual' as const },
+                { id: 'm5', label: 'Couverture (%)', value: '', target: '', source: 'manual' as const },
+              ],
+            },
+          ],
+        },
+      });
+
+      await renderPage();
+
+      fireEvent.change(screen.getByLabelText('Nom de l\'équipe'), { target: { value: '946' } });
+
+      expect(screen.getByLabelText('Type d\'équipe')).toHaveValue('qa');
+      await waitFor(() =>
+        expect(screen.getByLabelText('Valeur — Tickets en QA')).toHaveValue('3')
+      );
+      expect(screen.getByLabelText('Valeur — Bugs ouverts')).toHaveValue('1');
+      expect(screen.queryByLabelText('Valeur — Cas de test exécutés')).not.toBeInTheDocument();
+    });
+
+    it('demande aussi le sprint des boards QA au préremplissage', async () => {
+      const fetchMock = mockFetch({
+        'configured-boards': {
+          success: true,
+          boards: [{ id: 7, name: 'Board Dev' }],
+          qaBoards: [{ id: 946, name: 'Licornes' }],
+        },
+        'sprint-issues-all': JIRA_BOARDS['sprint-issues-all'],
+      });
+      mockGetLatest.mockResolvedValue({ success: true, meeting: emptyMeeting() });
+
+      await renderPage();
+
+      await waitFor(() =>
+        expect(
+          fetchMock.mock.calls.some(([url]) =>
+            String(url).includes('sprint-issues-all?includeQa=true')
+          )
+        ).toBe(true)
+      );
+    });
+
     it('avertit quand Jira est indisponible', async () => {
       mockFetch({
         'configured-boards': { success: true, boards: [{ id: 7, name: 'Board Dev' }] },
@@ -434,21 +621,17 @@ describe('PointHebdoPage', () => {
       ],
     };
 
-    /** Dates calées sur le jour courant : le burndown s'arrête à aujourd'hui. */
-    function dayOffset(offset: number): string {
-      const base = new Date(`${new Date().toISOString().slice(0, 10)}T00:00:00Z`);
-      base.setUTCDate(base.getUTCDate() + offset);
-      return base.toISOString().slice(0, 10);
-    }
-
-    function resolvedByDay(pointsByDate: Record<string, number>) {
+    function faithfulBurndown(boardId: number, overrides: Record<string, unknown> = {}) {
       return {
-        success: true,
-        dateRange: { from: dayOffset(-3), to: dayOffset(8) },
-        byDay: Array.from({ length: 12 }, (_, index) => {
-          const date = dayOffset(index - 3);
-          return { date, 'Board Dev': 0, 'Board Dev_points': pointsByDate[date] ?? 0 };
-        }),
+        boardId,
+        unit: 'points',
+        scopePoints: 45,
+        remainingPoints: 30,
+        idealPoints: 28,
+        deltaPoints: -2,
+        completedPoints: 15,
+        days: [{ date: '2026-09-08', remaining: 30, scope: 45, ideal: 28 }],
+        ...overrides,
       };
     }
 
@@ -456,29 +639,68 @@ describe('PointHebdoPage', () => {
       mockFetch({
         'configured-boards': { success: true, boards: [{ id: 7, name: 'Board Dev' }] },
         'sprint-issues-all': SPRINT_BOARDS,
-        'resolved-by-day': resolvedByDay({
-          [dayOffset(-2)]: 12,
-          [dayOffset(0)]: 3,
-          [dayOffset(4)]: 99, // jour à venir : ignoré
-        }),
+        'sprint-burndown': { success: true, boards: [faithfulBurndown(7)] },
       });
 
       await renderPage();
 
       expect(await screen.findByText('Burndown du sprint en cours')).toBeInTheDocument();
-      expect(screen.getByText('périmètre 45 SP')).toBeInTheDocument();
-      // 45 SP de périmètre moins les 15 SP résolus jusqu'à aujourd'hui.
+      expect(screen.getByText('périmètre actuel 45 SP')).toBeInTheDocument();
       expect(screen.getByLabelText('Reste à faire — Équipe Dev')).toHaveTextContent('30 SP');
       expect(
         screen.getByLabelText('Écart à la trajectoire idéale — Équipe Dev')
       ).toBeInTheDocument();
     });
 
-    it('demande les story points du sprint actif', async () => {
+    it('affiche le burndown QA en tickets, pas en story points', async () => {
+      mockGetLatest.mockResolvedValue({
+        success: true,
+        meeting: {
+          ...buildMeeting(),
+          teams: [
+            {
+              id: 't-qa',
+              name: 'Licornes',
+              role: 'qa' as const,
+              boardId: 946,
+              metrics: [{ id: 'm1', label: 'Tickets en cours', value: '2', target: '', source: 'jira' as const }],
+            },
+          ],
+        },
+      });
+      mockFetch({
+        'configured-boards': {
+          success: true,
+          boards: [{ id: 7, name: 'Board Dev' }],
+          qaBoards: [{ id: 946, name: 'Licornes' }],
+        },
+        'sprint-issues-all': { success: true, boards: [] },
+        'sprint-burndown': {
+          success: true,
+          boards: [
+            faithfulBurndown(946, {
+              unit: 'tickets',
+              scopePoints: 10,
+              remainingPoints: 7,
+              completedPoints: 3,
+            }),
+          ],
+        },
+      });
+
+      await renderPage();
+
+      expect(await screen.findByText('Burndown du sprint en cours')).toBeInTheDocument();
+      expect(screen.getByText('périmètre actuel 10 tickets')).toBeInTheDocument();
+      expect(screen.getByLabelText('Reste à faire — Licornes')).toHaveTextContent('7 tickets');
+      expect(screen.queryByText(/périmètre actuel 0 SP/)).not.toBeInTheDocument();
+    });
+
+    it('demande le burndown fidèle du sprint actif, y compris QA', async () => {
       const fetchMock = mockFetch({
         'configured-boards': { success: true, boards: [{ id: 7, name: 'Board Dev' }] },
         'sprint-issues-all': SPRINT_BOARDS,
-        'resolved-by-day': resolvedByDay({}),
+        'sprint-burndown': { success: true, boards: [faithfulBurndown(7)] },
       });
 
       await renderPage();
@@ -486,7 +708,7 @@ describe('PointHebdoPage', () => {
       await waitFor(() =>
         expect(
           fetchMock.mock.calls.some(([url]) =>
-            url.includes('resolved-by-day?activeSprint=true&mode=points')
+            String(url).includes('sprint-burndown?includeQa=true')
           )
         ).toBe(true)
       );

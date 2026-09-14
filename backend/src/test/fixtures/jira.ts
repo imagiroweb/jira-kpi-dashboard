@@ -12,6 +12,9 @@ export const TEST_CONFIGURED_BOARDS = [
   { id: 2, name: 'Board 2', projectKey: 'ABC' },
 ];
 
+/** Boards QA mockés (JIRA_QA_BOARD_ID) */
+export const TEST_QA_BOARDS = [{ id: 9, name: 'Licornes', projectKey: 'PROJ' }];
+
 /** Résultat batch sprint-issues-all */
 export const TEST_SPRINT_ISSUES_ALL_BOARDS = [
   { boardId: 1, boardName: 'Board 1', ...TEST_SPRINT_ISSUES_RESULT },

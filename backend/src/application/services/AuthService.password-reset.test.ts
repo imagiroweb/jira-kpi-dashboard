@@ -139,6 +139,17 @@ describe('AuthService — réinitialisation de mot de passe', () => {
       expect(expiresMs).toBeLessThanOrEqual(after + 61 * 60 * 1000);
     });
 
+    it('pointe vers le frontend Vite (port 3000) quand APP_BASE_URL est absent', async () => {
+      delete process.env.APP_BASE_URL;
+      mockUserFindOne.mockResolvedValue(mockUser);
+      mockEmailSend.mockResolvedValue(true);
+
+      await service.requestPasswordReset('user@test.com');
+
+      const resetUrl: string = mockEmailSend.mock.calls[0][1];
+      expect(resetUrl).toMatch(/^http:\/\/localhost:3000\/reset-password\?token=/);
+    });
+
     it("construit l'URL de reset avec APP_BASE_URL", async () => {
       process.env.APP_BASE_URL = 'https://app.example.com';
       mockUserFindOne.mockResolvedValue(mockUser);

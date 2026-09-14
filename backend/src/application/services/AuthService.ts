@@ -602,7 +602,7 @@ export class AuthService {
         { $set: { passwordResetToken: tokenHash, passwordResetExpires: resetExpires } }
       );
 
-      const appBaseUrl = (process.env.APP_BASE_URL || 'http://localhost:3001').replace(/\/$/, '');
+      const appBaseUrl = (process.env.APP_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
       const resetUrl = `${appBaseUrl}/reset-password?token=${plainToken}`;
 
       const sent = await emailService.sendPasswordResetEmail(

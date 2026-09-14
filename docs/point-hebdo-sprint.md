@@ -56,9 +56,15 @@ sans paramètre de date — c’est le backend qui résout le sprint courant.
 | Bugs détectés | issues de type bug du sprint |
 
 Le rapprochement se fait sur le **libellé de l’indicateur**, normalisé (minuscules, accents
-supprimés). Renommer un indicateur le déconnecte donc du préremplissage. Les indicateurs QA sans
-équivalent dans Jira (cas de test exécutés, taux de réussite, couverture, bugs critiques) restent
-en saisie manuelle.
+supprimés). Renommer un indicateur le déconnecte donc du préremplissage.
+
+Les boards QA (`JIRA_QA_BOARD_ID`, exposés dans `qaBoards` de `GET /api/jira/configured-boards`)
+apparaissent dans le sélecteur d’équipe, groupés à part des boards Dev. Les choisir bascule
+l’équipe en rôle QA et remplace un jeu d’indicateurs encore vide par les compteurs du board
+(tickets en cours / en QA / terminés, bugs ouverts / détectés) — le sprint QA se mesure en
+tickets, pas en story points. Le préremplissage les charge via
+`GET /api/jira/dashboard/sprint-issues-all?includeQa=true`. Un point déjà saisi à la main
+(y compris l’ancien jeu « cas de test / couverture ») n’est pas écrasé.
 
 Deux déclenchements :
 
@@ -72,45 +78,37 @@ l’indicateur en `source: 'manual'`.
 
 ### Burndown du sprint
 
-Sous les chiffres, une courbe par équipe rattachée à un board montre la fonte des story points du
-sprint en cours. Jira Cloud n’expose pas les données de son propre burndown : la courbe est donc
-**reconstituée** côté client par `computeTeamBurndown`, à partir de deux appels déjà utilisés
-ailleurs dans l’application :
+Sous les chiffres, une courbe par équipe rattachée à un board montre la fonte du sprint en cours.
+Les équipes Dev sont en **story points** ; le QA (Licornes) est en **tickets**.
 
-| Donnée | Source |
-|--------|--------|
-| Périmètre du sprint (point de départ) | `storyPointsByStatus.total` de `GET /api/jira/dashboard/sprint-issues-all` |
-| Points résolus par jour | `GET /api/jira/resolved-by-day?activeSprint=true&mode=points` |
-| Dates de début et de fin du sprint | `dateRange` de la même réponse |
+La courbe est **fidèle au burndown Jira** : le backend appelle l’API interne GreenHopper
+(`scopechangeburndownchart`) via `GET /api/jira/sprint-burndown?includeQa=true`. Pour les
+boards Dev, on force le champ Story Points (`statisticFieldId`) : un board réglé en
+« temps restant » (Calson) resterait sinon plat à zéro. Puis
+`buildFaithfulBurndown` rejoue chaque événement (ajout au sprint, retrait, ticket terminé,
+changement de story points). Le **périmètre** (ligne grise) monte ou descend quand le scope
+change ; le **reste à faire** (ligne cyan) descend quand on termine, et remonte si on ajoute
+du travail non fini. La guideline part du périmètre constaté dans les deux heures qui suivent
+le start du sprint : un ajout plus tardif n’y est pas répercuté.
 
-Le reste à faire d’un jour vaut le périmètre moins le cumul des points résolus jusqu’à ce jour. La
-courbe s’arrête à aujourd’hui — les jours à venir n’ont pas de valeur — et la trajectoire idéale
-décroît linéairement sur les **jours ouvrés** seulement, ce qui la met à plat le week-end. L’écart
-affiché à côté du graphique compare le reste à faire à cette trajectoire : « en avance » si le
-reste est inférieur à l’idéal, « en retard » sinon.
+La courbe s’arrête à aujourd’hui. L’idéal ne décroît que les **jours ouvrés**. L’écart affiché
+compare le reste à faire à cette guideline.
 
-La réponse de `resolved-by-day` prend deux formes selon la configuration ; les séries sont lues par
-nom d’équipe (`<board>_points`) avec repli sur le format historique par board (`board_<id>`).
-
-Deux limites assumées de cette reconstitution :
-
-- le périmètre utilisé est celui **constaté aujourd’hui**, appliqué rétroactivement à tout le
-  sprint : un ticket ajouté ou retiré en cours de route ne crée pas la marche d’escalier qu’on voit
-  dans le burndown de Jira ;
-- pour la même raison, une courbe qui passe **sous zéro** signale des points résolus qui ne font
-  plus partie du périmètre actuel (typiquement des tickets sortis du sprint). La valeur n’est pas
-  ramenée à zéro, justement pour rendre cette incohérence visible.
-
-Le bloc reste masqué si l’un des deux appels échoue, si aucune équipe n’est rattachée à un board ou
-si le périmètre du sprint est inconnu ; l’échec est silencieux et ne bloque pas la séance.
+Le bloc reste masqué si l’appel GreenHopper échoue pour tous les boards concernés, ou si
+aucune équipe n’est rattachée à un board ; l’échec est silencieux et ne bloque pas la séance.
 
 ### Sauvegarde
 
 Chaque modification met à jour l’état local puis planifie un `PATCH` après 500 ms d’inactivité ;
 les modifications successives sont fusionnées en un seul appel. L’indicateur de la barre d’outils
-affiche « Enregistrement… », « Sauvegardé » ou « Enregistrement impossible ». La dernière écriture
-gagne : il n’y a pas de résolution de conflit si deux personnes modifient la même ligne au même
-moment.
+affiche « Enregistrement… », « Sauvegardé » ou « Enregistrement impossible ».
+
+Les listes (blocages, interactions, actions, équipes, rétro) sont fusionnées **par id de ligne** :
+un ajout n’écrase plus les ajouts des autres. Le client envoie `{ upsert, remove }` ; une ligne
+absente de `upsert` n’est pas considérée comme supprimée. Un verrou optimiste `__v` relit et
+refusionne en cas d’écriture concurrente. Si deux personnes tapent **la même ligne** au même
+instant, le dernier enregistrement de cette ligne gagne. Chaque ligne porte un auteur affiché
+(pastille), sans verrou d’édition.
 
 ### Nouveau point
 
@@ -121,13 +119,19 @@ Le bouton « Nouveau point » crée le point suivant (`POST /api/meetings/:id/ne
   les valeurs sont vidées ;
 - les actions dont le statut n’est pas `Fait` sont reportées — c’est le fil rouge de l’amélioration
   continue ;
-- objectif, blocages, interactions et rétro repartent de zéro.
+- les points bloquants non levés (`resolved === false`) sont reportés ; une fois levés, ils
+  disparaissent du point suivant ;
+- les interactions dont le statut n’est pas `OK` sont reportées ;
+- objectif et rétro repartent de zéro.
+
+En bas de page, le tableau « À faire par responsable » regroupe les blocages encore ouverts et
+les actions non `Fait` par personne (les lignes sans responsable vont dans « Sans responsable »).
 
 ### Compte-rendu et impression
 
 « Copier le compte-rendu » place dans le presse-papier un texte structuré prêt à coller dans un
-canal d’équipe (`buildMeetingReport`). Si le navigateur refuse l’accès au presse-papier, le texte
-s’affiche dans une modale pour une copie manuelle. « Imprimer / PDF » s’appuie sur les règles
+canal d’équipe (`buildMeetingReport`), y compris le récapitulatif par responsable. Si le navigateur
+refuse l’accès au presse-papier, le texte s’affiche dans une modale pour une copie manuelle. « Imprimer / PDF » s’appuie sur les règles
 `@media print` de `index.css`, qui masquent le minuteur, la navigation et les boutons d’édition et
 basculent sur un rendu clair. Les zones de texte longues ne s’étendent pas à l’impression : c’est
 la limite connue de l’export papier, le compte-rendu texte reste la voie fiable pour un contenu
@@ -139,9 +143,11 @@ volumineux.
   sous-schémas embarqués sans `_id`, identifiants de ligne fournis par le client, `timestamps`,
   index sur `sprint.date`, `createdAt` et `createdBy.id`.
 - **Logique pure** : `backend/src/domain/meeting/weeklySprintMeeting.ts` — structure par défaut,
-  reconduction (`buildNextMeetingDraft`) et validation des payloads
-  (`parseWeeklyMeetingPatch`, seules les sections présentes dans le corps sont retenues, plafonds de
-  taille et énumérations vérifiés).
+  reconduction (`buildNextMeetingDraft`), fusion par id (`mergeMeetingRows`, `applyMeetingPatch`)
+  et validation des payloads (`parseWeeklyMeetingPatch` : tableau plat ou `{ upsert, remove }`).
+- **PATCH** : fusion + retry sur `__v` (5 tentatives) ; le socket reçoit la section fusionnée
+  complète. Chaque blocage / interaction / action porte `createdBy` / `updatedBy` (affichage,
+  pas de verrou).
 - **Routes** (`backend/src/routes/meetingRoutes.ts`, montées sur `/api/meetings`) : toutes derrière
   `authenticate`.
 

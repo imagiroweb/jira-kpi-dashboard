@@ -29,7 +29,7 @@ export interface KPIUpdate {
 
 /**
  * Modification d'un point hebdo diffusée par un autre client (édition collaborative).
- * `patch` reprend la forme de `WeeklyMeetingPatch` (sections `sprint`/`teams`/…), mais
+ * `patch` reprend les sections fusionnées (`sprint`/`teams`/… tableaux complets), mais
  * reste typé de façon large ici : la validation/filtrage se fait côté consommateur
  * (jamais confiance aveugle dans une donnée reçue par socket).
  */

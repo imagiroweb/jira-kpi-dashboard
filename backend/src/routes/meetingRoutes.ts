@@ -3,9 +3,12 @@ import { Server } from 'socket.io';
 import { logger } from '../utils/logger';
 import { WeeklySprintMeeting, IWeeklySprintMeeting } from '../domain/meeting/entities/WeeklySprintMeeting';
 import {
+  applyMeetingPatch,
   buildDefaultMeeting,
   buildNextMeetingDraft,
   parseWeeklyMeetingPatch,
+  snapshotFromPatch,
+  stampMeetingPatchAuthors,
   WeeklyMeetingDraft
 } from '../domain/meeting/weeklySprintMeeting';
 import { authenticate } from '../middleware/authMiddleware';
@@ -36,10 +39,19 @@ function today(): string {
   return new Date().toISOString().split('T')[0];
 }
 
+const PATCH_RETRIES = 5;
+
 function author(req: Request) {
   return {
     id: req.user!.userId,
     email: req.user!.email,
+    name: req.user!.email.split('@')[0]
+  };
+}
+
+function rowAuthor(req: Request) {
+  return {
+    id: req.user!.userId,
     name: req.user!.email.split('@')[0]
   };
 }
@@ -213,7 +225,8 @@ router.post('/:id/next', authenticate, async (req: Request, res: Response) => {
 });
 
 /**
- * Mise à jour partielle (sauvegarde automatique pendant la réunion)
+ * Mise à jour partielle (sauvegarde automatique pendant la réunion).
+ * Les listes sont fusionnées par id (upsert/remove) avec un verrou optimiste __v.
  * PATCH /api/meetings/:id
  */
 router.patch('/:id', authenticate, async (req: Request, res: Response) => {
@@ -223,22 +236,47 @@ router.patch('/:id', authenticate, async (req: Request, res: Response) => {
       return fail(res, 400, 'Contenu du point hebdo invalide');
     }
 
-    const meeting = await WeeklySprintMeeting.findByIdAndUpdate(
-      req.params.id,
-      { $set: { ...patch, updatedBy: author(req) } },
-      { new: true, runValidators: true }
-    );
+    const who = author(req);
+    let meeting = null;
+    let snapshot = {};
+
+    for (let attempt = 0; attempt < PATCH_RETRIES; attempt += 1) {
+      const current = await WeeklySprintMeeting.findById(req.params.id);
+      if (!current) {
+        return fail(res, 404, 'Point hebdo non trouvé');
+      }
+
+      const draft = toDraft(current);
+      const stamped = stampMeetingPatchAuthors(draft, patch, rowAuthor(req));
+      const next = applyMeetingPatch(draft, stamped);
+      snapshot = snapshotFromPatch(next, stamped);
+
+      const set: Record<string, unknown> = { updatedBy: who };
+      if (stamped.sprint) set.sprint = next.sprint;
+      if (stamped.teams) set.teams = next.teams;
+      if (stamped.blockers) set.blockers = next.blockers;
+      if (stamped.interactions) set.interactions = next.interactions;
+      if (stamped.retro) set.retro = next.retro;
+      if (stamped.actions) set.actions = next.actions;
+
+      meeting = await WeeklySprintMeeting.findOneAndUpdate(
+        { _id: req.params.id, __v: current.__v },
+        { $set: set, $inc: { __v: 1 } },
+        { new: true, runValidators: true }
+      );
+      if (meeting) break;
+    }
 
     if (!meeting) {
-      return fail(res, 404, 'Point hebdo non trouvé');
+      return fail(res, 409, 'Le point hebdo a été modifié en même temps, réessayez');
     }
 
     const io = getIO(req);
     if (io) {
       emitMeetingUpdate(io, String(meeting._id), {
         meetingId: String(meeting._id),
-        patch,
-        updatedBy: author(req),
+        patch: snapshot,
+        updatedBy: who,
         updatedAt: meeting.updatedAt,
         origin: clientOrigin(req) ?? null
       });
