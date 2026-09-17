@@ -66,6 +66,7 @@ export const TEST_SUPPORT_KPI_PAYLOAD = {
       workingDays: 0.1,
     },
   ],
+  dateRange: { from: '2026-04-01', to: '2026-04-15' },
   supportBuildRatio: {
     activeSprintPercent: 12.5,
     yearToDatePercent: 10,
