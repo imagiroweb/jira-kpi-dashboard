@@ -411,7 +411,7 @@ router.get('/support-kpi', async (req: Request, res: Response) => {
     res.json({
       success: true,
       projectKey: process.env.JIRA_SUPPORT_PROJECT_KEY || 'SB',
-      period: { from, to },
+      period: result.dateRange ?? { from, to },
       activeSprint: useActiveSprint,
       ...result
     });

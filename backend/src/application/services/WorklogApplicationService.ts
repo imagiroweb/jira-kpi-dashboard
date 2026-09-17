@@ -3,9 +3,11 @@ import { DateRange } from '../../domain/worklog/value-objects/DateRange';
 import { Worklog } from '../../domain/worklog/entities/Worklog';
 import { SprintIssue } from '../../domain/sprint/entities/SprintIssue';
 import { buildFaithfulBurndown, BurndownUnit, FaithfulBurndown } from '../../domain/sprint/sprintBurndown';
+import { resolveSupportChartDateRange } from '../../domain/support/supportChartDateRange';
 import { globalCache } from '../../infrastructure/cache/CacheDecorator';
 import { worklogHoursDailyService, bucketHoursByCalendarDate } from './WorklogHoursDailyService';
 import { logger } from '../../utils/logger';
+import { getWorklogCalendarDate } from '../../utils/worklogDate';
 
 function cacheTtlMinutes(envKey: string, defaultMinutes: number): number {
   const n = parseInt(process.env[envKey] || '', 10);
@@ -400,10 +402,11 @@ export class WorklogApplicationService {
     const backlogJql = `project = "${supportProjectKey}" AND Sprint is EMPTY AND statusCategory != Done ORDER BY created DESC`;
 
     // Main issues + backlog + support/build ratio in parallel (ratio was the main sequential bottleneck)
-    const [response, backlogResponse, supportBuildRatio] = await Promise.all([
+    const [response, backlogResponse, supportBuildRatio, sprintRange] = await Promise.all([
       jiraClient.searchIssuesWithPagination(jql, fields),
       jiraClient.searchIssuesWithPagination(backlogJql, fields),
-      this.getSupportBuildRatio()
+      this.getSupportBuildRatio(),
+      activeSprint ? this.getActiveSprintDateRange() : Promise.resolve(null),
     ]);
 
     const issues = response.issues;
@@ -659,8 +662,17 @@ export class WorklogApplicationService {
       }, 0)
     };
 
+    const dateRange = resolveSupportChartDateRange({
+      activeSprint,
+      from,
+      to,
+      sprintRange: activeSprint ? sprintRange : null,
+      today: getWorklogCalendarDate(new Date()),
+    });
+
     const kpiResult: SupportKPIResult = {
       issues: supportIssues,
+      dateRange,
       statusCounts,
       ponderationByStatus,
       ponderationByType,
@@ -2683,6 +2695,8 @@ export interface SupportIssue {
 
 export interface SupportKPIResult {
   issues: SupportIssue[];
+  /** Plage du graphe d’évolution : sprint actif (début → min(fin, aujourd’hui)) ou from/to. */
+  dateRange: { from: string; to: string } | null;
   statusCounts: {
     total: number;
     todo: number;

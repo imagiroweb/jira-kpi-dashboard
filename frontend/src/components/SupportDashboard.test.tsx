@@ -108,6 +108,28 @@ describe('SupportDashboard', () => {
     expect(supportCalls).toHaveLength(0);
   });
 
+  it('refetch si le cache persisté n’a pas de dateRange pour le graphe', async () => {
+    const fetchMock = makeSupportFetchMock();
+    vi.stubGlobal('fetch', fetchMock);
+    const { dateRange: _ignored, ...payloadWithoutRange } = TEST_SUPPORT_KPI_PAYLOAD;
+    const dateRange = useStore.getState().dateRange;
+    const filtersKey = `${dateRange.from}|${dateRange.to}|true`;
+    useStore.setState({
+      supportUseActiveSprint: true,
+      supportLastFiltersKey: filtersKey,
+      supportKpiPayload: payloadWithoutRange,
+    });
+
+    renderWithProviders(<SupportDashboard />, { user: TEST_USER, resetStore: false });
+
+    await waitFor(() => {
+      const supportCalls = fetchMock.mock.calls.filter(([url]) =>
+        String(url).includes('/worklog/support-kpi')
+      );
+      expect(supportCalls.length).toBeGreaterThan(0);
+    });
+  });
+
   it('bascule le mode sprint actif', async () => {
     vi.stubGlobal('fetch', makeSupportFetchMock());
 
@@ -283,8 +305,8 @@ describe('SupportDashboard', () => {
         sprintName: 'Support S12',
         savedAt: '2026-02-01T12:00:00.000Z',
         savedBy: { id: 'user-1', name: 'Support Admin', email: 'support@test.com' },
-        dateRange: { from: '2026-01-01', to: '2026-01-07' },
         ...TEST_SUPPORT_KPI_PAYLOAD,
+        dateRange: { from: '2026-01-01', to: '2026-01-07' },
       },
     });
 
@@ -378,5 +400,34 @@ describe('SupportDashboard', () => {
     });
 
     expect(screen.getByText('Sauvegarder le Sprint')).toBeInTheDocument();
+  });
+
+  it('borne le graphe d’évolution aux dates du sprint (pas aux tickets hors période)', async () => {
+    vi.stubGlobal('fetch', makeSupportFetchMock());
+    const dateRange = useStore.getState().dateRange;
+    const filtersKey = `${dateRange.from}|${dateRange.to}|true`;
+    useStore.setState({
+      supportUseActiveSprint: true,
+      supportLastFiltersKey: filtersKey,
+      supportKpiPayload: {
+        ...TEST_SUPPORT_KPI_PAYLOAD,
+        dateRange: { from: '2026-04-01', to: '2026-04-03' },
+        issues: [
+          {
+            ...TEST_SUPPORT_KPI_PAYLOAD.issues[0],
+            created: '2026-01-01T08:00:00.000Z',
+            resolved: '2026-04-02T10:00:00.000Z',
+          },
+        ],
+      },
+    });
+
+    renderWithProviders(<SupportDashboard />, { user: TEST_USER, resetStore: false });
+
+    await waitFor(() => {
+      expect(screen.getByText('Évolution des Tickets dans le Temps')).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Début:\s*01 avr/i)).toBeInTheDocument();
+    expect(screen.getByText(/Fin:\s*03 avr/i)).toBeInTheDocument();
   });
 });

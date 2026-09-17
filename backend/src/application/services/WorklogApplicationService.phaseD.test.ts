@@ -97,6 +97,7 @@ import { globalCache } from '../../infrastructure/cache/CacheDecorator';
 import { Worklog } from '../../domain/worklog/entities/Worklog';
 import { Author } from '../../domain/worklog/value-objects/Author';
 import { TimeSpent } from '../../domain/worklog/value-objects/TimeSpent';
+import { getWorklogCalendarDate } from '../../utils/worklogDate';
 
 describe('WorklogApplicationService (phase D — Jira orchestration)', () => {
   const service = new WorklogApplicationService();
@@ -499,6 +500,20 @@ describe('WorklogApplicationService (phase D — Jira orchestration)', () => {
     const kpi = await service.getSupportBoardKPI(undefined, undefined, true);
     expect(kpi.statusCounts.total).toBe(0);
     expect(kpi.ponderationByStatus.total).toBe(0);
+    expect(kpi.dateRange).toEqual({ from: '2026-04-01', to: '2026-04-15' });
+  });
+
+  it('getSupportBoardKPI dateRange sprint actif est borné à aujourd’hui si la fin est future', async () => {
+    mockJiraClient.getBoardSprints.mockResolvedValue([
+      { id: 1, name: 'S', state: 'active', startDate: '2026-09-01T00:00:00.000Z', endDate: '2026-12-31T00:00:00.000Z' }
+    ]);
+    const kpi = await service.getSupportBoardKPI(undefined, undefined, true);
+    expect(kpi.dateRange).toEqual({ from: '2026-09-01', to: getWorklogCalendarDate(new Date()) });
+  });
+
+  it('getSupportBoardKPI dateRange période perso reprend from/to', async () => {
+    const kpi = await service.getSupportBoardKPI('2026-03-01', '2026-03-31', false);
+    expect(kpi.dateRange).toEqual({ from: '2026-03-01', to: '2026-03-31' });
   });
 
   it('getSupportBoardKPI sert le cache mémoire au 2e appel (issue #37)', async () => {

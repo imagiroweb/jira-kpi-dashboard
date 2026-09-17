@@ -10,6 +10,11 @@ import { DateRangePicker } from './DateRangePicker';
 import { useStore } from '../store/useStore';
 import { supportSnapshotApi, SupportSnapshotSummary, SupportSnapshotFull } from '../services/api';
 import { formatHours } from '../utils/timeFormat';
+import {
+  buildSupportTicketTimeline,
+  localTodayIsoDate,
+  resolveSupportTimelineRange,
+} from '../domain/supportTicketTimeline';
 
 interface SupportIssue {
   issueKey: string;
@@ -37,6 +42,7 @@ interface AssigneeStats {
 
 interface SupportKPIData {
   issues: SupportIssue[];
+  dateRange?: { from: string; to: string } | null;
   statusCounts: {
     total: number;
     todo: number;
@@ -149,6 +155,25 @@ export function SupportDashboard() {
     () => `${dateRange.from}|${dateRange.to}|${useActiveSprint}`,
     [dateRange.from, dateRange.to, useActiveSprint]
   );
+
+  const ticketTimelineRange = useMemo(
+    () =>
+      resolveSupportTimelineRange({
+        apiRange: kpiData?.dateRange,
+        useActiveSprint,
+        selectedRange: dateRange,
+        today: localTodayIsoDate(),
+      }),
+    [kpiData?.dateRange, useActiveSprint, dateRange]
+  );
+
+  const ticketTimeline = useMemo(
+    () =>
+      kpiData?.issues && ticketTimelineRange
+        ? buildSupportTicketTimeline(kpiData.issues, ticketTimelineRange)
+        : [],
+    [kpiData?.issues, ticketTimelineRange]
+  );
   const filtersKeyRef = useRef(filtersKey);
   filtersKeyRef.current = filtersKey;
 
@@ -208,7 +233,10 @@ export function SupportDashboard() {
     if (!filtersKey) return;
     const { supportLastFiltersKey, supportKpiPayload } = useStore.getState();
     if (supportLastFiltersKey === filtersKey && supportKpiPayload != null) {
-      return;
+      const cachedRange = (supportKpiPayload as SupportKPIData).dateRange;
+      if (cachedRange?.from && cachedRange?.to) {
+        return;
+      }
     }
     loadKPIs(false);
   }, [filtersKey, loadKPIs]);
@@ -1134,51 +1162,11 @@ export function SupportDashboard() {
             </div>
           )}
 
-          {/* Ticket Creation Timeline */}
-          {kpiData.issues && kpiData.issues.length > 0 && (() => {
-            // Group tickets by creation date and resolution date
-            const ticketsByDay = new Map<string, { created: number; resolved: number; ponderation: number }>();
-            
-            // Get all unique dates from both created and resolved
-            const allDates = new Set<string>();
-            
-            kpiData.issues.forEach((issue: SupportIssue) => {
-              if (issue.created) {
-                const createdDate = issue.created.split('T')[0];
-                allDates.add(createdDate);
-                const current = ticketsByDay.get(createdDate) || { created: 0, resolved: 0, ponderation: 0 };
-                current.created++;
-                current.ponderation += issue.ponderation || 0;
-                ticketsByDay.set(createdDate, current);
-              }
-              if (issue.resolved) {
-                const resolvedDate = issue.resolved.split('T')[0];
-                allDates.add(resolvedDate);
-                const current = ticketsByDay.get(resolvedDate) || { created: 0, resolved: 0, ponderation: 0 };
-                current.resolved++;
-                ticketsByDay.set(resolvedDate, current);
-              }
-            });
-            
-            // Sort by date and format for chart
-            const chartData = Array.from(allDates)
-              .sort((a, b) => a.localeCompare(b))
-              .map((date) => {
-                const data = ticketsByDay.get(date) || { created: 0, resolved: 0, ponderation: 0 };
-                return {
-                  date,
-                  displayDate: new Date(date).toLocaleDateString('fr-FR', { day: '2-digit', month: 'short' }),
-                  created: data.created,
-                  resolved: data.resolved,
-                  ponderation: data.ponderation
-                };
-              });
-            
-            if (chartData.length === 0) return null;
-            
-            const totalCreated = chartData.reduce((sum, d) => sum + d.created, 0);
-            const totalResolved = chartData.reduce((sum, d) => sum + d.resolved, 0);
-            
+          {/* Ticket Creation Timeline — borné à la période de la page (sprint ou from/to) */}
+          {ticketTimeline.length > 0 && (() => {
+            const totalCreated = ticketTimeline.reduce((sum, d) => sum + d.created, 0);
+            const totalResolved = ticketTimeline.reduce((sum, d) => sum + d.resolved, 0);
+
             return (
               <div className="card-glass p-6 mb-8">
                 <h3 className="text-lg font-semibold text-surface-100 mb-4 flex items-center gap-2">
@@ -1191,7 +1179,7 @@ export function SupportDashboard() {
                 </h3>
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart data={chartData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+                    <AreaChart data={ticketTimeline} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
                       <defs>
                         <linearGradient id="colorCreated" x1="0" y1="0" x2="0" y2="1">
                           <stop offset="5%" stopColor="#06b6d4" stopOpacity={0.4}/>
@@ -1287,8 +1275,8 @@ export function SupportDashboard() {
                   </ResponsiveContainer>
                 </div>
                 <div className="flex justify-between mt-4 text-xs text-surface-500">
-                  <span>Premier ticket: {chartData[0]?.displayDate}</span>
-                  <span>Dernier ticket: {chartData[chartData.length - 1]?.displayDate}</span>
+                  <span>Début: {ticketTimeline[0]?.displayDate}</span>
+                  <span>Fin: {ticketTimeline[ticketTimeline.length - 1]?.displayDate}</span>
                 </div>
               </div>
             );
