@@ -16,7 +16,8 @@ vi.mock('../services/api', () => ({
     getTeamMembers: vi.fn()
   },
   teamApi: {
-    list: vi.fn()
+    list: vi.fn(),
+    getRoster: vi.fn()
   }
 }));
 
@@ -90,6 +91,7 @@ describe('TeamPerformancePage', () => {
     // Par défaut, aucun collaborateur sans fiche : les tests existants (centrés sur les fiches
     // déjà ouvertes) n'ont pas à s'en soucier ; les tests dédiés le redéfinissent explicitement.
     mockGetTeamMembers.mockResolvedValue({ success: true, members: [] });
+    vi.mocked(teamApi.getRoster).mockResolvedValue({ success: true, users: [] });
   });
 
   it("affiche la liste pour un CTO (accès global) avec le filtre 'toutes les équipes'", async () => {
@@ -298,5 +300,36 @@ describe('TeamPerformancePage', () => {
     expect(await screen.findByText('Bob Dupont')).toBeInTheDocument();
     expect(screen.getByText('En cours', { selector: 'span' })).toBeInTheDocument();
     expect(screen.queryByText('Dossier manquant', { selector: 'span' })).not.toBeInTheDocument();
+  });
+
+  it("n'affiche pas l'onglet de gestion pour un lead sans accès global", async () => {
+    seedUser({ performanceGlobalAccess: false, leadTeamIds: ['team-1'] });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [] });
+
+    render(<TeamPerformancePage />);
+
+    await screen.findByRole('option', { name: 'Toutes mes équipes' });
+    expect(screen.queryByRole('button', { name: 'Gestion équipes & cycles' })).not.toBeInTheDocument();
+  });
+
+  it("affiche le panneau de gestion équipes & cycles pour un CTO qui bascule sur cet onglet", async () => {
+    seedUser({ performanceGlobalAccess: true });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [] });
+    vi.mocked(teamApi.getRoster).mockResolvedValue({ success: true, users: [] });
+
+    render(<TeamPerformancePage />);
+
+    await screen.findByRole('button', { name: 'Gestion équipes & cycles' });
+    fireEvent.click(screen.getByRole('button', { name: 'Gestion équipes & cycles' }));
+
+    expect(await screen.findByRole('heading', { name: 'Équipes' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Cycles de performance' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Réaffecter un collaborateur' })).toBeInTheDocument();
+    // Le suivi des fiches n'est plus affiché tant qu'on est sur l'onglet gestion.
+    expect(screen.queryByText('Aucune fiche de performance dans votre périmètre pour ce cycle.')).not.toBeInTheDocument();
   });
 });

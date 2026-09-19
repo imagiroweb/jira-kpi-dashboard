@@ -10,6 +10,7 @@ const mockTeamFindOne = jest.fn();
 const mockTeamFindById = jest.fn();
 const mockTeamCreate = jest.fn();
 const mockUserFindById = jest.fn();
+const mockUserFind = jest.fn();
 const mockRoleFindById = jest.fn();
 
 jest.mock('../domain/team/entities/Team', () => ({
@@ -23,7 +24,8 @@ jest.mock('../domain/team/entities/Team', () => ({
 
 jest.mock('../domain/user/entities/User', () => ({
   User: {
-    findById: (...args: unknown[]) => mockUserFindById(...args)
+    findById: (...args: unknown[]) => mockUserFindById(...args),
+    find: (...args: unknown[]) => mockUserFind(...args)
   }
 }));
 
@@ -86,6 +88,9 @@ describe('teamRoutes (TI)', () => {
       sort: () => Promise.resolve([])
     });
     mockTeamFindOne.mockResolvedValue(null);
+    mockUserFind.mockReturnValue({
+      select: () => ({ sort: () => Promise.resolve([]) })
+    });
   });
 
   describe('GET /', () => {
@@ -102,6 +107,55 @@ describe('teamRoutes (TI)', () => {
       expect(res.status).toBe(200);
       expect(res.body.teams).toHaveLength(1);
       expect(res.body.teams[0].name).toBe('Choco');
+    });
+  });
+
+  describe('GET /roster', () => {
+    it("403 si l'acteur n'a pas d'accès global", async () => {
+      const res = await request(app).get('/api/teams/roster');
+      expect(res.status).toBe(403);
+      expect(mockUserFind).not.toHaveBeenCalled();
+    });
+
+    it('200 renvoie tous les collaborateurs actifs, y compris sans équipe (acteur super_admin)', async () => {
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      mockUserFind.mockReturnValue({
+        select: () => ({
+          sort: () =>
+            Promise.resolve([
+              { _id: TARGET_USER_ID, firstName: 'Bob', lastName: 'Dupont', email: 'bob@test.com', teamId: null },
+              { _id: TEST_USER_ID, firstName: 'Alice', lastName: 'Martin', email: 'alice@test.com', teamId: TEAM_A_ID }
+            ])
+        })
+      });
+
+      const res = await request(app).get('/api/teams/roster');
+
+      expect(res.status).toBe(200);
+      expect(mockUserFind).toHaveBeenCalledWith({ isActive: true });
+      expect(res.body.users).toEqual([
+        { id: TARGET_USER_ID, firstName: 'Bob', lastName: 'Dupont', email: 'bob@test.com', teamId: null },
+        { id: TEST_USER_ID, firstName: 'Alice', lastName: 'Martin', email: 'alice@test.com', teamId: TEAM_A_ID }
+      ]);
+    });
+
+    it('200 pour un CTO avec accès global délégué via un rôle (performanceGlobalAccess)', async () => {
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ roleId: 'role-1' })) })
+      });
+      mockRoleFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve({ performanceGlobalAccess: true }) })
+      });
+      mockUserFind.mockReturnValue({
+        select: () => ({ sort: () => Promise.resolve([]) })
+      });
+
+      const res = await request(app).get('/api/teams/roster');
+
+      expect(res.status).toBe(200);
+      expect(res.body.users).toEqual([]);
     });
   });
 

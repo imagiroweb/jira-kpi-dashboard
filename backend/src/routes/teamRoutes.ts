@@ -84,6 +84,36 @@ router.get('/', authenticate, async (_req: Request, res: Response) => {
 });
 
 /**
+ * Liste de tous les collaborateurs actifs (avec ou sans équipe), pour le
+ * sélecteur de réaffectation de la gestion d'équipes. Réservée à
+ * `requireGlobalTeamManagementAccess` (CTO/super_admin) : contrairement à
+ * `GET /`, cette liste expose des données nominatives sur l'ensemble des
+ * collaborateurs et ne doit pas être ouverte à tout utilisateur authentifié.
+ * GET /api/teams/roster
+ */
+router.get('/roster', authenticate, requireGlobalTeamManagementAccess, async (_req: Request, res: Response) => {
+  try {
+    const users = await User.find({ isActive: true })
+      .select('firstName lastName email teamId')
+      .sort({ firstName: 1, lastName: 1 });
+
+    res.json({
+      success: true,
+      users: users.map((u) => ({
+        id: u._id,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        email: u.email,
+        teamId: u.teamId ?? null
+      }))
+    });
+  } catch (error) {
+    logger.error('Error listing team roster:', error);
+    fail(res, 500, "Erreur lors de la récupération des collaborateurs", error);
+  }
+});
+
+/**
  * Création d'une équipe (CTO/super_admin uniquement).
  * POST /api/teams
  */

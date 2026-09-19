@@ -23,3 +23,12 @@ export interface UpdateTeamInput {
   name?: string;
   leadIds?: string[];
 }
+
+/** Un collaborateur actif de l'organisation (résultat de `GET /teams/roster`), avec ou sans équipe. */
+export interface RosterUser {
+  id: string;
+  firstName?: string;
+  lastName?: string;
+  email: string;
+  teamId: string | null;
+}

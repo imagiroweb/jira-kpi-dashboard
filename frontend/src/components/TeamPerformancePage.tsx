@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Loader2,
   AlertTriangle,
@@ -10,6 +10,7 @@ import {
   Lock
 } from 'lucide-react';
 import { performanceApi, teamApi } from '../services/api';
+import { TeamsCyclesAdminPanel } from './TeamsCyclesAdminPanel';
 import { useSocketOptional } from '../hooks/useSocketContext';
 import { useStore } from '../store/useStore';
 import type { Team } from '../domain/team';
@@ -175,9 +176,10 @@ export function TeamPerformancePage() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [cycle, setCycle] = useState<PerformanceCycle | null>(null);
+  const [cycles, setCycles] = useState<PerformanceCycle[]>([]);
   const [teams, setTeams] = useState<Team[]>([]);
   const [members, setMembers] = useState<PerformanceTeamMember[]>([]);
+  const [activeTab, setActiveTab] = useState<'suivi' | 'gestion'>('suivi');
 
   const [teamFilter, setTeamFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<PerformanceReviewStatus | ''>('');
@@ -195,6 +197,7 @@ export function TeamPerformancePage() {
   const [managerDraft, setManagerDraft] = useState<ManagerDraft | null>(null);
   const [savingManager, setSavingManager] = useState(false);
 
+  const cycle = useMemo(() => cycles.find((c) => c.status === 'active') ?? null, [cycles]);
   const isReadOnly = cycle != null && cycle.status !== 'active';
 
   const teamsById = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
@@ -214,29 +217,33 @@ export function TeamPerformancePage() {
     [members, reviewedUserIds, statusFilter]
   );
 
+  const loadTeamsAndCycles = useCallback(async () => {
+    const [cyclesResult, teamsResult] = await Promise.allSettled([performanceApi.getCycles(), teamApi.list()]);
+    if (cyclesResult.status === 'fulfilled' && cyclesResult.value.success) {
+      setCycles(cyclesResult.value.cycles);
+    }
+    if (teamsResult.status === 'fulfilled' && teamsResult.value.success) {
+      setTeams(teamsResult.value.teams);
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
       setLoading(true);
       setError(null);
-      const [cyclesResult, teamsResult] = await Promise.allSettled([performanceApi.getCycles(), teamApi.list()]);
+      await loadTeamsAndCycles();
       if (cancelled) return;
-
-      if (cyclesResult.status === 'fulfilled' && cyclesResult.value.success) {
-        setCycle(cyclesResult.value.cycles.find((c) => c.status === 'active') ?? null);
-      }
-      if (teamsResult.status === 'fulfilled' && teamsResult.value.success) {
-        setTeams(teamsResult.value.teams);
-      }
       setLoading(false);
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loadTeamsAndCycles]);
 
   useEffect(() => {
-    if (!cycle) return;
+    // Rien à charger côté "suivi" si aucun cycle actif, ou si l'onglet "gestion" (CTO) est affiché.
+    if (!cycle || (isGlobal && activeTab !== 'suivi')) return;
     let cancelled = false;
     (async () => {
       setListLoading(true);
@@ -268,7 +275,7 @@ export function TeamPerformancePage() {
     return () => {
       cancelled = true;
     };
-  }, [cycle, teamFilter, statusFilter]);
+  }, [cycle, teamFilter, statusFilter, isGlobal, activeTab]);
 
   async function handleOpenDetail(userId: string) {
     if (!cycle) return;
@@ -483,14 +490,45 @@ export function TeamPerformancePage() {
         </div>
       )}
 
-      {!error && !cycle && (
+      {isGlobal && !selectedUserId && (
+        <div className="flex gap-1 border-b border-surface-700/50">
+          <button
+            type="button"
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              activeTab === 'suivi'
+                ? 'border-accent-500 text-surface-100'
+                : 'border-transparent text-surface-400 hover:text-surface-200'
+            }`}
+            onClick={() => setActiveTab('suivi')}
+          >
+            Suivi
+          </button>
+          <button
+            type="button"
+            className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+              activeTab === 'gestion'
+                ? 'border-accent-500 text-surface-100'
+                : 'border-transparent text-surface-400 hover:text-surface-200'
+            }`}
+            onClick={() => setActiveTab('gestion')}
+          >
+            Gestion équipes & cycles
+          </button>
+        </div>
+      )}
+
+      {!error && (!isGlobal || activeTab === 'suivi') && !cycle && (
         <div className="alert alert-info">
           <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
           <p>Aucun cycle de performance actif pour le moment.</p>
         </div>
       )}
 
-      {!error && cycle && !selectedUserId && (
+      {!error && isGlobal && activeTab === 'gestion' && !selectedUserId && (
+        <TeamsCyclesAdminPanel teams={teams} cycles={cycles} onChanged={loadTeamsAndCycles} />
+      )}
+
+      {!error && (!isGlobal || activeTab === 'suivi') && cycle && !selectedUserId && (
         <>
           <div className="card-glass p-6 flex flex-wrap items-center gap-3">
             <span className="badge badge-info">

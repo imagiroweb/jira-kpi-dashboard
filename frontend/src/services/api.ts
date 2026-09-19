@@ -18,7 +18,7 @@ import type {
   AssessmentInput,
   ProgressUpdateInput
 } from '../domain/performance';
-import type { Team, CreateTeamInput, UpdateTeamInput } from '../domain/team';
+import type { Team, CreateTeamInput, UpdateTeamInput, RosterUser } from '../domain/team';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -760,6 +760,11 @@ export const performanceApi = {
 export const teamApi = {
   list: async (): Promise<{ success: boolean; teams: Team[] }> => {
     const { data } = await api.get('/teams');
+    return data;
+  },
+  /** Tous les collaborateurs actifs (avec ou sans équipe) — réservé à la gestion d'équipes (CTO/admin). */
+  getRoster: async (): Promise<{ success: boolean; users: RosterUser[] }> => {
+    const { data } = await api.get('/teams/roster');
     return data;
   },
   create: async (input: CreateTeamInput): Promise<{ success: boolean; team: Team }> => {
