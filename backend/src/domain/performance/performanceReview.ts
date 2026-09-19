@@ -4,7 +4,19 @@
  * Extraite des entités Mongoose pour rester testable sans base de
  * données, dans l'esprit de `roadmapAdoriaKpi.ts` / `weeklySprintMeeting.ts`.
  */
-import { IKeyResult, IObjective, IProgressUpdate, IReviewAuthor } from './entities/PerformanceReview';
+import {
+  IKeyResult,
+  IObjective,
+  IObjectiveAssessment,
+  IProgressUpdate,
+  IQualitative,
+  ICompetencyScores,
+  IReviewAuthor,
+  ObjectiveAssessmentStatus,
+  PerformanceReviewStatus,
+  CompetencyAxis,
+  COMPETENCY_AXES
+} from './entities/PerformanceReview';
 
 const WEIGHT_TOLERANCE = 0.01;
 const EVIDENCE_URL_PATTERN = /^https?:\/\//i;
@@ -97,4 +109,224 @@ export function appendKeyResultProgress(
     progress: value,
     progressHistory: [...kr.progressHistory, update]
   };
+}
+
+const MAX_OBJECTIVES = 4;
+
+/** Un résultat clé tel que défini par un lead/CTO (sans avancement — voir `applyObjectivesDefinition`). */
+export interface KeyResultDefinitionInput {
+  id: string;
+  label: string;
+  weight: number;
+}
+
+/** Un objectif tel que défini par un lead/CTO. */
+export interface ObjectiveDefinitionInput {
+  id: string;
+  title: string;
+  description?: string;
+  weight: number;
+  krs: KeyResultDefinitionInput[];
+}
+
+export interface ObjectivesDefinitionValidation {
+  valid: boolean;
+  errors: string[];
+}
+
+/**
+ * Valide une définition d'objectifs (avant application) : au plus
+ * `MAX_OBJECTIVES` objectifs, poids d'objectifs et de KR équilibrés (somme à
+ * 1, comme les fichiers Excel), identifiants uniques et titres renseignés.
+ * Ne mute rien, ne consulte pas la base — utilisable côté route ET côté
+ * frontend pour une validation immédiate.
+ */
+export function validateObjectivesDefinition(objectives: ObjectiveDefinitionInput[]): ObjectivesDefinitionValidation {
+  const errors: string[] = [];
+
+  if (objectives.length === 0) {
+    errors.push('Au moins un objectif est requis');
+  }
+  if (objectives.length > MAX_OBJECTIVES) {
+    errors.push(`Un maximum de ${MAX_OBJECTIVES} objectifs est autorisé`);
+  }
+  if (!weightsAreBalanced(objectives)) {
+    errors.push('La somme des poids des objectifs doit être égale à 1');
+  }
+
+  const seenObjectiveIds = new Set<string>();
+  for (const objective of objectives) {
+    if (!objective.id?.trim()) {
+      errors.push('Chaque objectif doit avoir un identifiant');
+    } else if (seenObjectiveIds.has(objective.id)) {
+      errors.push(`Identifiant d'objectif en double : ${objective.id}`);
+    } else {
+      seenObjectiveIds.add(objective.id);
+    }
+
+    if (!objective.title?.trim()) {
+      errors.push(`L'objectif ${objective.id || '(sans id)'} doit avoir un titre`);
+    }
+
+    if (objective.krs.length > 0 && !weightsAreBalanced(objective.krs)) {
+      errors.push(
+        `La somme des poids des résultats clés de l'objectif "${objective.title || objective.id}" doit être égale à 1`
+      );
+    }
+
+    const seenKrIds = new Set<string>();
+    for (const kr of objective.krs) {
+      if (!kr.id?.trim()) {
+        errors.push(`Chaque résultat clé de l'objectif ${objective.id || '(sans id)'} doit avoir un identifiant`);
+      } else if (seenKrIds.has(kr.id)) {
+        errors.push(`Identifiant de résultat clé en double dans l'objectif ${objective.id} : ${kr.id}`);
+      } else {
+        seenKrIds.add(kr.id);
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Applique une (re)définition d'objectifs à la fiche : fusion par id avec les
+ * objectifs/KR existants pour ne JAMAIS perdre l'avancement déjà saisi par le
+ * collaborateur — un KR dont l'id est repris conserve `progress` et
+ * `progressHistory` ; un nouvel id démarre à 0 sans historique ; un objectif
+ * repris conserve ses auto/manager-évaluations. Un objectif ou KR dont l'id
+ * disparaît de la nouvelle définition est simplement retiré (la définition
+ * remplace l'ensemble courant). Ne valide pas — appeler
+ * `validateObjectivesDefinition` avant.
+ */
+export function applyObjectivesDefinition(
+  currentObjectives: IObjective[],
+  definition: ObjectiveDefinitionInput[]
+): IObjective[] {
+  const currentObjectivesById = new Map(currentObjectives.map((objective) => [objective.id, objective]));
+
+  return definition.map((objectiveDef) => {
+    const existingObjective = currentObjectivesById.get(objectiveDef.id);
+    const existingKrsById = new Map((existingObjective?.krs ?? []).map((kr) => [kr.id, kr]));
+
+    const krs: IKeyResult[] = objectiveDef.krs.map((krDef) => {
+      const existingKr = existingKrsById.get(krDef.id);
+      return {
+        id: krDef.id,
+        label: krDef.label,
+        weight: krDef.weight,
+        progress: existingKr?.progress ?? 0,
+        progressHistory: existingKr?.progressHistory ?? []
+      };
+    });
+
+    return {
+      id: objectiveDef.id,
+      title: objectiveDef.title,
+      description: objectiveDef.description,
+      weight: objectiveDef.weight,
+      krs,
+      selfAssessment: existingObjective?.selfAssessment ?? {},
+      managerAssessment: existingObjective?.managerAssessment ?? {}
+    };
+  });
+}
+
+/** Évaluation manager d'un objectif (par id d'objectif). */
+export interface ObjectiveManagerAssessmentInput {
+  id: string;
+  status?: ObjectiveAssessmentStatus;
+  comment?: string;
+}
+
+/** Champs qualitatifs remplis côté manager (undefined = ne pas toucher au champ). */
+export interface QualitativeManagerInput {
+  successes?: string;
+  challenges?: string;
+  growthAreas?: string;
+  overallReview?: string;
+}
+
+export interface ManagerAssessmentInput {
+  objectives?: ObjectiveManagerAssessmentInput[];
+  qualitative?: QualitativeManagerInput;
+  competencyScores?: Partial<Record<CompetencyAxis, number>>;
+}
+
+export interface ManagerAssessmentTarget {
+  objectives: IObjective[];
+  qualitative: IQualitative;
+  competencyScores: ICompetencyScores;
+}
+
+/**
+ * Applique l'évaluation manager (par objectif, bilan qualitatif "manager",
+ * grille de compétences "manager") sans jamais toucher au contenu
+ * "self" (auto-évaluation du collaborateur) — pure fonction, ne mute rien.
+ * Un objectif dont l'id ne correspond à aucun objectif existant est ignoré
+ * (l'évaluation manager porte sur des objectifs déjà définis).
+ */
+export function applyManagerAssessment(
+  target: ManagerAssessmentTarget,
+  input: ManagerAssessmentInput
+): ManagerAssessmentTarget {
+  const assessmentsByObjectiveId = new Map((input.objectives ?? []).map((a) => [a.id, a]));
+
+  const objectives = target.objectives.map((objective) => {
+    const assessment = assessmentsByObjectiveId.get(objective.id);
+    if (!assessment) return objective;
+    const managerAssessment: IObjectiveAssessment = {
+      status: assessment.status ?? objective.managerAssessment?.status,
+      comment: assessment.comment ?? objective.managerAssessment?.comment
+    };
+    return { ...objective, managerAssessment };
+  });
+
+  const qualitativeInput = input.qualitative ?? {};
+  const mergeQualitativeEntry = (
+    entry: IQualitative[keyof IQualitative],
+    managerValue: string | undefined
+  ) => (managerValue !== undefined ? { ...entry, manager: managerValue } : entry);
+
+  const qualitative: IQualitative = {
+    successes: mergeQualitativeEntry(target.qualitative.successes, qualitativeInput.successes),
+    challenges: mergeQualitativeEntry(target.qualitative.challenges, qualitativeInput.challenges),
+    growthAreas: mergeQualitativeEntry(target.qualitative.growthAreas, qualitativeInput.growthAreas),
+    overallReview: mergeQualitativeEntry(target.qualitative.overallReview, qualitativeInput.overallReview)
+  };
+
+  const competencyScoresInput = input.competencyScores ?? {};
+  const competencyScores = { ...target.competencyScores };
+  for (const axis of COMPETENCY_AXES) {
+    const managerScore = competencyScoresInput[axis];
+    if (managerScore !== undefined) {
+      competencyScores[axis] = { ...competencyScores[axis], manager: managerScore };
+    }
+  }
+
+  return { objectives, qualitative, competencyScores };
+}
+
+/**
+ * Statut dérivé de la fiche après une action (définition d'objectifs ou
+ * évaluation manager) : passe à "complete" dès que tous les objectifs ont
+ * reçu un statut d'évaluation manager ; sinon fait avancer
+ * "dossier_manquant" vers "en_cours" dès qu'il y a du contenu à évaluer.
+ * Ne revient jamais en arrière (un statut "complete" existant est conservé
+ * même si, par exemple, un nouvel objectif sans évaluation est ajouté —
+ * cette régression éventuelle est un choix produit à trancher séparément).
+ */
+export function computeReviewStatus(
+  objectives: Pick<IObjective, 'managerAssessment'>[],
+  currentStatus: PerformanceReviewStatus
+): PerformanceReviewStatus {
+  if (currentStatus === 'complete') return currentStatus;
+  if (objectives.length === 0) return currentStatus;
+  if (objectives.every((o) => !!o.managerAssessment?.status)) {
+    return 'complete';
+  }
+  if (currentStatus === 'dossier_manquant') {
+    return 'en_cours';
+  }
+  return currentStatus;
 }

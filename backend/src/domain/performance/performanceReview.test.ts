@@ -3,13 +3,18 @@
  */
 import {
   appendKeyResultProgress,
+  applyManagerAssessment,
+  applyObjectivesDefinition,
   computeObjectiveProgress,
   computeReviewScore,
+  computeReviewStatus,
   isPlausibleEvidenceUrl,
+  ObjectiveDefinitionInput,
   sumWeights,
+  validateObjectivesDefinition,
   weightsAreBalanced
 } from './performanceReview';
-import { IKeyResult, IObjective, IReviewAuthor } from './entities/PerformanceReview';
+import { IKeyResult, IObjective, IQualitative, ICompetencyScores, IReviewAuthor } from './entities/PerformanceReview';
 
 function makeKr(overrides: Partial<IKeyResult> = {}): IKeyResult {
   return {
@@ -174,5 +179,271 @@ describe('appendKeyResultProgress', () => {
     kr = appendKeyResultProgress(kr, { value: 90, evidenceUrl: 'https://jira.adoria.fr/DEV-1' }, author);
     expect(kr.progress).toBe(90);
     expect(kr.progressHistory.map((h) => h.value)).toEqual([10, 40, 90]);
+  });
+});
+
+function objectiveDef(overrides: Partial<ObjectiveDefinitionInput> = {}): ObjectiveDefinitionInput {
+  return {
+    id: 'obj-1',
+    title: 'Delivery produit',
+    weight: 1,
+    krs: [{ id: 'kr-1', label: '100% des US en temps', weight: 1 }],
+    ...overrides
+  };
+}
+
+describe('validateObjectivesDefinition', () => {
+  it('refuse une liste vide', () => {
+    const result = validateObjectivesDefinition([]);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /au moins un objectif/i.test(e))).toBe(true);
+  });
+
+  it('refuse plus de 4 objectifs', () => {
+    const objectives = Array.from({ length: 5 }, (_, i) =>
+      objectiveDef({ id: `obj-${i}`, weight: 0.2, krs: [{ id: `kr-${i}`, label: 'KR', weight: 1 }] })
+    );
+    const result = validateObjectivesDefinition(objectives);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /maximum de 4/i.test(e))).toBe(true);
+  });
+
+  it("refuse des poids d'objectifs qui ne totalisent pas 1", () => {
+    const result = validateObjectivesDefinition([objectiveDef({ weight: 0.5 })]);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /poids des objectifs/i.test(e))).toBe(true);
+  });
+
+  it('refuse des poids de KR qui ne totalisent pas 1 au sein d\'un objectif', () => {
+    const result = validateObjectivesDefinition([
+      objectiveDef({
+        krs: [
+          { id: 'kr-1', label: 'A', weight: 0.3 },
+          { id: 'kr-2', label: 'B', weight: 0.3 }
+        ]
+      })
+    ]);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /résultats clés/i.test(e))).toBe(true);
+  });
+
+  it('refuse un id d\'objectif en double', () => {
+    const result = validateObjectivesDefinition([
+      objectiveDef({ id: 'obj-1', weight: 0.5 }),
+      objectiveDef({ id: 'obj-1', weight: 0.5 })
+    ]);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /en double/i.test(e))).toBe(true);
+  });
+
+  it('refuse un objectif sans titre', () => {
+    const result = validateObjectivesDefinition([objectiveDef({ title: '' })]);
+    expect(result.valid).toBe(false);
+    expect(result.errors.some((e) => /doit avoir un titre/i.test(e))).toBe(true);
+  });
+
+  it('accepte une définition valide (3 objectifs, 0.4/0.4/0.2, cas réel Excel)', () => {
+    const result = validateObjectivesDefinition([
+      objectiveDef({ id: 'obj-1', weight: 0.4 }),
+      objectiveDef({ id: 'obj-2', weight: 0.4 }),
+      objectiveDef({ id: 'obj-3', weight: 0.2 })
+    ]);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+});
+
+describe('applyObjectivesDefinition', () => {
+  it('crée les objectifs/KR à zéro quand la fiche est vide', () => {
+    const result = applyObjectivesDefinition([], [objectiveDef()]);
+    expect(result).toHaveLength(1);
+    expect(result[0].krs[0].progress).toBe(0);
+    expect(result[0].krs[0].progressHistory).toEqual([]);
+    expect(result[0].selfAssessment).toEqual({});
+    expect(result[0].managerAssessment).toEqual({});
+  });
+
+  it("conserve l'avancement d'un KR dont l'id est repris (changement de libellé/poids)", () => {
+    const existingKr = makeKr({ id: 'kr-1', progress: 70, progressHistory: [{ value: 70, updatedBy: { id: 'u1', name: 'A' }, updatedAt: new Date() }] });
+    const existing: IObjective[] = [
+      { id: 'obj-1', title: 'Ancien titre', weight: 1, krs: [existingKr], selfAssessment: { status: 'atteint' }, managerAssessment: {} }
+    ];
+
+    const result = applyObjectivesDefinition(existing, [
+      objectiveDef({ title: 'Nouveau titre', krs: [{ id: 'kr-1', label: 'Nouveau libellé', weight: 1 }] })
+    ]);
+
+    expect(result[0].title).toBe('Nouveau titre');
+    expect(result[0].krs[0].label).toBe('Nouveau libellé');
+    expect(result[0].krs[0].progress).toBe(70);
+    expect(result[0].krs[0].progressHistory).toHaveLength(1);
+    expect(result[0].selfAssessment).toEqual({ status: 'atteint' });
+  });
+
+  it("démarre à 0 un nouveau KR ajouté à un objectif existant", () => {
+    const existing: IObjective[] = [
+      { id: 'obj-1', title: 'X', weight: 1, krs: [makeKr({ id: 'kr-1', progress: 50 })], selfAssessment: {}, managerAssessment: {} }
+    ];
+
+    const result = applyObjectivesDefinition(existing, [
+      objectiveDef({
+        krs: [
+          { id: 'kr-1', label: 'A', weight: 0.5 },
+          { id: 'kr-2', label: 'B (nouveau)', weight: 0.5 }
+        ]
+      })
+    ]);
+
+    expect(result[0].krs.find((k) => k.id === 'kr-1')?.progress).toBe(50);
+    expect(result[0].krs.find((k) => k.id === 'kr-2')?.progress).toBe(0);
+  });
+
+  it('retire un objectif dont l\'id ne figure plus dans la nouvelle définition', () => {
+    const existing: IObjective[] = [
+      { id: 'obj-1', title: 'A', weight: 0.5, krs: [], selfAssessment: {}, managerAssessment: {} },
+      { id: 'obj-2', title: 'B', weight: 0.5, krs: [], selfAssessment: {}, managerAssessment: {} }
+    ];
+
+    const result = applyObjectivesDefinition(existing, [objectiveDef({ id: 'obj-1', title: 'A' })]);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].id).toBe('obj-1');
+  });
+
+  it('ne mute pas les objectifs/KR reçus', () => {
+    const existingKr = makeKr({ id: 'kr-1', progress: 30 });
+    const existing: IObjective[] = [
+      { id: 'obj-1', title: 'X', weight: 1, krs: [existingKr], selfAssessment: {}, managerAssessment: {} }
+    ];
+
+    applyObjectivesDefinition(existing, [objectiveDef({ krs: [{ id: 'kr-1', label: 'Y', weight: 1 }] })]);
+
+    expect(existingKr.label).toBe('KR');
+    expect(existing[0].title).toBe('X');
+  });
+});
+
+function baseQualitative(): IQualitative {
+  return { successes: {}, challenges: {}, growthAreas: {}, overallReview: {} };
+}
+
+function baseCompetencyScores(): ICompetencyScores {
+  return {
+    technique: {},
+    impact: {},
+    collaboration: {},
+    leadership: {}
+  };
+}
+
+describe('applyManagerAssessment', () => {
+  it("applique l'évaluation manager d'un objectif sans toucher au self", () => {
+    const objectives: IObjective[] = [
+      {
+        id: 'obj-1',
+        title: 'X',
+        weight: 1,
+        krs: [],
+        selfAssessment: { status: 'atteint', comment: 'Auto-évaluation' },
+        managerAssessment: {}
+      }
+    ];
+
+    const result = applyManagerAssessment(
+      { objectives, qualitative: baseQualitative(), competencyScores: baseCompetencyScores() },
+      { objectives: [{ id: 'obj-1', status: 'depasse', comment: 'Bravo' }] }
+    );
+
+    expect(result.objectives[0].managerAssessment).toEqual({ status: 'depasse', comment: 'Bravo' });
+    expect(result.objectives[0].selfAssessment).toEqual({ status: 'atteint', comment: 'Auto-évaluation' });
+  });
+
+  it('ignore une évaluation dont l\'id ne correspond à aucun objectif', () => {
+    const objectives: IObjective[] = [
+      { id: 'obj-1', title: 'X', weight: 1, krs: [], selfAssessment: {}, managerAssessment: {} }
+    ];
+    const result = applyManagerAssessment(
+      { objectives, qualitative: baseQualitative(), competencyScores: baseCompetencyScores() },
+      { objectives: [{ id: 'obj-inconnu', status: 'atteint' }] }
+    );
+    expect(result.objectives[0].managerAssessment).toEqual({});
+  });
+
+  it("fusionne le bilan qualitatif côté manager sans écraser le self", () => {
+    const qualitative: IQualitative = {
+      successes: { self: 'Auto : livraison à temps' },
+      challenges: {},
+      growthAreas: {},
+      overallReview: {}
+    };
+
+    const result = applyManagerAssessment(
+      { objectives: [], qualitative, competencyScores: baseCompetencyScores() },
+      { qualitative: { successes: 'Manager : bonne collaboration' } }
+    );
+
+    expect(result.qualitative.successes).toEqual({
+      self: 'Auto : livraison à temps',
+      manager: 'Manager : bonne collaboration'
+    });
+    expect(result.qualitative.challenges).toEqual({});
+  });
+
+  it('met à jour la grille de compétences manager par axe, sans toucher aux autres', () => {
+    const competencyScores: ICompetencyScores = {
+      technique: { self: 4 },
+      impact: {},
+      collaboration: {},
+      leadership: {}
+    };
+
+    const result = applyManagerAssessment(
+      { objectives: [], qualitative: baseQualitative(), competencyScores },
+      { competencyScores: { technique: 3, impact: 5 } }
+    );
+
+    expect(result.competencyScores.technique).toEqual({ self: 4, manager: 3 });
+    expect(result.competencyScores.impact).toEqual({ manager: 5 });
+    expect(result.competencyScores.collaboration).toEqual({});
+  });
+
+  it('ne mute pas les objets reçus', () => {
+    const qualitative = baseQualitative();
+    const competencyScores = baseCompetencyScores();
+    applyManagerAssessment(
+      { objectives: [], qualitative, competencyScores },
+      { qualitative: { successes: 'X' }, competencyScores: { technique: 5 } }
+    );
+    expect(qualitative.successes).toEqual({});
+    expect(competencyScores.technique).toEqual({});
+  });
+});
+
+describe('computeReviewStatus', () => {
+  it('reste "dossier_manquant" sans objectif', () => {
+    expect(computeReviewStatus([], 'dossier_manquant')).toBe('dossier_manquant');
+  });
+
+  it('passe à "en_cours" dès qu\'un objectif existe sans évaluation manager', () => {
+    expect(computeReviewStatus([{ managerAssessment: {} }], 'dossier_manquant')).toBe('en_cours');
+  });
+
+  it('passe à "complete" quand tous les objectifs ont une évaluation manager', () => {
+    expect(
+      computeReviewStatus(
+        [{ managerAssessment: { status: 'atteint' } }, { managerAssessment: { status: 'depasse' } }],
+        'en_cours'
+      )
+    ).toBe('complete');
+  });
+
+  it('reste "en_cours" si au moins un objectif n\'a pas d\'évaluation manager', () => {
+    expect(
+      computeReviewStatus([{ managerAssessment: { status: 'atteint' } }, { managerAssessment: {} }], 'en_cours')
+    ).toBe('en_cours');
+  });
+
+  it('ne revient jamais en arrière depuis "complete"', () => {
+    expect(computeReviewStatus([{ managerAssessment: {} }], 'complete')).toBe('complete');
   });
 });
