@@ -324,8 +324,11 @@ export const COMPETENCY_AXIS_LABELS: Record<CompetencyAxis, string> = {
   leadership: 'Leadership'
 };
 
+export const QUALITATIVE_KEYS = ['successes', 'challenges', 'growthAreas', 'overallReview'] as const;
+export type QualitativeKey = (typeof QUALITATIVE_KEYS)[number];
+
 export const QUALITATIVE_FIELDS: {
-  key: 'successes' | 'challenges' | 'growthAreas' | 'overallReview';
+  key: QualitativeKey;
   label: string;
 }[] = [
   { key: 'successes', label: 'Réussites' },
@@ -333,4 +336,49 @@ export const QUALITATIVE_FIELDS: {
   { key: 'growthAreas', label: 'Axes de progression' },
   { key: 'overallReview', label: 'Bilan général' }
 ];
+
+/** Fiche API incomplète (Mongoose `default: () => ({})`) : sous-objets qualitative / scores absents. */
+export function emptyQualitative(): Qualitative {
+  return { successes: {}, challenges: {}, growthAreas: {}, overallReview: {} };
+}
+
+export function emptyCompetencyScores(): CompetencyScores {
+  return { technique: {}, impact: {}, collaboration: {}, leadership: {} };
+}
+
+export function normalizeQualitative(raw?: Partial<Qualitative> | null): Qualitative {
+  const base = emptyQualitative();
+  if (!raw) return base;
+  return {
+    successes: raw.successes ?? {},
+    challenges: raw.challenges ?? {},
+    growthAreas: raw.growthAreas ?? {},
+    overallReview: raw.overallReview ?? {}
+  };
+}
+
+export function normalizeCompetencyScores(raw?: Partial<CompetencyScores> | null): CompetencyScores {
+  const base = emptyCompetencyScores();
+  if (!raw) return base;
+  return {
+    technique: raw.technique ?? {},
+    impact: raw.impact ?? {},
+    collaboration: raw.collaboration ?? {},
+    leadership: raw.leadership ?? {}
+  };
+}
+
+export function normalizePerformanceReview(review: PerformanceReview): PerformanceReview {
+  return {
+    ...review,
+    objectives: (review.objectives ?? []).map((objective) => ({
+      ...objective,
+      krs: objective.krs ?? [],
+      selfAssessment: objective.selfAssessment ?? {},
+      managerAssessment: objective.managerAssessment ?? {}
+    })),
+    qualitative: normalizeQualitative(review.qualitative),
+    competencyScores: normalizeCompetencyScores(review.competencyScores)
+  };
+}
 

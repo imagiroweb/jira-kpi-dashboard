@@ -355,3 +355,22 @@ export function computeReviewStatus(
   }
   return currentStatus;
 }
+
+/** Mongoose `default: () => ({})` omet les sous-clés : l'API doit toujours les exposer. */
+export function completeQualitative(raw?: Partial<IQualitative> | null): IQualitative {
+  return {
+    successes: raw?.successes ?? {},
+    challenges: raw?.challenges ?? {},
+    growthAreas: raw?.growthAreas ?? {},
+    overallReview: raw?.overallReview ?? {}
+  };
+}
+
+export function completeCompetencyScores(raw?: Partial<ICompetencyScores> | null): ICompetencyScores {
+  return {
+    technique: raw?.technique ?? {},
+    impact: raw?.impact ?? {},
+    collaboration: raw?.collaboration ?? {},
+    leadership: raw?.leadership ?? {}
+  };
+}

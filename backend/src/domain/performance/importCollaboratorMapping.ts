@@ -1,52 +1,19 @@
 /**
- * Table de correspondance collaborateur ↔ équipe ↔ fichier d'entretien, établie à partir de
- * l'analyse documentée dans `OKR-entretien/documentation-dashboard/02-mapping-collaborateurs.md`.
- * `interviewFilePath` est relatif à `Entretiens-eval-perf/` ; `null` pour les 6 collaborateurs
- * sans dossier d'entretien (statut "Dossier manquant" conservé tel quel, pas d'objectifs à importer
- * pour eux). `Guillaume Bely` n'a pas de fichier d'entretien et n'apparaît donc pas ici — voir le
- * futur import des scores de compétences pour son cas.
+ * Correspondance fichier d'entretien ↔ utilisateur du roster.
+ *
+ * Source de vérité = les fichiers sous `Entretiens-eval-perf/` (scan récursif), pas une table
+ * nominative. Convention de nommage constatée :
+ *   `Perf-Eval-<période>-Adoria-<nom>-BDR.xlsx` (ou `.ods`)
+ * où `<nom>` est en général le nom de famille (éventuellement composé : Wan-Meenen, Deguil-Robin).
+ *
+ * `IMPORT_FILE_NAME_OVERRIDES` n'existe que pour les exceptions (homonymes, fichier hors
+ * convention). Un nouveau fichier qui suit la convention n'a rien à ajouter ici.
  */
-export interface ImportCollaboratorEntry {
-  name: string;
-  /** Nom d'équipe tel qu'affiché dans le dashboard existant — à recouper avec les équipes réelles au moment de l'import. */
-  team: string;
-  interviewFilePath: string | null;
-}
 
-export const IMPORT_COLLABORATOR_MAPPING: ImportCollaboratorEntry[] = [
-  { name: 'Alexandre Parjouet', team: 'Front', interviewFilePath: 'cook/Perf-Eval-H1-26-Adoria-Parjouet-BDR.xlsx' },
-  { name: 'Bruno Ignace', team: 'Front', interviewFilePath: null },
-  {
-    name: 'Caroline Wan-Meenen',
-    team: 'Front',
-    interviewFilePath: 'calson/Perf-Eval-H1-26-Adoria-Wan-Meenen-BDR.xlsx'
-  },
-  { name: 'Esther Beaudouin', team: 'QA', interviewFilePath: 'QA/Perf-Eval-H1-26-Adoria-Beaudouin-BDR.xlsx' },
-  { name: 'Frederic Saintout', team: 'QA', interviewFilePath: null },
-  { name: 'Guilhem Vasselin', team: 'Calson', interviewFilePath: 'calson/Perf-Eval-H1-26-Adoria-Vasselin-BDR.xlsx' },
-  { name: 'Guillaume Gobin', team: 'Choco', interviewFilePath: 'choco/Perf-Eval-H1-26-Adoria-Gobin-BDR.xlsx' },
-  {
-    name: 'Julie Andrianalimanana',
-    team: 'Calson',
-    interviewFilePath: 'calson/Perf-Eval-H1-26-Adoria-ANDRIANALIMANANA-BDR.xlsx'
-  },
-  { name: 'Jérémy Baudet', team: 'COOK', interviewFilePath: 'cook/Perf-Eval-H1-26-Adoria-Baudet-BDR.ods' },
-  { name: 'Louis Marriott', team: 'Choco', interviewFilePath: 'choco/Perf-Eval-H1-26-Adoria-Marriott-BDR.xlsx' },
-  { name: 'Loïc Bitter', team: 'Calson', interviewFilePath: 'calson/Perf-Eval-H1-26-Adoria-Bitter-BDR.xlsx' },
-  { name: 'Marjolaine Belay', team: 'QA', interviewFilePath: 'QA/Perf-Eval-H1-26-Adoria-BELAY-BDR.xlsx' },
-  { name: 'Maxime Andres', team: 'Front', interviewFilePath: 'choco/Perf-Eval-H1-26-Adoria-Andres-BDR.xlsx' },
-  { name: 'Michel Piac', team: 'Choco', interviewFilePath: null },
-  { name: 'Quentin Besson', team: 'Calson', interviewFilePath: 'calson/Perf-Eval-H1-26-Adoria-Besson-BDR.xlsx' },
-  {
-    name: 'Sandra Dubois-Coutand',
-    team: 'QA',
-    interviewFilePath: 'QA/Perf-Eval-H1-26-Adoria-Dubois-coutand-BDR.xlsx'
-  },
-  { name: 'Sylvain Ruchat', team: 'Choco', interviewFilePath: 'choco/Perf-Eval-H1-26-Adoria-RUCHAT-BDR.xlsx' },
-  { name: 'Thibault Demars', team: 'Front', interviewFilePath: null },
-  { name: 'Yoann Benes', team: 'Front', interviewFilePath: null },
-  { name: 'Sylvain Megret', team: 'COOK', interviewFilePath: null }
-];
+/** Chemin relatif à `Entretiens-eval-perf/` → nom complet roster, si le fichier n'est pas univoque. */
+export const IMPORT_FILE_NAME_OVERRIDES: Record<string, string> = {};
+
+const INTERVIEW_NAME_PATTERN = /Adoria-(.+)-BDR\.(xlsx|ods)$/i;
 
 /** Un collaborateur du roster (`GET /api/teams/roster`), tel que vu côté import. */
 export interface RosterCandidate {
@@ -61,10 +28,23 @@ export interface RosterCandidate {
 export function normalizeName(name: string): string {
   return name
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
+    .replace(/[\u0300-\u036f]/g, '')
     .trim()
     .toLowerCase()
     .replace(/\s+/g, ' ');
+}
+
+export function normalizeHyphenatedName(name: string): string {
+  return normalizeName(name.replace(/-/g, ' '));
+}
+
+/**
+ * Extrait le jeton de nom entre `Adoria-` et `-BDR` (`Parjouet`, `Wan-Meenen`, `Deguil-Robin`).
+ * `null` si le fichier ne suit pas la convention — à traiter via override ou à renommer.
+ */
+export function parseInterviewFileName(fileName: string): string | null {
+  const match = fileName.match(INTERVIEW_NAME_PATTERN);
+  return match?.[1]?.trim() || null;
 }
 
 /**
@@ -77,4 +57,44 @@ export function matchRosterUser(excelFullName: string, roster: RosterCandidate[]
   const target = normalizeName(excelFullName);
   const matches = roster.filter((u) => normalizeName(`${u.firstName ?? ''} ${u.lastName ?? ''}`) === target);
   return matches.length === 1 ? matches[0] : null;
+}
+
+/**
+ * Rattache le jeton extrait du nom de fichier à un utilisateur du roster, sans table manuelle :
+ * 1. nom de famille unique ;
+ * 2. prénom + nom (tirets = espaces) ;
+ * 3. le jeton se termine par le nom de famille (`Bruno-Deguil-Robin` → `Deguil-Robin`).
+ * `null` si 0 ou plusieurs candidats — le dry-run le signale.
+ */
+export function matchRosterForInterviewToken(
+  token: string,
+  roster: RosterCandidate[]
+): RosterCandidate | null {
+  const tokenNorm = normalizeName(token);
+  const tokenSpaces = normalizeHyphenatedName(token);
+  if (!tokenNorm) return null;
+
+  const byLast = roster.filter((u) => {
+    const last = normalizeName(u.lastName ?? '');
+    const lastSpaces = normalizeHyphenatedName(u.lastName ?? '');
+    return last === tokenNorm || lastSpaces === tokenSpaces;
+  });
+  if (byLast.length === 1) return byLast[0];
+  if (byLast.length > 1) return null;
+
+  const byFull = roster.filter((u) => {
+    const fullSpaces = normalizeHyphenatedName(`${u.firstName ?? ''} ${u.lastName ?? ''}`);
+    return fullSpaces === tokenSpaces;
+  });
+  if (byFull.length === 1) return byFull[0];
+
+  const bySuffix = roster.filter((u) => {
+    const lastSpaces = normalizeHyphenatedName(u.lastName ?? '');
+    return lastSpaces.length > 0 && (tokenSpaces === lastSpaces || tokenSpaces.endsWith(` ${lastSpaces}`));
+  });
+  return bySuffix.length === 1 ? bySuffix[0] : null;
+}
+
+export function rosterDisplayName(user: RosterCandidate): string {
+  return `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() || user.email;
 }

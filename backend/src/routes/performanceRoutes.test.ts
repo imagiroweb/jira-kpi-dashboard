@@ -152,6 +152,18 @@ describe('performanceRoutes (TI)', () => {
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(res.body.review.status).toBe('dossier_manquant');
+      expect(res.body.review.qualitative).toEqual({
+        successes: {},
+        challenges: {},
+        growthAreas: {},
+        overallReview: {}
+      });
+      expect(res.body.review.competencyScores).toEqual({
+        technique: {},
+        impact: {},
+        collaboration: {},
+        leadership: {}
+      });
       expect(mockReviewCreate).not.toHaveBeenCalled();
     });
 

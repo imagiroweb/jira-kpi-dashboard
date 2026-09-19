@@ -232,6 +232,26 @@ describe('TeamPerformancePage', () => {
     });
   });
 
+  it('ne plante pas si qualitative / competencyScores arrivent vides depuis l’API (détail manager)', async () => {
+    seedUser({ performanceGlobalAccess: true });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [makeReview()] });
+    mockGetReview.mockResolvedValue({
+      success: true,
+      review: makeReview({
+        qualitative: {} as PerformanceReview['qualitative'],
+        competencyScores: {} as PerformanceReview['competencyScores']
+      })
+    });
+
+    render(<TeamPerformancePage />);
+    await screen.findByText('Alice Martin');
+    fireEvent.click(screen.getByRole('button', { name: 'Ouvrir' }));
+
+    expect(await screen.findByText('Évaluation manager')).toBeInTheDocument();
+  });
+
   it("affiche les collaborateurs sans fiche encore ouverte avec le badge 'Dossier manquant' et ouvre une fiche vierge sans appeler l'API de détail", async () => {
     seedUser({ performanceGlobalAccess: true });
     mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });

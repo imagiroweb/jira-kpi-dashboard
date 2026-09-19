@@ -18,6 +18,8 @@ import {
   applyObjectivesDefinition,
   applySelfAssessment,
   AssessmentInput,
+  completeCompetencyScores,
+  completeQualitative,
   computeReviewStatus,
   ObjectiveDefinitionInput,
   validateObjectivesDefinition
@@ -61,14 +63,31 @@ function serialize(review: IPerformanceReview) {
     team: review.team,
     teamNameSnapshot: review.teamNameSnapshot,
     objectives: review.objectives,
-    qualitative: review.qualitative,
-    competencyScores: review.competencyScores,
+    qualitative: completeQualitative(review.qualitative),
+    competencyScores: completeCompetencyScores(review.competencyScores),
     status: review.status,
     definedBy: review.definedBy,
     createdBy: review.createdBy,
     updatedBy: review.updatedBy,
     createdAt: review.createdAt,
     updatedAt: review.updatedAt
+  };
+}
+
+/**
+ * Sérialise un cycle de performance pour l'API (`_id` -> `id`, comme `serialize` ci-dessus pour
+ * les fiches et `serializeTeam` dans teamRoutes.ts) — sans cette conversion, le frontend reçoit
+ * un cycle sans `id` exploitable (bug réel constaté : PATCH /cycles/undefined).
+ */
+function serializeCycle(cycle: IPerformanceCycle) {
+  return {
+    id: cycle._id,
+    label: cycle.label,
+    startDate: cycle.startDate,
+    endDate: cycle.endDate,
+    status: cycle.status,
+    createdAt: cycle.createdAt,
+    updatedAt: cycle.updatedAt
   };
 }
 
@@ -257,7 +276,7 @@ async function requireGlobalPerformanceAccess(req: Request, res: Response, next:
 router.get('/cycles', authenticate, async (_req: Request, res: Response) => {
   try {
     const cycles = await PerformanceCycle.find().sort({ startDate: -1 });
-    res.json({ success: true, cycles });
+    res.json({ success: true, cycles: cycles.map(serializeCycle) });
   } catch (error) {
     logger.error('Error listing performance cycles:', error);
     fail(res, 500, 'Erreur lors de la récupération des cycles', error);
@@ -293,7 +312,7 @@ router.post(
       }
 
       const cycle = await PerformanceCycle.create({ label, startDate, endDate, status: status ?? 'draft' });
-      res.status(201).json({ success: true, cycle });
+      res.status(201).json({ success: true, cycle: serializeCycle(cycle) });
     } catch (error) {
       logger.error('Error creating performance cycle:', error);
       fail(res, 500, 'Erreur lors de la création du cycle', error);
@@ -341,7 +360,7 @@ router.patch(
       }
 
       await cycle.save();
-      res.json({ success: true, cycle });
+      res.json({ success: true, cycle: serializeCycle(cycle) });
     } catch (error) {
       logger.error('Error updating performance cycle:', error);
       fail(res, 500, 'Erreur lors de la mise à jour du cycle', error);

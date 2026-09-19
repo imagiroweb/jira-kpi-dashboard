@@ -34,7 +34,8 @@ import {
   CYCLE_STATUS_LABELS,
   COMPETENCY_AXIS_LABELS,
   QUALITATIVE_FIELDS,
-  PerformanceTeamMember
+  PerformanceTeamMember,
+  normalizePerformanceReview
 } from '../domain/performance';
 
 function extractApiErrorMessage(err: unknown, fallback: string): string {
@@ -142,28 +143,37 @@ interface ManagerDraft {
 }
 
 function buildManagerDraft(review: PerformanceReview): ManagerDraft {
+  const normalized = normalizePerformanceReview(review);
   return {
     objectives: Object.fromEntries(
-      review.objectives.map((o) => [
+      normalized.objectives.map((o) => [
         o.id,
         { status: o.managerAssessment.status ?? '', comment: o.managerAssessment.comment ?? '' }
       ])
     ),
     qualitative: {
-      successes: review.qualitative.successes.manager ?? '',
-      challenges: review.qualitative.challenges.manager ?? '',
-      growthAreas: review.qualitative.growthAreas.manager ?? '',
-      overallReview: review.qualitative.overallReview.manager ?? ''
+      successes: normalized.qualitative.successes.manager ?? '',
+      challenges: normalized.qualitative.challenges.manager ?? '',
+      growthAreas: normalized.qualitative.growthAreas.manager ?? '',
+      overallReview: normalized.qualitative.overallReview.manager ?? ''
     },
     competencyScores: {
-      technique: review.competencyScores.technique.manager != null ? String(review.competencyScores.technique.manager) : '',
-      impact: review.competencyScores.impact.manager != null ? String(review.competencyScores.impact.manager) : '',
+      technique:
+        normalized.competencyScores.technique.manager != null
+          ? String(normalized.competencyScores.technique.manager)
+          : '',
+      impact:
+        normalized.competencyScores.impact.manager != null
+          ? String(normalized.competencyScores.impact.manager)
+          : '',
       collaboration:
-        review.competencyScores.collaboration.manager != null
-          ? String(review.competencyScores.collaboration.manager)
+        normalized.competencyScores.collaboration.manager != null
+          ? String(normalized.competencyScores.collaboration.manager)
           : '',
       leadership:
-        review.competencyScores.leadership.manager != null ? String(review.competencyScores.leadership.manager) : ''
+        normalized.competencyScores.leadership.manager != null
+          ? String(normalized.competencyScores.leadership.manager)
+          : ''
     }
   };
 }
@@ -259,7 +269,9 @@ export function TeamPerformancePage() {
       if (cancelled) return;
 
       if (reviewsResult.status === 'fulfilled') {
-        if (reviewsResult.value.success) setReviews(reviewsResult.value.reviews);
+        if (reviewsResult.value.success) {
+          setReviews(reviewsResult.value.reviews.map(normalizePerformanceReview));
+        }
       } else {
         setError(extractApiErrorMessage(reviewsResult.reason, 'Impossible de charger les fiches de performance'));
       }
@@ -286,7 +298,7 @@ export function TeamPerformancePage() {
     try {
       const res = await performanceApi.getReview(userId, cycle.id);
       if (res.success) {
-        setDetail(res.review);
+        setDetail(normalizePerformanceReview(res.review));
         setObjectivesDraft(buildObjectivesDraft(res.review.objectives));
         setManagerDraft(buildManagerDraft(res.review));
       }

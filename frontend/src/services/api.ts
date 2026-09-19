@@ -8,15 +8,16 @@ import type {
   WeeklyMeetingPatch,
   WeeklyMeetingSummary,
 } from '../domain/pointHebdoSprint';
-import type {
-  PerformanceCycle,
-  PerformanceReview,
-  PerformanceTeamMember,
-  CreatePerformanceCycleInput,
-  UpdatePerformanceCycleInput,
-  ObjectiveDefinitionInput,
-  AssessmentInput,
-  ProgressUpdateInput
+import {
+  normalizePerformanceReview,
+  type PerformanceCycle,
+  type PerformanceReview,
+  type PerformanceTeamMember,
+  type CreatePerformanceCycleInput,
+  type UpdatePerformanceCycleInput,
+  type ObjectiveDefinitionInput,
+  type AssessmentInput,
+  type ProgressUpdateInput
 } from '../domain/performance';
 import type { Team, CreateTeamInput, UpdateTeamInput, RosterUser } from '../domain/team';
 
@@ -693,7 +694,7 @@ export const performanceApi = {
   /** Ma fiche de performance pour un cycle (le cycle actif par défaut, créée à la volée si besoin). */
   getMyReview: async (cycleId?: string): Promise<{ success: boolean; review: PerformanceReview }> => {
     const { data } = await api.get('/performance/reviews/me', { params: cycleId ? { cycleId } : undefined });
-    return data;
+    return { ...data, review: normalizePerformanceReview(data.review) };
   },
   /** Ajoute une mise à jour d'avancement à un KR de ma fiche (verrou optimiste géré côté serveur, 409 si conflit). */
   updateKeyResultProgress: async (
@@ -705,14 +706,14 @@ export const performanceApi = {
       `/performance/reviews/me/objectives/${objectiveId}/krs/${krId}/progress`,
       input
     );
-    return data;
+    return { ...data, review: normalizePerformanceReview(data.review) };
   },
   /** Auto-évaluation sur ma propre fiche (jamais sur celle d'un autre collaborateur). */
   updateSelfAssessment: async (
     input: AssessmentInput & { cycleId?: string }
   ): Promise<{ success: boolean; review: PerformanceReview }> => {
     const { data } = await api.patch('/performance/reviews/me/self-assessment', input);
-    return data;
+    return { ...data, review: normalizePerformanceReview(data.review) };
   },
   /** Fiches dans la portée de l'acteur (CTO : toutes, filtrables par équipe ; lead : ses équipes). */
   listReviews: async (params?: {
@@ -721,7 +722,7 @@ export const performanceApi = {
     status?: string;
   }): Promise<{ success: boolean; reviews: PerformanceReview[] }> => {
     const { data } = await api.get('/performance/reviews', { params });
-    return data;
+    return { ...data, reviews: (data.reviews ?? []).map(normalizePerformanceReview) };
   },
   getReview: async (
     userId: string,
@@ -730,7 +731,7 @@ export const performanceApi = {
     const { data } = await api.get(`/performance/reviews/${userId}`, {
       params: cycleId ? { cycleId } : undefined
     });
-    return data;
+    return { ...data, review: normalizePerformanceReview(data.review) };
   },
   /** (Re)définit les objectifs d'un collaborateur — fusion par id côté serveur, préserve l'avancement déjà saisi. */
   defineObjectives: async (
@@ -739,14 +740,14 @@ export const performanceApi = {
     cycleId?: string
   ): Promise<{ success: boolean; review: PerformanceReview }> => {
     const { data } = await api.patch(`/performance/reviews/${userId}/objectives`, { objectives, cycleId });
-    return data;
+    return { ...data, review: normalizePerformanceReview(data.review) };
   },
   updateManagerAssessment: async (
     userId: string,
     input: AssessmentInput & { cycleId?: string }
   ): Promise<{ success: boolean; review: PerformanceReview }> => {
     const { data } = await api.patch(`/performance/reviews/${userId}/manager-assessment`, input);
-    return data;
+    return { ...data, review: normalizePerformanceReview(data.review) };
   },
   /** Membres d'équipe dans la portée de l'acteur, avec ou sans fiche de performance ouverte. */
   getTeamMembers: async (params?: {

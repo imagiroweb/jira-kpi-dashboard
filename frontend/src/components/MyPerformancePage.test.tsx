@@ -104,6 +104,24 @@ describe('MyPerformancePage', () => {
     expect(screen.getByText('Réduire le taux d’incidents de 30%')).toBeInTheDocument();
   });
 
+  it('ne plante pas si qualitative / competencyScores arrivent vides depuis l’API', async () => {
+    mockGetMyReview.mockResolvedValue({
+      success: true,
+      review: makeReview({
+        qualitative: {} as PerformanceReview['qualitative'],
+        competencyScores: {} as PerformanceReview['competencyScores']
+      })
+    });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+
+    render(<MyPerformancePage />);
+
+    expect(
+      await screen.findByRole('heading', { name: 'Améliorer la fiabilité du produit', level: 3 })
+    ).toBeInTheDocument();
+    expect(screen.getByText('Mon auto-évaluation')).toBeInTheDocument();
+  });
+
   it("affiche un message si aucun cycle de performance n'est actif", async () => {
     mockGetMyReview.mockRejectedValue(apiError(404, 'Aucun cycle de performance actif'));
     mockGetCycles.mockResolvedValue({ success: true, cycles: [] });

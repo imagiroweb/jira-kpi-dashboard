@@ -1,7 +1,8 @@
 import {
-  IMPORT_COLLABORATOR_MAPPING,
-  normalizeName,
+  matchRosterForInterviewToken,
   matchRosterUser,
+  normalizeName,
+  parseInterviewFileName,
   type RosterCandidate
 } from './importCollaboratorMapping';
 
@@ -18,6 +19,22 @@ describe('normalizeName', () => {
 
   it('produit le même résultat pour deux variantes de casse/accents du même nom', () => {
     expect(normalizeName('Sandra Dubois-coutand')).toBe(normalizeName('SANDRA DUBOIS-COUTAND'));
+  });
+});
+
+describe('parseInterviewFileName', () => {
+  it('extrait le nom entre Adoria- et -BDR', () => {
+    expect(parseInterviewFileName('Perf-Eval-H1-26-Adoria-Parjouet-BDR.xlsx')).toBe('Parjouet');
+    expect(parseInterviewFileName('Perf-Eval-H1-26-Adoria-Wan-Meenen-BDR.xlsx')).toBe('Wan-Meenen');
+    expect(parseInterviewFileName('Perf-Eval-H1-26-Adoria-Deguil-Robin-BDR.ods')).toBe('Deguil-Robin');
+    expect(parseInterviewFileName('Perf-Eval-H1-26-Adoria-ANDRIANALIMANANA-BDR.xlsx')).toBe(
+      'ANDRIANALIMANANA'
+    );
+  });
+
+  it('retourne null si le fichier ne suit pas la convention', () => {
+    expect(parseInterviewFileName('notes-bruno.xlsx')).toBeNull();
+    expect(parseInterviewFileName('Perf-Eval-H1-26-Adoria-Parjouet.xlsx')).toBeNull();
   });
 });
 
@@ -48,23 +65,32 @@ describe('matchRosterUser', () => {
   });
 });
 
-describe('IMPORT_COLLABORATOR_MAPPING', () => {
-  it('contient les 20 collaborateurs identifiés dans la cartographie', () => {
-    expect(IMPORT_COLLABORATOR_MAPPING).toHaveLength(20);
+describe('matchRosterForInterviewToken', () => {
+  const roster: RosterCandidate[] = [
+    { id: 'u1', firstName: 'Julie', lastName: 'Andrianalimanana', email: 'julie@adoria.com', teamId: 't1' },
+    { id: 'u2', firstName: 'Caroline', lastName: 'Wan-Meenen', email: 'caroline@adoria.com', teamId: 't2' },
+    { id: 'u3', firstName: 'Bruno', lastName: 'Deguil-Robin', email: 'bruno@adoria.com', teamId: 't3' },
+    { id: 'u4', firstName: 'Homonyme', lastName: 'Dupont', email: 'h1@adoria.com', teamId: 't4' },
+    { id: 'u5', firstName: 'Autre', lastName: 'Dupont', email: 'h2@adoria.com', teamId: 't5' }
+  ];
+
+  it('rattache un nom de famille unique (casse ignorée)', () => {
+    expect(matchRosterForInterviewToken('ANDRIANALIMANANA', roster)?.id).toBe('u1');
   });
 
-  it('recense exactement 6 collaborateurs sans dossier d\'entretien ("Dossier manquant")', () => {
-    const withoutInterview = IMPORT_COLLABORATOR_MAPPING.filter((entry) => entry.interviewFilePath === null);
-    expect(withoutInterview).toHaveLength(6);
+  it('rattache un nom composé du fichier (Wan-Meenen)', () => {
+    expect(matchRosterForInterviewToken('Wan-Meenen', roster)?.id).toBe('u2');
   });
 
-  it('ne contient aucun nom en double', () => {
-    const names = IMPORT_COLLABORATOR_MAPPING.map((entry) => entry.name);
-    expect(new Set(names).size).toBe(names.length);
+  it('rattache un jeton prénom+nom (Bruno-Deguil-Robin)', () => {
+    expect(matchRosterForInterviewToken('Bruno-Deguil-Robin', roster)?.id).toBe('u3');
   });
 
-  it('n\'inclut pas Guillaume Bely (aucun dossier d\'entretien, cas traité à part)', () => {
-    const bely = IMPORT_COLLABORATOR_MAPPING.find((entry) => normalizeName(entry.name) === normalizeName('Guillaume Bely'));
-    expect(bely).toBeUndefined();
+  it('renvoie null si le nom de famille est partagé par plusieurs personnes', () => {
+    expect(matchRosterForInterviewToken('Dupont', roster)).toBeNull();
+  });
+
+  it('renvoie null si personne ne correspond', () => {
+    expect(matchRosterForInterviewToken('Inconnu', roster)).toBeNull();
   });
 });

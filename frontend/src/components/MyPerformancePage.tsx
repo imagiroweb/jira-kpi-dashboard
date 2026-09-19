@@ -22,6 +22,7 @@ import {
   OBJECTIVE_ASSESSMENT_STATUSES,
   COMPETENCY_AXES,
   computeObjectiveProgress,
+  normalizePerformanceReview,
   OBJECTIVE_STATUS_LABELS,
   REVIEW_STATUS_LABELS,
   REVIEW_STATUS_BADGE_CLASS,
@@ -58,26 +59,35 @@ interface SelfDraft {
 }
 
 function buildSelfDraft(review: PerformanceReview): SelfDraft {
+  const normalized = normalizePerformanceReview(review);
   return {
     objectives: Object.fromEntries(
-      review.objectives.map((o) => [
+      normalized.objectives.map((o) => [
         o.id,
         { status: o.selfAssessment.status ?? '', comment: o.selfAssessment.comment ?? '' }
       ])
     ),
     qualitative: {
-      successes: review.qualitative.successes.self ?? '',
-      challenges: review.qualitative.challenges.self ?? '',
-      growthAreas: review.qualitative.growthAreas.self ?? '',
-      overallReview: review.qualitative.overallReview.self ?? ''
+      successes: normalized.qualitative.successes.self ?? '',
+      challenges: normalized.qualitative.challenges.self ?? '',
+      growthAreas: normalized.qualitative.growthAreas.self ?? '',
+      overallReview: normalized.qualitative.overallReview.self ?? ''
     },
     competencyScores: {
-      technique: review.competencyScores.technique.self != null ? String(review.competencyScores.technique.self) : '',
-      impact: review.competencyScores.impact.self != null ? String(review.competencyScores.impact.self) : '',
+      technique:
+        normalized.competencyScores.technique.self != null
+          ? String(normalized.competencyScores.technique.self)
+          : '',
+      impact:
+        normalized.competencyScores.impact.self != null ? String(normalized.competencyScores.impact.self) : '',
       collaboration:
-        review.competencyScores.collaboration.self != null ? String(review.competencyScores.collaboration.self) : '',
+        normalized.competencyScores.collaboration.self != null
+          ? String(normalized.competencyScores.collaboration.self)
+          : '',
       leadership:
-        review.competencyScores.leadership.self != null ? String(review.competencyScores.leadership.self) : ''
+        normalized.competencyScores.leadership.self != null
+          ? String(normalized.competencyScores.leadership.self)
+          : ''
     }
   };
 }
@@ -116,7 +126,7 @@ export function MyPerformancePage() {
       let loadedReview: PerformanceReview | null = null;
 
       if (reviewResult.status === 'fulfilled' && reviewResult.value.success) {
-        loadedReview = reviewResult.value.review;
+        loadedReview = normalizePerformanceReview(reviewResult.value.review);
         setReview(loadedReview);
         setSelfDraft(buildSelfDraft(loadedReview));
       } else if (reviewResult.status === 'rejected') {
@@ -176,7 +186,7 @@ export function MyPerformancePage() {
         note: draft.note.trim() || undefined,
         evidenceUrl: draft.evidenceUrl.trim() || undefined
       });
-      setReview(res.review);
+      setReview(normalizePerformanceReview(res.review));
       setKrDrafts((prev) => ({ ...prev, [key]: { value: '', note: '', evidenceUrl: '' } }));
       socket?.notify?.success('Avancement enregistré', 'La mise à jour a bien été prise en compte');
     } catch (err) {
@@ -241,7 +251,7 @@ export function MyPerformancePage() {
     setSavingSelf(true);
     try {
       const res = await performanceApi.updateSelfAssessment(input);
-      setReview(res.review);
+      setReview(normalizePerformanceReview(res.review));
       setSelfDraft(buildSelfDraft(res.review));
       socket?.notify?.success('Auto-évaluation enregistrée', 'Votre auto-évaluation a bien été sauvegardée');
     } catch (err) {

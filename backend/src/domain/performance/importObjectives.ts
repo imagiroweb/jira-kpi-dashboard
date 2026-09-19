@@ -7,7 +7,7 @@ import type ExcelJS from 'exceljs';
  * lignes fixes, chacun avec titre + poids sur la ligne suivante puis jusqu'à 5 KPI/KR juste
  * après un saut d'une ligne. Cette fonction ne fait que LIRE ce que contient la feuille ; la
  * validation agrégée (somme des poids, nombre d'objectifs par rapport au modèle applicatif) et
- * l'écriture via l'API restent dans le script d'import (voir `backend/scripts/import-okr/`).
+ * l'écriture via l'API restent dans le script d'import (voir `backend/src/scripts/import-okr/`).
  */
 
 export interface ParsedKeyResult {

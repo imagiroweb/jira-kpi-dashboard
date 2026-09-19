@@ -8,6 +8,8 @@ import {
   applySelfAssessment,
   computeObjectiveProgress,
   computeReviewScore,
+  completeCompetencyScores,
+  completeQualitative,
   computeReviewStatus,
   isPlausibleEvidenceUrl,
   ObjectiveDefinitionInput,
@@ -510,5 +512,22 @@ describe('applySelfAssessment', () => {
     const qualitative = baseQualitative();
     applySelfAssessment({ objectives: [], qualitative, competencyScores: baseCompetencyScores() }, { qualitative: { successes: 'X' } });
     expect(qualitative.successes).toEqual({});
+  });
+});
+
+describe('completeQualitative / completeCompetencyScores', () => {
+  it('remplit les sous-clés absentes d’un payload Mongoose vide', () => {
+    expect(completeQualitative({})).toEqual({
+      successes: {},
+      challenges: {},
+      growthAreas: {},
+      overallReview: {}
+    });
+    expect(completeCompetencyScores({})).toEqual({
+      technique: {},
+      impact: {},
+      collaboration: {},
+      leadership: {}
+    });
   });
 });

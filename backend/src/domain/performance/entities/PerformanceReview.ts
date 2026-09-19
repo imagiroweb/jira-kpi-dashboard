@@ -201,8 +201,14 @@ const PerformanceReviewSchema = new Schema<IPerformanceReview>(
     team: { type: Schema.Types.ObjectId, ref: 'Team' },
     teamNameSnapshot: { type: String, trim: true },
     objectives: { type: [ObjectiveSchema], default: [] },
-    qualitative: { type: QualitativeSchema, default: () => ({}) },
-    competencyScores: { type: CompetencyScoresSchema, default: () => ({}) },
+    qualitative: {
+      type: QualitativeSchema,
+      default: () => ({ successes: {}, challenges: {}, growthAreas: {}, overallReview: {} })
+    },
+    competencyScores: {
+      type: CompetencyScoresSchema,
+      default: () => ({ technique: {}, impact: {}, collaboration: {}, leadership: {} })
+    },
     status: { type: String, enum: PERFORMANCE_REVIEW_STATUSES, default: 'dossier_manquant' },
     definedBy: { type: ReviewAuthorSchema },
     createdBy: { type: ReviewAuthorSchema, required: true },
