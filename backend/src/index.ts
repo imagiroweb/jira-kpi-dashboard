@@ -23,6 +23,7 @@ import { brevoRoutes } from './routes/brevoRoutes';
 import { mondayRoutes } from './routes/mondayRoutes';
 import { meetingRoutes } from './routes/meetingRoutes';
 import { performanceRoutes } from './routes/performanceRoutes';
+import { teamRoutes } from './routes/teamRoutes';
 import { setupSocketHandlers } from './websocket/socketHandler';
 import { swaggerSpec } from './config/swagger';
 import { schedulerService } from './services/schedulerService';
@@ -48,7 +49,9 @@ const connectMongoDB = async () => {
           marketing: false,
           produit: false,
           pointHebdo: false,
-          gestionUtilisateurs: false
+          gestionUtilisateurs: false,
+          performance: true,
+          performanceDashboard: false
         }
       },
       {
@@ -61,7 +64,9 @@ const connectMongoDB = async () => {
           marketing: false,
           produit: false,
           pointHebdo: true,
-          gestionUtilisateurs: false
+          gestionUtilisateurs: false,
+          performance: true,
+          performanceDashboard: false
         }
       },
       {
@@ -74,7 +79,9 @@ const connectMongoDB = async () => {
           marketing: false,
           produit: false,
           pointHebdo: true,
-          gestionUtilisateurs: false
+          gestionUtilisateurs: false,
+          performance: true,
+          performanceDashboard: false
         }
       },
       {
@@ -87,7 +94,9 @@ const connectMongoDB = async () => {
           marketing: false,
           produit: true,
           pointHebdo: true,
-          gestionUtilisateurs: false
+          gestionUtilisateurs: false,
+          performance: true,
+          performanceDashboard: false
         }
       },
       {
@@ -100,7 +109,9 @@ const connectMongoDB = async () => {
           marketing: true,
           produit: false,
           pointHebdo: false,
-          gestionUtilisateurs: false
+          gestionUtilisateurs: false,
+          performance: true,
+          performanceDashboard: false
         }
       }
     ];
@@ -186,6 +197,7 @@ app.use('/api/brevo', brevoRoutes);
 app.use('/api/monday', mondayRoutes);
 app.use('/api/meetings', meetingRoutes);
 app.use('/api/performance', performanceRoutes);
+app.use('/api/teams', teamRoutes);
 
 // Setup WebSocket handlers
 setupSocketHandlers(io);

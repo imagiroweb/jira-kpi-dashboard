@@ -502,7 +502,9 @@ export class AuthService {
       marketing: true,
       produit: true,
       pointHebdo: true,
-      gestionUtilisateurs: false
+      gestionUtilisateurs: false,
+      performance: true,
+      performanceDashboard: false
     };
   }
 
