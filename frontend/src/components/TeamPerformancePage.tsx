@@ -32,7 +32,8 @@ import {
   REVIEW_STATUS_BADGE_CLASS,
   CYCLE_STATUS_LABELS,
   COMPETENCY_AXIS_LABELS,
-  QUALITATIVE_FIELDS
+  QUALITATIVE_FIELDS,
+  PerformanceTeamMember
 } from '../domain/performance';
 
 function extractApiErrorMessage(err: unknown, fallback: string): string {
@@ -49,6 +50,37 @@ function reviewUserLabel(review: PerformanceReview): string {
   const user = review.user as PerformanceReviewUserRef;
   const name = `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim();
   return name || user.email || user._id;
+}
+
+function memberLabel(member: PerformanceTeamMember): string {
+  const name = `${member.firstName ?? ''} ${member.lastName ?? ''}`.trim();
+  return name || member.email;
+}
+
+function buildEmptyReviewForMember(member: PerformanceTeamMember, cycleId: string): PerformanceReview {
+  return {
+    id: '',
+    user: { _id: member.id, firstName: member.firstName, lastName: member.lastName, email: member.email },
+    cycle: cycleId,
+    team: member.teamId,
+    objectives: [],
+    qualitative: {
+      successes: {},
+      challenges: {},
+      growthAreas: {},
+      overallReview: {}
+    },
+    competencyScores: {
+      technique: {},
+      impact: {},
+      collaboration: {},
+      leadership: {}
+    },
+    status: 'dossier_manquant',
+    createdBy: { id: member.id, name: memberLabel(member) },
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
 }
 
 function generateId(prefix: string): string {
@@ -145,6 +177,7 @@ export function TeamPerformancePage() {
   const [error, setError] = useState<string | null>(null);
   const [cycle, setCycle] = useState<PerformanceCycle | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
+  const [members, setMembers] = useState<PerformanceTeamMember[]>([]);
 
   const [teamFilter, setTeamFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState<PerformanceReviewStatus | ''>('');
@@ -168,6 +201,17 @@ export function TeamPerformancePage() {
   const filterableTeams = useMemo(
     () => (isGlobal ? teams : teams.filter((t) => leadTeamIds.includes(t.id))),
     [teams, isGlobal, leadTeamIds]
+  );
+
+  const reviewedUserIds = useMemo(() => new Set(reviews.map((r) => reviewUserId(r))), [reviews]);
+  // Collaborateurs de la portée sans fiche encore ouverte pour ce cycle (jamais créée en base) :
+  // on ne les affiche que si le filtre de statut ne les exclut pas explicitement.
+  const virtualMembers = useMemo(
+    () =>
+      statusFilter === '' || statusFilter === 'dossier_manquant'
+        ? members.filter((m) => !reviewedUserIds.has(m.id))
+        : [],
+    [members, reviewedUserIds, statusFilter]
   );
 
   useEffect(() => {
@@ -197,20 +241,29 @@ export function TeamPerformancePage() {
     (async () => {
       setListLoading(true);
       setError(null);
-      try {
-        const res = await performanceApi.listReviews({
+      const [reviewsResult, membersResult] = await Promise.allSettled([
+        performanceApi.listReviews({
           cycleId: cycle.id,
           teamId: teamFilter || undefined,
           status: statusFilter || undefined
-        });
-        if (cancelled) return;
-        if (res.success) setReviews(res.reviews);
-      } catch (err) {
-        if (cancelled) return;
-        setError(extractApiErrorMessage(err, 'Impossible de charger les fiches de performance'));
-      } finally {
-        if (!cancelled) setListLoading(false);
+        }),
+        performanceApi.getTeamMembers({ teamId: teamFilter || undefined })
+      ]);
+      if (cancelled) return;
+
+      if (reviewsResult.status === 'fulfilled') {
+        if (reviewsResult.value.success) setReviews(reviewsResult.value.reviews);
+      } else {
+        setError(extractApiErrorMessage(reviewsResult.reason, 'Impossible de charger les fiches de performance'));
       }
+
+      // Le croisement avec la liste des membres n'est qu'un complément d'affichage (collaborateurs
+      // sans fiche encore ouverte) : un échec ici ne doit pas bloquer l'affichage des fiches existantes.
+      setMembers(
+        membersResult.status === 'fulfilled' && membersResult.value.success ? membersResult.value.members : []
+      );
+
+      setListLoading(false);
     })();
     return () => {
       cancelled = true;
@@ -237,6 +290,17 @@ export function TeamPerformancePage() {
     }
   }
 
+  function handleOpenNewMember(member: PerformanceTeamMember) {
+    if (!cycle) return;
+    const synthetic = buildEmptyReviewForMember(member, cycle.id);
+    setSelectedUserId(member.id);
+    setDetail(synthetic);
+    setDetailError(null);
+    setDetailLoading(false);
+    setObjectivesDraft(buildObjectivesDraft(synthetic.objectives));
+    setManagerDraft(buildManagerDraft(synthetic));
+  }
+
   function handleBackToList() {
     setSelectedUserId(null);
     setDetail(null);
@@ -245,10 +309,14 @@ export function TeamPerformancePage() {
     setManagerDraft(null);
   }
 
-  function patchReviewInList(updated: PerformanceReview) {
-    setReviews((prev) =>
-      prev.map((r) => (reviewUserId(r) === reviewUserId(updated) ? { ...updated, user: r.user } : r))
-    );
+  function upsertReviewInList(updated: PerformanceReview) {
+    setReviews((prev) => {
+      const idx = prev.findIndex((r) => reviewUserId(r) === reviewUserId(updated));
+      if (idx === -1) return [...prev, updated];
+      const next = [...prev];
+      next[idx] = { ...updated, user: prev[idx].user };
+      return next;
+    });
   }
 
   function addObjective() {
@@ -314,7 +382,7 @@ export function TeamPerformancePage() {
       setDetail(merged);
       setObjectivesDraft(buildObjectivesDraft(merged.objectives));
       setManagerDraft(buildManagerDraft(merged));
-      patchReviewInList(merged);
+      upsertReviewInList(merged);
       socket?.notify?.success('Objectifs enregistrés', 'La définition des objectifs a été mise à jour');
     } catch (err) {
       socket?.notify?.error('Échec', extractApiErrorMessage(err, "Erreur lors de l'enregistrement des objectifs"));
@@ -373,7 +441,7 @@ export function TeamPerformancePage() {
       const merged: PerformanceReview = { ...res.review, user: detail.user };
       setDetail(merged);
       setManagerDraft(buildManagerDraft(merged));
-      patchReviewInList(merged);
+      upsertReviewInList(merged);
       socket?.notify?.success('Évaluation enregistrée', "L'évaluation manager a bien été sauvegardée");
     } catch (err) {
       socket?.notify?.error(
@@ -464,7 +532,7 @@ export function TeamPerformancePage() {
               <div className="p-8 text-center">
                 <Loader2 className="w-6 h-6 text-accent-500 animate-spin mx-auto" />
               </div>
-            ) : reviews.length === 0 ? (
+            ) : reviews.length === 0 && virtualMembers.length === 0 ? (
               <p className="p-6 text-sm text-surface-400">
                 Aucune fiche de performance dans votre périmètre pour ce cycle.
               </p>
@@ -497,6 +565,27 @@ export function TeamPerformancePage() {
                           type="button"
                           className="btn-ghost text-xs px-3 py-1.5"
                           onClick={() => handleOpenDetail(reviewUserId(review))}
+                        >
+                          Ouvrir
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {virtualMembers.map((member) => (
+                    <tr key={member.id} className="border-b border-surface-800/50">
+                      <td className="p-3 text-surface-200">{memberLabel(member)}</td>
+                      <td className="p-3 text-surface-400">{teamsById.get(member.teamId) || '—'}</td>
+                      <td className="p-3">
+                        <span className={`badge ${REVIEW_STATUS_BADGE_CLASS.dossier_manquant}`}>
+                          {REVIEW_STATUS_LABELS.dossier_manquant}
+                        </span>
+                      </td>
+                      <td className="p-3 text-surface-300">—</td>
+                      <td className="p-3 text-right">
+                        <button
+                          type="button"
+                          className="btn-ghost text-xs px-3 py-1.5"
+                          onClick={() => handleOpenNewMember(member)}
                         >
                           Ouvrir
                         </button>

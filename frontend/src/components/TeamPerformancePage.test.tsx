@@ -12,7 +12,8 @@ vi.mock('../services/api', () => ({
     listReviews: vi.fn(),
     getReview: vi.fn(),
     defineObjectives: vi.fn(),
-    updateManagerAssessment: vi.fn()
+    updateManagerAssessment: vi.fn(),
+    getTeamMembers: vi.fn()
   },
   teamApi: {
     list: vi.fn()
@@ -27,6 +28,7 @@ const mockListReviews = vi.mocked(performanceApi.listReviews);
 const mockGetReview = vi.mocked(performanceApi.getReview);
 const mockDefineObjectives = vi.mocked(performanceApi.defineObjectives);
 const mockUpdateManagerAssessment = vi.mocked(performanceApi.updateManagerAssessment);
+const mockGetTeamMembers = vi.mocked(performanceApi.getTeamMembers);
 const mockTeamList = vi.mocked(teamApi.list);
 
 const ACTIVE_CYCLE: PerformanceCycle = {
@@ -85,6 +87,9 @@ function seedUser(overrides: Partial<typeof TEST_USER> = {}) {
 describe('TeamPerformancePage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Par défaut, aucun collaborateur sans fiche : les tests existants (centrés sur les fiches
+    // déjà ouvertes) n'ont pas à s'en soucier ; les tests dédiés le redéfinissent explicitement.
+    mockGetTeamMembers.mockResolvedValue({ success: true, members: [] });
   });
 
   it("affiche la liste pour un CTO (accès global) avec le filtre 'toutes les équipes'", async () => {
@@ -223,5 +228,75 @@ describe('TeamPerformancePage', () => {
         })
       );
     });
+  });
+
+  it("affiche les collaborateurs sans fiche encore ouverte avec le badge 'Dossier manquant' et ouvre une fiche vierge sans appeler l'API de détail", async () => {
+    seedUser({ performanceGlobalAccess: true });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [makeReview()] });
+    mockGetTeamMembers.mockResolvedValue({
+      success: true,
+      members: [
+        { id: 'user-1', firstName: 'Alice', lastName: 'Martin', email: 'alice@test.com', teamId: 'team-1' },
+        { id: 'user-2', firstName: 'Bob', lastName: 'Dupont', email: 'bob@test.com', teamId: 'team-1' }
+      ]
+    });
+
+    render(<TeamPerformancePage />);
+
+    expect(await screen.findByText('Alice Martin')).toBeInTheDocument();
+    expect(screen.getByText('Bob Dupont')).toBeInTheDocument();
+    expect(screen.getByText('Dossier manquant', { selector: 'span' })).toBeInTheDocument();
+
+    const ouvrirButtons = screen.getAllByRole('button', { name: 'Ouvrir' });
+    expect(ouvrirButtons).toHaveLength(2);
+    fireEvent.click(ouvrirButtons[1]);
+
+    await screen.findByText('Définition des objectifs');
+    expect(mockGetReview).not.toHaveBeenCalled();
+    expect(screen.queryByPlaceholderText("Titre de l'objectif")).not.toBeInTheDocument();
+  });
+
+  it("définit les objectifs d'un collaborateur sans fiche existante : la fiche créée remplace la ligne 'Dossier manquant'", async () => {
+    seedUser({ performanceGlobalAccess: true });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [] });
+    mockGetTeamMembers.mockResolvedValue({
+      success: true,
+      members: [{ id: 'user-2', firstName: 'Bob', lastName: 'Dupont', email: 'bob@test.com', teamId: 'team-1' }]
+    });
+    mockDefineObjectives.mockResolvedValue({
+      success: true,
+      review: makeReview({ id: 'review-2', user: 'user-2', status: 'en_cours' })
+    });
+
+    render(<TeamPerformancePage />);
+    await screen.findByText('Bob Dupont');
+    fireEvent.click(screen.getByRole('button', { name: 'Ouvrir' }));
+    await screen.findByText('Définition des objectifs');
+    expect(mockGetReview).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: /Ajouter un objectif/i }));
+    fireEvent.change(screen.getByPlaceholderText("Titre de l'objectif"), {
+      target: { value: 'Nouvel objectif' }
+    });
+    fireEvent.change(screen.getByPlaceholderText('Poids %'), { target: { value: '100' } });
+    fireEvent.click(screen.getByRole('button', { name: /Enregistrer les objectifs/i }));
+
+    await waitFor(() => {
+      expect(mockDefineObjectives).toHaveBeenCalledWith(
+        'user-2',
+        [expect.objectContaining({ title: 'Nouvel objectif', weight: 1 })],
+        'cycle-1'
+      );
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Retour à la liste' }));
+
+    expect(await screen.findByText('Bob Dupont')).toBeInTheDocument();
+    expect(screen.getByText('En cours', { selector: 'span' })).toBeInTheDocument();
+    expect(screen.queryByText('Dossier manquant', { selector: 'span' })).not.toBeInTheDocument();
   });
 });

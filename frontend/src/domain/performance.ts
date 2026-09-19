@@ -185,6 +185,15 @@ export interface UpdatePerformanceCycleInput {
   status?: PerformanceCycleStatus;
 }
 
+/** Un membre d'équipe (résultat de `GET /performance/team-members`), avec ou sans fiche ouverte. */
+export interface PerformanceTeamMember {
+  id: string;
+  firstName?: string;
+  lastName?: string;
+  email: string;
+  teamId: string;
+}
+
 // --- Aides d'affichage pures (miroir de src/domain/performance/performanceReview.ts côté backend). ---
 // Le backend reste la seule source de vérité : ces fonctions ne font qu'anticiper le même calcul
 // côté client (barres de progression, validation immédiate d'un formulaire) avant l'appel API, qui

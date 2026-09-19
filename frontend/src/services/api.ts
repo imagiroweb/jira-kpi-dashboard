@@ -11,6 +11,7 @@ import type {
 import type {
   PerformanceCycle,
   PerformanceReview,
+  PerformanceTeamMember,
   CreatePerformanceCycleInput,
   UpdatePerformanceCycleInput,
   ObjectiveDefinitionInput,
@@ -745,6 +746,13 @@ export const performanceApi = {
     input: AssessmentInput & { cycleId?: string }
   ): Promise<{ success: boolean; review: PerformanceReview }> => {
     const { data } = await api.patch(`/performance/reviews/${userId}/manager-assessment`, input);
+    return data;
+  },
+  /** Membres d'équipe dans la portée de l'acteur, avec ou sans fiche de performance ouverte. */
+  getTeamMembers: async (params?: {
+    teamId?: string;
+  }): Promise<{ success: boolean; members: PerformanceTeamMember[] }> => {
+    const { data } = await api.get('/performance/team-members', { params });
     return data;
   }
 };
