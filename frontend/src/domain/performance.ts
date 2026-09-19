@@ -184,3 +184,144 @@ export interface UpdatePerformanceCycleInput {
   endDate?: string;
   status?: PerformanceCycleStatus;
 }
+
+// --- Aides d'affichage pures (miroir de src/domain/performance/performanceReview.ts côté backend). ---
+// Le backend reste la seule source de vérité : ces fonctions ne font qu'anticiper le même calcul
+// côté client (barres de progression, validation immédiate d'un formulaire) avant l'appel API, qui
+// revalide de toute façon. Aucune n'écrit ni ne décide d'un accès.
+
+const WEIGHT_TOLERANCE = 0.01;
+const MAX_OBJECTIVES = 4;
+
+/** Somme des poids d'une liste d'objectifs ou de KR (0 si la liste est vide). */
+export function sumWeights(items: { weight: number }[]): number {
+  return items.reduce((sum, item) => sum + (item.weight || 0), 0);
+}
+
+/** Les poids d'une liste totalisent-ils bien 1 (à la tolérance près) ? Une liste vide est équilibrée. */
+export function weightsAreBalanced(items: { weight: number }[], tolerance: number = WEIGHT_TOLERANCE): boolean {
+  if (items.length === 0) return true;
+  return Math.abs(sumWeights(items) - 1) <= tolerance;
+}
+
+/** Avancement d'un objectif (0-100) : moyenne pondérée de l'avancement de ses KR. */
+export function computeObjectiveProgress(objective: Pick<Objective, 'krs'>): number {
+  const totalWeight = sumWeights(objective.krs);
+  if (totalWeight <= 0) return 0;
+  const weightedSum = objective.krs.reduce((sum, kr) => sum + kr.weight * kr.progress, 0);
+  return weightedSum / totalWeight;
+}
+
+/** Score global d'une fiche (0-100) : moyenne pondérée de l'avancement des objectifs. */
+export function computeReviewScore(objectives: Pick<Objective, 'weight' | 'krs'>[]): number {
+  const totalWeight = sumWeights(objectives);
+  if (totalWeight <= 0) return 0;
+  const weightedSum = objectives.reduce(
+    (sum, objective) => sum + objective.weight * computeObjectiveProgress(objective),
+    0
+  );
+  return weightedSum / totalWeight;
+}
+
+export interface ObjectivesDefinitionValidation {
+  valid: boolean;
+  errors: string[];
+}
+
+/**
+ * Valide une définition d'objectifs avant envoi (retour immédiat côté formulaire) : au plus 4
+ * objectifs, poids d'objectifs et de KR équilibrés (somme à 1), identifiants uniques, titres
+ * renseignés. Miroir exact de `validateObjectivesDefinition` côté backend, qui revalide à l'arrivée.
+ */
+export function validateObjectivesDefinition(objectives: ObjectiveDefinitionInput[]): ObjectivesDefinitionValidation {
+  const errors: string[] = [];
+
+  if (objectives.length === 0) {
+    errors.push('Au moins un objectif est requis');
+  }
+  if (objectives.length > MAX_OBJECTIVES) {
+    errors.push(`Un maximum de ${MAX_OBJECTIVES} objectifs est autorisé`);
+  }
+  if (!weightsAreBalanced(objectives)) {
+    errors.push('La somme des poids des objectifs doit être égale à 1');
+  }
+
+  const seenObjectiveIds = new Set<string>();
+  for (const objective of objectives) {
+    if (!objective.id?.trim()) {
+      errors.push('Chaque objectif doit avoir un identifiant');
+    } else if (seenObjectiveIds.has(objective.id)) {
+      errors.push(`Identifiant d'objectif en double : ${objective.id}`);
+    } else {
+      seenObjectiveIds.add(objective.id);
+    }
+
+    if (!objective.title?.trim()) {
+      errors.push(`L'objectif ${objective.id || '(sans id)'} doit avoir un titre`);
+    }
+
+    if (objective.krs.length > 0 && !weightsAreBalanced(objective.krs)) {
+      errors.push(
+        `La somme des poids des résultats clés de l'objectif "${objective.title || objective.id}" doit être égale à 1`
+      );
+    }
+
+    const seenKrIds = new Set<string>();
+    for (const kr of objective.krs) {
+      if (!kr.id?.trim()) {
+        errors.push(`Chaque résultat clé de l'objectif ${objective.id || '(sans id)'} doit avoir un identifiant`);
+      } else if (seenKrIds.has(kr.id)) {
+        errors.push(`Identifiant de résultat clé en double dans l'objectif ${objective.id} : ${kr.id}`);
+      } else {
+        seenKrIds.add(kr.id);
+      }
+    }
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+// --- Libellés d'affichage partagés (français) ---
+
+export const OBJECTIVE_STATUS_LABELS: Record<ObjectiveAssessmentStatus, string> = {
+  non_atteint: 'Non atteint',
+  partiellement_atteint: 'Partiellement atteint',
+  atteint: 'Atteint',
+  depasse: 'Dépassé'
+};
+
+export const REVIEW_STATUS_LABELS: Record<PerformanceReviewStatus, string> = {
+  dossier_manquant: 'Dossier manquant',
+  en_cours: 'En cours',
+  complete: 'Complète'
+};
+
+export const REVIEW_STATUS_BADGE_CLASS: Record<PerformanceReviewStatus, string> = {
+  dossier_manquant: 'badge-danger',
+  en_cours: 'badge-warning',
+  complete: 'badge-success'
+};
+
+export const CYCLE_STATUS_LABELS: Record<PerformanceCycleStatus, string> = {
+  draft: 'Brouillon',
+  active: 'Actif',
+  closed: 'Clos'
+};
+
+export const COMPETENCY_AXIS_LABELS: Record<CompetencyAxis, string> = {
+  technique: 'Technique',
+  impact: 'Impact',
+  collaboration: 'Collaboration',
+  leadership: 'Leadership'
+};
+
+export const QUALITATIVE_FIELDS: {
+  key: 'successes' | 'challenges' | 'growthAreas' | 'overallReview';
+  label: string;
+}[] = [
+  { key: 'successes', label: 'Réussites' },
+  { key: 'challenges', label: 'Difficultés rencontrées' },
+  { key: 'growthAreas', label: 'Axes de progression' },
+  { key: 'overallReview', label: 'Bilan général' }
+];
+

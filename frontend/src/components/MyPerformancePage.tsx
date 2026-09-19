@@ -18,21 +18,17 @@ import {
   KeyResult,
   CompetencyAxis,
   ObjectiveAssessmentStatus,
-  PerformanceReviewStatus,
-  PerformanceCycleStatus,
+  AssessmentInput,
   OBJECTIVE_ASSESSMENT_STATUSES,
   COMPETENCY_AXES,
-  AssessmentInput
+  computeObjectiveProgress,
+  OBJECTIVE_STATUS_LABELS,
+  REVIEW_STATUS_LABELS,
+  REVIEW_STATUS_BADGE_CLASS,
+  CYCLE_STATUS_LABELS,
+  COMPETENCY_AXIS_LABELS,
+  QUALITATIVE_FIELDS
 } from '../domain/performance';
-
-/** Avancement d'un objectif (0-100), moyenne des KR pondérée par leur poids — miroir d'affichage de
- * `computeObjectiveProgress` côté backend (aucune écriture n'en dépend, uniquement la barre de progression). */
-function objectiveProgress(objective: Pick<Objective, 'krs'>): number {
-  const totalWeight = objective.krs.reduce((sum, kr) => sum + (kr.weight || 0), 0);
-  if (totalWeight <= 0) return 0;
-  const weightedSum = objective.krs.reduce((sum, kr) => sum + kr.weight * kr.progress, 0);
-  return weightedSum / totalWeight;
-}
 
 function extractApiErrorMessage(err: unknown, fallback: string): string {
   const e = err as { response?: { data?: { message?: string }; status?: number }; message?: string };
@@ -43,45 +39,6 @@ function extractApiErrorStatus(err: unknown): number | undefined {
   const e = err as { response?: { status?: number } };
   return e?.response?.status;
 }
-
-const OBJECTIVE_STATUS_LABELS: Record<ObjectiveAssessmentStatus, string> = {
-  non_atteint: 'Non atteint',
-  partiellement_atteint: 'Partiellement atteint',
-  atteint: 'Atteint',
-  depasse: 'Dépassé'
-};
-
-const REVIEW_STATUS_LABELS: Record<PerformanceReviewStatus, string> = {
-  dossier_manquant: 'Dossier manquant',
-  en_cours: 'En cours',
-  complete: 'Complète'
-};
-
-const REVIEW_STATUS_BADGE_CLASS: Record<PerformanceReviewStatus, string> = {
-  dossier_manquant: 'badge-danger',
-  en_cours: 'badge-warning',
-  complete: 'badge-success'
-};
-
-const CYCLE_STATUS_LABELS: Record<PerformanceCycleStatus, string> = {
-  draft: 'Brouillon',
-  active: 'Actif',
-  closed: 'Clos'
-};
-
-const COMPETENCY_AXIS_LABELS: Record<CompetencyAxis, string> = {
-  technique: 'Technique',
-  impact: 'Impact',
-  collaboration: 'Collaboration',
-  leadership: 'Leadership'
-};
-
-const QUALITATIVE_FIELDS: { key: 'successes' | 'challenges' | 'growthAreas' | 'overallReview'; label: string }[] = [
-  { key: 'successes', label: 'Réussites' },
-  { key: 'challenges', label: 'Difficultés rencontrées' },
-  { key: 'growthAreas', label: 'Axes de progression' },
-  { key: 'overallReview', label: 'Bilan général' }
-];
 
 interface KrDraft {
   value: string;
@@ -505,7 +462,7 @@ function ObjectiveCard({
   onSubmitProgress,
   onToggleHistory
 }: ObjectiveCardProps) {
-  const progress = Math.round(objectiveProgress(objective));
+  const progress = Math.round(computeObjectiveProgress(objective));
 
   return (
     <div className="card-glass p-6">
