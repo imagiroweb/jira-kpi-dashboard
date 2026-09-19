@@ -1,4 +1,6 @@
 import {
+  emailLocalMatchesLastName,
+  expectedAdoriaLocalParts,
   matchRosterForInterviewToken,
   matchRosterUser,
   normalizeName,
@@ -19,6 +21,21 @@ describe('normalizeName', () => {
 
   it('produit le même résultat pour deux variantes de casse/accents du même nom', () => {
     expect(normalizeName('Sandra Dubois-coutand')).toBe(normalizeName('SANDRA DUBOIS-COUTAND'));
+  });
+});
+
+describe('email Entra (1re lettre + nom)', () => {
+  it('construit bdeguil-robin à partir de Bruno / Deguil-Robin', () => {
+    expect(expectedAdoriaLocalParts('Bruno', 'Deguil-Robin')).toEqual([
+      'bdeguil-robin',
+      'bdeguilrobin'
+    ]);
+  });
+
+  it('reconnaît le nom du fichier dans bdeguil-robin@adoria.com', () => {
+    expect(emailLocalMatchesLastName('bdeguil-robin@adoria.com', 'Deguil-Robin')).toBe(true);
+    expect(emailLocalMatchesLastName('jandrianalimanana@adoria.com', 'ANDRIANALIMANANA')).toBe(true);
+    expect(emailLocalMatchesLastName('bdeguil-robin@adoria.com', 'Baudet')).toBe(false);
   });
 });
 
@@ -63,6 +80,13 @@ describe('matchRosterUser', () => {
   it('renvoie null en cas d\'ambiguïté (plusieurs utilisateurs avec le même nom normalisé)', () => {
     expect(matchRosterUser('Homonyme Dupont', roster)).toBeNull();
   });
+
+  it('retrouve un utilisateur via l’email Entra si le nom roster ne correspond pas', () => {
+    const entraRoster: RosterCandidate[] = [
+      { id: 'cto', firstName: null, lastName: null, email: 'bdeguil-robin@adoria.com', teamId: null }
+    ];
+    expect(matchRosterUser('Bruno Deguil-Robin', entraRoster)?.id).toBe('cto');
+  });
 });
 
 describe('matchRosterForInterviewToken', () => {
@@ -92,5 +116,33 @@ describe('matchRosterForInterviewToken', () => {
 
   it('renvoie null si personne ne correspond', () => {
     expect(matchRosterForInterviewToken('Inconnu', roster)).toBeNull();
+  });
+
+  it('rattache le fichier Deguil-Robin à l’email Entra bdeguil-robin@adoria.com', () => {
+    const entraRoster: RosterCandidate[] = [
+      {
+        id: 'cto',
+        firstName: 'Bruno',
+        lastName: 'Deguil-Robin',
+        email: 'bdeguil-robin@adoria.com',
+        teamId: null
+      },
+      {
+        id: 'other',
+        firstName: 'Julie',
+        lastName: 'Andrianalimanana',
+        email: 'jandrianalimanana@adoria.com',
+        teamId: 't1'
+      }
+    ];
+    expect(matchRosterForInterviewToken('Deguil-Robin', entraRoster)?.id).toBe('cto');
+    expect(matchRosterForInterviewToken('ANDRIANALIMANANA', entraRoster)?.id).toBe('other');
+  });
+
+  it('rattache même si le roster n’a pas de prénom/nom, seulement l’email Entra', () => {
+    const entraOnly: RosterCandidate[] = [
+      { id: 'cto', firstName: null, lastName: null, email: 'bdeguil-robin@adoria.com', teamId: null }
+    ];
+    expect(matchRosterForInterviewToken('Deguil-Robin', entraOnly)?.email).toBe('bdeguil-robin@adoria.com');
   });
 });
