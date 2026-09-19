@@ -16,8 +16,9 @@ import {
   appendKeyResultProgress,
   applyManagerAssessment,
   applyObjectivesDefinition,
+  applySelfAssessment,
+  AssessmentInput,
   computeReviewStatus,
-  ManagerAssessmentInput,
   ObjectiveDefinitionInput,
   validateObjectivesDefinition
 } from '../domain/performance/performanceReview';
@@ -533,7 +534,7 @@ router.patch('/reviews/:userId/objectives', authenticate, async (req: Request, r
 router.patch('/reviews/:userId/manager-assessment', authenticate, async (req: Request, res: Response) => {
   try {
     const { userId } = req.params;
-    const input: ManagerAssessmentInput = {
+    const input: AssessmentInput = {
       objectives: Array.isArray(req.body?.objectives) ? req.body.objectives : undefined,
       qualitative: typeof req.body?.qualitative === 'object' ? req.body.qualitative : undefined,
       competencyScores: typeof req.body?.competencyScores === 'object' ? req.body.competencyScores : undefined
@@ -595,6 +596,74 @@ router.patch('/reviews/:userId/manager-assessment', authenticate, async (req: Re
   } catch (error) {
     logger.error('Error applying manager assessment:', error);
     fail(res, 500, "Erreur lors de l'application de l'évaluation manager", error);
+  }
+});
+
+
+/**
+ * Auto-évaluation du collaborateur sur sa propre fiche (par objectif, bilan
+ * qualitatif "self", grille de compétences "self") — jamais côté d'un autre
+ * collaborateur (voir PATCH /reviews/:userId/manager-assessment pour le
+ * pendant lead/CTO). Ne crée jamais la fiche : les objectifs doivent déjà
+ * avoir été définis par un lead/CTO.
+ * PATCH /api/performance/reviews/me/self-assessment
+ */
+router.patch('/reviews/me/self-assessment', authenticate, async (req: Request, res: Response) => {
+  try {
+    const input: AssessmentInput = {
+      objectives: Array.isArray(req.body?.objectives) ? req.body.objectives : undefined,
+      qualitative: typeof req.body?.qualitative === 'object' ? req.body.qualitative : undefined,
+      competencyScores: typeof req.body?.competencyScores === 'object' ? req.body.competencyScores : undefined
+    };
+
+    const cycle = await resolveCycle(req.body?.cycleId);
+    if (cycle === undefined) return fail(res, 400, 'Identifiant de cycle invalide');
+    if (!cycle) return fail(res, 404, req.body?.cycleId ? 'Cycle introuvable' : 'Aucun cycle de performance actif');
+    if (cycle.status !== 'active') {
+      return fail(res, 403, "Ce cycle est clos, l'auto-évaluation ne peut plus être modifiée");
+    }
+
+    const who = author(req);
+
+    let updated: IPerformanceReview | null = null;
+
+    for (let attempt = 0; attempt < REVIEW_UPDATE_RETRIES; attempt += 1) {
+      const current = await PerformanceReview.findOne({ user: req.user!.userId, cycle: cycle._id });
+      if (!current) {
+        return fail(res, 404, "Aucune fiche de performance pour ce cycle — ouvrez-la d'abord (GET /reviews/me)");
+      }
+
+      const plain = current.toObject();
+      const result = applySelfAssessment(
+        { objectives: plain.objectives, qualitative: plain.qualitative, competencyScores: plain.competencyScores },
+        input
+      );
+      const status = computeReviewStatus(result.objectives, current.status);
+
+      updated = await PerformanceReview.findOneAndUpdate(
+        { _id: current._id, __v: current.__v },
+        {
+          $set: {
+            objectives: result.objectives,
+            qualitative: result.qualitative,
+            competencyScores: result.competencyScores,
+            updatedBy: who,
+            status
+          }
+        },
+        { new: true, runValidators: true }
+      );
+      if (updated) break;
+    }
+
+    if (!updated) {
+      return fail(res, 409, 'La fiche a été modifiée en même temps, réessayez');
+    }
+
+    res.json({ success: true, review: serialize(updated) });
+  } catch (error) {
+    logger.error('Error applying self assessment:', error);
+    fail(res, 500, "Erreur lors de l'application de l'auto-évaluation", error);
   }
 });
 

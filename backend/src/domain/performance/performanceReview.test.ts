@@ -5,6 +5,7 @@ import {
   appendKeyResultProgress,
   applyManagerAssessment,
   applyObjectivesDefinition,
+  applySelfAssessment,
   computeObjectiveProgress,
   computeReviewScore,
   computeReviewStatus,
@@ -445,5 +446,69 @@ describe('computeReviewStatus', () => {
 
   it('ne revient jamais en arrière depuis "complete"', () => {
     expect(computeReviewStatus([{ managerAssessment: {} }], 'complete')).toBe('complete');
+  });
+});
+
+describe('applySelfAssessment', () => {
+  it("applique l'auto-évaluation d'un objectif sans toucher au manager", () => {
+    const objectives: IObjective[] = [
+      {
+        id: 'obj-1',
+        title: 'X',
+        weight: 1,
+        krs: [],
+        selfAssessment: {},
+        managerAssessment: { status: 'atteint', comment: 'Évaluation manager' }
+      }
+    ];
+
+    const result = applySelfAssessment(
+      { objectives, qualitative: baseQualitative(), competencyScores: baseCompetencyScores() },
+      { objectives: [{ id: 'obj-1', status: 'depasse', comment: 'Je suis fier du résultat' }] }
+    );
+
+    expect(result.objectives[0].selfAssessment).toEqual({ status: 'depasse', comment: 'Je suis fier du résultat' });
+    expect(result.objectives[0].managerAssessment).toEqual({ status: 'atteint', comment: 'Évaluation manager' });
+  });
+
+  it('fusionne le bilan qualitatif côté self sans écraser le manager', () => {
+    const qualitative: IQualitative = {
+      successes: { manager: 'Manager : bonne collaboration' },
+      challenges: {},
+      growthAreas: {},
+      overallReview: {}
+    };
+
+    const result = applySelfAssessment(
+      { objectives: [], qualitative, competencyScores: baseCompetencyScores() },
+      { qualitative: { successes: 'Auto : livraison à temps' } }
+    );
+
+    expect(result.qualitative.successes).toEqual({
+      manager: 'Manager : bonne collaboration',
+      self: 'Auto : livraison à temps'
+    });
+  });
+
+  it('met à jour la grille de compétences self par axe, sans toucher au manager', () => {
+    const competencyScores: ICompetencyScores = {
+      technique: { manager: 3 },
+      impact: {},
+      collaboration: {},
+      leadership: {}
+    };
+
+    const result = applySelfAssessment(
+      { objectives: [], qualitative: baseQualitative(), competencyScores },
+      { competencyScores: { technique: 4 } }
+    );
+
+    expect(result.competencyScores.technique).toEqual({ manager: 3, self: 4 });
+  });
+
+  it('ne mute pas les objets reçus', () => {
+    const qualitative = baseQualitative();
+    applySelfAssessment({ objectives: [], qualitative, competencyScores: baseCompetencyScores() }, { qualitative: { successes: 'X' } });
+    expect(qualitative.successes).toEqual({});
   });
 });

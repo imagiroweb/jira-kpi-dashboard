@@ -232,61 +232,68 @@ export function applyObjectivesDefinition(
   });
 }
 
-/** Évaluation manager d'un objectif (par id d'objectif). */
-export interface ObjectiveManagerAssessmentInput {
+/** Évaluation (self ou manager) d'un objectif, par id d'objectif. */
+export interface ObjectiveAssessmentInput {
   id: string;
   status?: ObjectiveAssessmentStatus;
   comment?: string;
 }
 
-/** Champs qualitatifs remplis côté manager (undefined = ne pas toucher au champ). */
-export interface QualitativeManagerInput {
+/** Champs qualitatifs remplis d'un côté (self ou manager) — undefined = ne pas toucher au champ. */
+export interface QualitativeAssessmentInput {
   successes?: string;
   challenges?: string;
   growthAreas?: string;
   overallReview?: string;
 }
 
-export interface ManagerAssessmentInput {
-  objectives?: ObjectiveManagerAssessmentInput[];
-  qualitative?: QualitativeManagerInput;
+export interface AssessmentInput {
+  objectives?: ObjectiveAssessmentInput[];
+  qualitative?: QualitativeAssessmentInput;
   competencyScores?: Partial<Record<CompetencyAxis, number>>;
 }
 
-export interface ManagerAssessmentTarget {
+export interface AssessmentTarget {
   objectives: IObjective[];
   qualitative: IQualitative;
   competencyScores: ICompetencyScores;
 }
 
+/** Alias conservés pour compatibilité — l'évaluation manager est un cas particulier de `AssessmentInput`/`AssessmentTarget`. */
+export type ObjectiveManagerAssessmentInput = ObjectiveAssessmentInput;
+export type QualitativeManagerInput = QualitativeAssessmentInput;
+export type ManagerAssessmentInput = AssessmentInput;
+export type ManagerAssessmentTarget = AssessmentTarget;
+
 /**
- * Applique l'évaluation manager (par objectif, bilan qualitatif "manager",
- * grille de compétences "manager") sans jamais toucher au contenu
- * "self" (auto-évaluation du collaborateur) — pure fonction, ne mute rien.
- * Un objectif dont l'id ne correspond à aucun objectif existant est ignoré
- * (l'évaluation manager porte sur des objectifs déjà définis).
+ * Applique une évaluation (`side`: "self" ou "manager") — par objectif,
+ * bilan qualitatif, grille de compétences — sans jamais toucher au contenu
+ * de l'autre côté ; pure fonction, ne mute rien. Un objectif dont l'id ne
+ * correspond à aucun objectif existant est ignoré (l'évaluation porte sur
+ * des objectifs déjà définis).
  */
-export function applyManagerAssessment(
-  target: ManagerAssessmentTarget,
-  input: ManagerAssessmentInput
-): ManagerAssessmentTarget {
+function applyAssessment(
+  target: AssessmentTarget,
+  input: AssessmentInput,
+  side: 'self' | 'manager'
+): AssessmentTarget {
+  const assessmentField = side === 'self' ? 'selfAssessment' : 'managerAssessment';
   const assessmentsByObjectiveId = new Map((input.objectives ?? []).map((a) => [a.id, a]));
 
   const objectives = target.objectives.map((objective) => {
     const assessment = assessmentsByObjectiveId.get(objective.id);
     if (!assessment) return objective;
-    const managerAssessment: IObjectiveAssessment = {
-      status: assessment.status ?? objective.managerAssessment?.status,
-      comment: assessment.comment ?? objective.managerAssessment?.comment
+    const currentAssessment = objective[assessmentField];
+    const nextAssessment: IObjectiveAssessment = {
+      status: assessment.status ?? currentAssessment?.status,
+      comment: assessment.comment ?? currentAssessment?.comment
     };
-    return { ...objective, managerAssessment };
+    return { ...objective, [assessmentField]: nextAssessment };
   });
 
   const qualitativeInput = input.qualitative ?? {};
-  const mergeQualitativeEntry = (
-    entry: IQualitative[keyof IQualitative],
-    managerValue: string | undefined
-  ) => (managerValue !== undefined ? { ...entry, manager: managerValue } : entry);
+  const mergeQualitativeEntry = (entry: IQualitative[keyof IQualitative], value: string | undefined) =>
+    value !== undefined ? { ...entry, [side]: value } : entry;
 
   const qualitative: IQualitative = {
     successes: mergeQualitativeEntry(target.qualitative.successes, qualitativeInput.successes),
@@ -298,13 +305,31 @@ export function applyManagerAssessment(
   const competencyScoresInput = input.competencyScores ?? {};
   const competencyScores = { ...target.competencyScores };
   for (const axis of COMPETENCY_AXES) {
-    const managerScore = competencyScoresInput[axis];
-    if (managerScore !== undefined) {
-      competencyScores[axis] = { ...competencyScores[axis], manager: managerScore };
+    const score = competencyScoresInput[axis];
+    if (score !== undefined) {
+      competencyScores[axis] = { ...competencyScores[axis], [side]: score };
     }
   }
 
   return { objectives, qualitative, competencyScores };
+}
+
+/**
+ * Applique l'évaluation manager (par objectif, bilan qualitatif "manager",
+ * grille de compétences "manager") sans jamais toucher au contenu "self"
+ * (auto-évaluation du collaborateur).
+ */
+export function applyManagerAssessment(target: AssessmentTarget, input: AssessmentInput): AssessmentTarget {
+  return applyAssessment(target, input, 'manager');
+}
+
+/**
+ * Applique l'auto-évaluation du collaborateur (par objectif, bilan
+ * qualitatif "self", grille de compétences "self") sans jamais toucher au
+ * contenu "manager".
+ */
+export function applySelfAssessment(target: AssessmentTarget, input: AssessmentInput): AssessmentTarget {
+  return applyAssessment(target, input, 'self');
 }
 
 /**

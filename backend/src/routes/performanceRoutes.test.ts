@@ -13,20 +13,28 @@ const mockReviewCreate = jest.fn();
 const mockReviewFindOneAndUpdate = jest.fn();
 const mockUserFindById = jest.fn();
 
-jest.mock('../domain/performance/entities/PerformanceCycle', () => ({
-  PerformanceCycle: {
-    findOne: (...args: unknown[]) => mockCycleFindOne(...args),
-    findById: (...args: unknown[]) => mockCycleFindById(...args)
-  }
-}));
+jest.mock('../domain/performance/entities/PerformanceCycle', () => {
+  const actual = jest.requireActual('../domain/performance/entities/PerformanceCycle');
+  return {
+    ...actual,
+    PerformanceCycle: {
+      findOne: (...args: unknown[]) => mockCycleFindOne(...args),
+      findById: (...args: unknown[]) => mockCycleFindById(...args)
+    }
+  };
+});
 
-jest.mock('../domain/performance/entities/PerformanceReview', () => ({
-  PerformanceReview: {
-    findOne: (...args: unknown[]) => mockReviewFindOne(...args),
-    create: (...args: unknown[]) => mockReviewCreate(...args),
-    findOneAndUpdate: (...args: unknown[]) => mockReviewFindOneAndUpdate(...args)
-  }
-}));
+jest.mock('../domain/performance/entities/PerformanceReview', () => {
+  const actual = jest.requireActual('../domain/performance/entities/PerformanceReview');
+  return {
+    ...actual,
+    PerformanceReview: {
+      findOne: (...args: unknown[]) => mockReviewFindOne(...args),
+      create: (...args: unknown[]) => mockReviewCreate(...args),
+      findOneAndUpdate: (...args: unknown[]) => mockReviewFindOneAndUpdate(...args)
+    }
+  };
+});
 
 jest.mock('../domain/user/entities/User', () => ({
   User: {
@@ -86,11 +94,19 @@ function objectiveFixture(krs = [krFixture()]) {
 }
 
 /** Document mocké tel que renvoyé par `PerformanceReview.findOne` dans la route progress. */
-function makeReviewDoc(objectives = [objectiveFixture()]) {
+function makeReviewDoc(
+  objectives = [objectiveFixture()],
+  overrides: { qualitative?: Record<string, unknown>; competencyScores?: Record<string, unknown> } = {}
+) {
   return {
     _id: 'review-1',
     __v: 0,
-    toObject: () => ({ objectives: structuredClone(objectives) })
+    status: 'en_cours',
+    toObject: () => ({
+      objectives: structuredClone(objectives),
+      qualitative: structuredClone(overrides.qualitative ?? {}),
+      competencyScores: structuredClone(overrides.competencyScores ?? {})
+    })
   };
 }
 
@@ -259,6 +275,82 @@ describe('performanceRoutes (TI)', () => {
       mockReviewFindOneAndUpdate.mockResolvedValue(null);
 
       const res = await request(app).post(url).send({ value: 50 });
+
+      expect(res.status).toBe(409);
+      expect(mockReviewFindOneAndUpdate).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  describe('PATCH /reviews/me/self-assessment', () => {
+    const url = '/api/performance/reviews/me/self-assessment';
+    const payload = { objectives: [{ id: 'obj-1', status: 'atteint', comment: 'Auto-évaluation' }] };
+
+    it('404 si aucun cycle actif', async () => {
+      mockCycleFindOne.mockResolvedValue(null);
+      const res = await request(app).patch(url).send(payload);
+      expect(res.status).toBe(404);
+    });
+
+    it('403 si le cycle ciblé est clos', async () => {
+      mockCycleFindById.mockResolvedValue(CLOSED_CYCLE);
+      const res = await request(app).patch(url).send({ ...payload, cycleId: VALID_OBJECT_ID });
+      expect(res.status).toBe(403);
+    });
+
+    it("404 si aucune fiche n'existe pour ce cycle", async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(null);
+      const res = await request(app).patch(url).send(payload);
+      expect(res.status).toBe(404);
+    });
+
+    it("200 applique l'auto-évaluation d'un objectif sans toucher au manager", async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(
+        makeReviewDoc([objectiveFixture([krFixture()])])
+      );
+      mockReviewFindOneAndUpdate.mockResolvedValue(
+        makeReview({
+          objectives: [
+            { ...objectiveFixture([krFixture()]), selfAssessment: { status: 'atteint', comment: 'Auto-évaluation' } }
+          ]
+        })
+      );
+
+      const res = await request(app).patch(url).send(payload);
+
+      expect(res.status).toBe(200);
+      const [, update] = mockReviewFindOneAndUpdate.mock.calls[0];
+      expect(update.$set.objectives[0].selfAssessment).toEqual({ status: 'atteint', comment: 'Auto-évaluation' });
+      expect(update.$set.objectives[0]).not.toHaveProperty('managerAssessment.status');
+    });
+
+    it("200 fusionne le bilan qualitatif et les scores de compétence côté self", async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(
+        makeReviewDoc([], {
+          qualitative: { successes: { manager: 'Bravo' } },
+          competencyScores: { technique: { manager: 3 } }
+        })
+      );
+      mockReviewFindOneAndUpdate.mockResolvedValue(makeReview());
+
+      const res = await request(app)
+        .patch(url)
+        .send({ qualitative: { successes: 'Content de moi' }, competencyScores: { technique: 4 } });
+
+      expect(res.status).toBe(200);
+      const [, update] = mockReviewFindOneAndUpdate.mock.calls[0];
+      expect(update.$set.qualitative.successes).toEqual({ manager: 'Bravo', self: 'Content de moi' });
+      expect(update.$set.competencyScores.technique).toEqual({ manager: 3, self: 4 });
+    });
+
+    it('409 si la fiche a été modifiée en même temps (verrou optimiste épuisé)', async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(makeReviewDoc());
+      mockReviewFindOneAndUpdate.mockResolvedValue(null);
+
+      const res = await request(app).patch(url).send(payload);
 
       expect(res.status).toBe(409);
       expect(mockReviewFindOneAndUpdate).toHaveBeenCalledTimes(5);
