@@ -406,6 +406,61 @@ router.get('/reviews', authenticate, async (req: Request, res: Response) => {
 });
 
 /**
+ * Membres d'équipe dans la portée de l'acteur (pour compléter la liste des fiches de `GET /reviews`
+ * avec les collaborateurs qui n'ont pas encore de fiche ouverte pour ce cycle — une fiche n'existe
+ * que si le collaborateur a déjà visité sa page ou qu'un lead/CTO lui a déjà défini des objectifs).
+ * Mêmes règles de portée que `GET /reviews` : tout le monde pour le CTO/super_admin (filtrable par
+ * équipe), les équipes dirigées pour un lead. N'inclut que les comptes actifs.
+ * GET /api/performance/team-members?teamId=
+ */
+router.get('/team-members', authenticate, async (req: Request, res: Response) => {
+  try {
+    const actor = await loadPerformanceActorContext(req.user!.userId);
+    if (!actor) return fail(res, 404, 'Utilisateur authentifié introuvable');
+
+    const isGlobal = hasGlobalPerformanceAccess(actor);
+    if (!isGlobal && actor.leadTeamIds.length === 0) {
+      return fail(res, 403, "Accès réservé au CTO, aux administrateurs, et aux leads d'équipe");
+    }
+
+    const filter: Record<string, unknown> = { isActive: true };
+
+    const requestedTeamId = req.query.teamId as string | undefined;
+    if (requestedTeamId) {
+      if (!mongoose.Types.ObjectId.isValid(requestedTeamId)) {
+        return fail(res, 400, "Identifiant d'équipe invalide");
+      }
+      if (!isGlobal && !actor.leadTeamIds.includes(requestedTeamId)) {
+        return fail(res, 403, "Vous n'avez pas accès à cette équipe");
+      }
+      filter.teamId = requestedTeamId;
+    } else if (isGlobal) {
+      filter.teamId = { $ne: null };
+    } else {
+      filter.teamId = { $in: actor.leadTeamIds };
+    }
+
+    const users = await User.find(filter)
+      .select('firstName lastName email teamId')
+      .sort({ firstName: 1, lastName: 1 });
+
+    res.json({
+      success: true,
+      members: users.map((u) => ({
+        id: u._id,
+        firstName: u.firstName,
+        lastName: u.lastName,
+        email: u.email,
+        teamId: u.teamId
+      }))
+    });
+  } catch (error) {
+    logger.error('Error listing team members:', error);
+    fail(res, 500, "Erreur lors de la récupération des membres d'équipe", error);
+  }
+});
+
+/**
  * Détail de la fiche de performance d'un collaborateur (dans la portée de
  * l'acteur, ou sa propre fiche).
  * GET /api/performance/reviews/:userId?cycleId=
