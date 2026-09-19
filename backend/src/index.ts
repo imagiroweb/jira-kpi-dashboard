@@ -22,6 +22,7 @@ import { authRoutes } from './routes/authRoutes';
 import { brevoRoutes } from './routes/brevoRoutes';
 import { mondayRoutes } from './routes/mondayRoutes';
 import { meetingRoutes } from './routes/meetingRoutes';
+import { performanceRoutes } from './routes/performanceRoutes';
 import { setupSocketHandlers } from './websocket/socketHandler';
 import { swaggerSpec } from './config/swagger';
 import { schedulerService } from './services/schedulerService';
@@ -184,6 +185,7 @@ app.use('/api/worklog', worklogRoutes);
 app.use('/api/brevo', brevoRoutes);
 app.use('/api/monday', mondayRoutes);
 app.use('/api/meetings', meetingRoutes);
+app.use('/api/performance', performanceRoutes);
 
 // Setup WebSocket handlers
 setupSocketHandlers(io);
