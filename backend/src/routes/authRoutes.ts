@@ -477,7 +477,11 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
         lastLogin: user.lastLogin,
         role: withPerms.role,
         roleName: withPerms.roleName,
-        visiblePages: withPerms.visiblePages
+        visiblePages: withPerms.visiblePages,
+        performanceGlobalAccess: withPerms.performanceGlobalAccess,
+        teamId: withPerms.teamId,
+        leadTeamIds: withPerms.leadTeamIds,
+        canManageTeamAssignment: withPerms.canManageTeamAssignment
       }
     });
   } catch (error) {
@@ -995,7 +999,11 @@ router.patch(
           provider: withPerms.provider,
           role: withPerms.role,
           roleName: withPerms.roleName,
-          visiblePages: withPerms.visiblePages
+          visiblePages: withPerms.visiblePages,
+          performanceGlobalAccess: withPerms.performanceGlobalAccess,
+          teamId: withPerms.teamId,
+          leadTeamIds: withPerms.leadTeamIds,
+          canManageTeamAssignment: withPerms.canManageTeamAssignment
         }
       });
     } catch (error) {

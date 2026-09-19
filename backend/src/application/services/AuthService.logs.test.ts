@@ -44,6 +44,12 @@ jest.mock('../../domain/user/entities/UserActivityLog', () => ({
   }
 }));
 
+jest.mock('../../domain/team/entities/Team', () => ({
+  Team: {
+    find: () => ({ select: () => ({ lean: () => Promise.resolve([]) }) })
+  }
+}));
+
 jest.mock('../../utils/logger', () => ({
   logger: { info: jest.fn(), error: jest.fn(), warn: jest.fn() }
 }));

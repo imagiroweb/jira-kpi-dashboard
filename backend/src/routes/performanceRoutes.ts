@@ -231,7 +231,7 @@ async function loadPerformanceActorContext(userId: string): Promise<PerformanceS
   return {
     isSuperAdmin: user.role === 'super_admin',
     performanceGlobalAccess,
-    ledTeamIds: ledTeams.map((t) => (t._id as mongoose.Types.ObjectId).toString())
+    leadTeamIds: ledTeams.map((t) => (t._id as mongoose.Types.ObjectId).toString())
   };
 }
 
@@ -362,7 +362,7 @@ router.get('/reviews', authenticate, async (req: Request, res: Response) => {
     if (!actor) return fail(res, 404, 'Utilisateur authentifié introuvable');
 
     const isGlobal = hasGlobalPerformanceAccess(actor);
-    if (!isGlobal && actor.ledTeamIds.length === 0) {
+    if (!isGlobal && actor.leadTeamIds.length === 0) {
       return fail(res, 403, "Accès réservé au CTO, aux administrateurs, et aux leads d'équipe");
     }
 
@@ -378,12 +378,12 @@ router.get('/reviews', authenticate, async (req: Request, res: Response) => {
       if (!mongoose.Types.ObjectId.isValid(requestedTeamId)) {
         return fail(res, 400, "Identifiant d'équipe invalide");
       }
-      if (!isGlobal && !actor.ledTeamIds.includes(requestedTeamId)) {
+      if (!isGlobal && !actor.leadTeamIds.includes(requestedTeamId)) {
         return fail(res, 403, "Vous n'avez pas accès à cette équipe");
       }
       filter.team = requestedTeamId;
     } else if (!isGlobal) {
-      filter.team = { $in: actor.ledTeamIds };
+      filter.team = { $in: actor.leadTeamIds };
     }
 
     const requestedStatus = req.query.status as string | undefined;

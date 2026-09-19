@@ -262,7 +262,7 @@ describe('teamRoutes (TI)', () => {
         }
         return userDoc();
       });
-      mockTeamFindOne.mockResolvedValue({ _id: TEAM_A_ID, leadIds: [TEST_USER_ID] }); // isLeadOfAnyTeam(target) -> false attendu, mais on force le find pour ledTeamIds
+      mockTeamFindOne.mockResolvedValue({ _id: TEAM_A_ID, leadIds: [TEST_USER_ID] }); // isLeadOfAnyTeam(target) -> false attendu, mais on force le find pour leadTeamIds
 
       const res = await request(app).patch(url).send({ teamId: null });
       expect(res.status).toBe(403);
@@ -277,7 +277,7 @@ describe('teamRoutes (TI)', () => {
         }
         return userDoc();
       });
-      // L'acteur ne dirige aucune équipe (ledTeamIds vide) : Team.find({leadIds: actorId}) -> []
+      // L'acteur ne dirige aucune équipe (leadTeamIds vide) : Team.find({leadIds: actorId}) -> []
       mockTeamFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([]) }) });
       mockTeamFindById.mockResolvedValue({ _id: TEAM_B_ID, name: 'Autre équipe' });
       mockTeamFindOne.mockResolvedValue(null); // target non-lead

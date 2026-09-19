@@ -10,7 +10,7 @@ export interface PerformanceScopeActor {
   isSuperAdmin: boolean;
   performanceGlobalAccess: boolean;
   /** Ids (string) des équipes où l'acteur figure dans `leadIds`. */
-  ledTeamIds: string[];
+  leadTeamIds: string[];
 }
 
 /** Portée globale (CTO/super_admin) : voit et peut gérer les fiches de n'importe qui. */
@@ -31,7 +31,7 @@ export function canAccessReviewForTeam(
 ): boolean {
   if (hasGlobalPerformanceAccess(actor)) return true;
   if (!reviewTeamId) return false;
-  return actor.ledTeamIds.includes(reviewTeamId);
+  return actor.leadTeamIds.includes(reviewTeamId);
 }
 
 /** Le rôle (`IReviewAuthor.role`) à attribuer à l'acteur pour une action sur la fiche de `reviewTeamId`. */
@@ -40,6 +40,6 @@ export function resolveAuthorRole(
   reviewTeamId: string | null | undefined
 ): 'cto' | 'lead' | 'collaborateur' {
   if (hasGlobalPerformanceAccess(actor)) return 'cto';
-  if (reviewTeamId && actor.ledTeamIds.includes(reviewTeamId)) return 'lead';
+  if (reviewTeamId && actor.leadTeamIds.includes(reviewTeamId)) return 'lead';
   return 'collaborateur';
 }

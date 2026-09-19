@@ -13,10 +13,10 @@ function getDefaultDateRange() {
 }
 
 // Page ids for permissions (must match backend PAGE_IDS)
-export type PageId = 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'pointHebdo' | 'gestionUtilisateurs';
+export type PageId = 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'pointHebdo' | 'gestionUtilisateurs' | 'performance' | 'performanceDashboard';
 
 /** Order used for "first visible page" (dashboard first if visible, else first in list) */
-const PAGE_ORDER: PageId[] = ['dashboard', 'users', 'support', 'epics', 'marketing', 'produit', 'pointHebdo', 'gestionUtilisateurs'];
+const PAGE_ORDER: PageId[] = ['dashboard', 'users', 'support', 'epics', 'marketing', 'produit', 'pointHebdo', 'gestionUtilisateurs', 'performance', 'performanceDashboard'];
 
 export interface VisiblePages {
   dashboard: boolean;
@@ -27,6 +27,8 @@ export interface VisiblePages {
   produit: boolean;
   pointHebdo: boolean;
   gestionUtilisateurs: boolean;
+  performance: boolean;
+  performanceDashboard: boolean;
 }
 
 /** First page the user is allowed to see; default 'dashboard' if none or no visiblePages */
@@ -46,6 +48,14 @@ export interface User {
   role?: 'super_admin' | string | null;
   roleName?: string;
   visiblePages?: VisiblePages;
+  /** Équipe courante (modulable) ; null si non affecté */
+  teamId?: string | null;
+  /** Équipes dont l'utilisateur est lead (leadIds) */
+  leadTeamIds?: string[];
+  /** Portée globale Performance (CTO), indépendante de la visibilité de la page */
+  performanceGlobalAccess?: boolean;
+  /** Droit délégué de réaffecter des collaborateurs au sein de son équipe */
+  canManageTeamAssignment?: boolean;
 }
 
 // Dashboard board stats interface (now based on board ID)

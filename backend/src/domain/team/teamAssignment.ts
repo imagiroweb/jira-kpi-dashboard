@@ -18,7 +18,7 @@ export interface TeamAssignmentActor {
   /** Droit délégué par le CTO/super_admin — voir `User.canManageTeamAssignment`. */
   canManageTeamAssignment: boolean;
   /** Ids (string) des équipes où l'acteur figure dans `leadIds`. */
-  ledTeamIds: string[];
+  leadTeamIds: string[];
 }
 
 export interface TeamAssignmentTarget {
@@ -62,7 +62,7 @@ export function canAssignUserToTeam(
     };
   }
 
-  if (!actor.ledTeamIds.includes(requestedTeamId)) {
+  if (!actor.leadTeamIds.includes(requestedTeamId)) {
     return {
       allowed: false,
       reason: "Vous ne pouvez rattacher un collaborateur qu'à votre propre équipe"

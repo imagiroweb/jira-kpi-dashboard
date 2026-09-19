@@ -49,7 +49,7 @@ async function loadActorContext(userId: string): Promise<TeamAssignmentActor | n
     isSuperAdmin: user.role === 'super_admin',
     performanceGlobalAccess,
     canManageTeamAssignment: user.canManageTeamAssignment ?? false,
-    ledTeamIds: ledTeams.map((t) => (t._id as mongoose.Types.ObjectId).toString())
+    leadTeamIds: ledTeams.map((t) => (t._id as mongoose.Types.ObjectId).toString())
   };
 }
 

@@ -8,7 +8,7 @@ function actor(overrides: Partial<TeamAssignmentActor> = {}): TeamAssignmentActo
     isSuperAdmin: false,
     performanceGlobalAccess: false,
     canManageTeamAssignment: false,
-    ledTeamIds: [],
+    leadTeamIds: [],
     ...overrides
   };
 }
@@ -45,7 +45,7 @@ describe('canAssignUserToTeam', () => {
 
   it('refuse un lead qui tente de détacher un collaborateur (teamId null)', () => {
     const decision = canAssignUserToTeam(
-      actor({ canManageTeamAssignment: true, ledTeamIds: ['team-a'] }),
+      actor({ canManageTeamAssignment: true, leadTeamIds: ['team-a'] }),
       { isLeadOfAnyTeam: false },
       null
     );
@@ -55,7 +55,7 @@ describe('canAssignUserToTeam', () => {
 
   it("refuse un lead qui tente de rattacher à une équipe qu'il ne dirige pas", () => {
     const decision = canAssignUserToTeam(
-      actor({ canManageTeamAssignment: true, ledTeamIds: ['team-a'] }),
+      actor({ canManageTeamAssignment: true, leadTeamIds: ['team-a'] }),
       { isLeadOfAnyTeam: false },
       'team-b'
     );
@@ -65,7 +65,7 @@ describe('canAssignUserToTeam', () => {
 
   it('refuse un lead qui tente de déplacer un autre lead', () => {
     const decision = canAssignUserToTeam(
-      actor({ canManageTeamAssignment: true, ledTeamIds: ['team-a'] }),
+      actor({ canManageTeamAssignment: true, leadTeamIds: ['team-a'] }),
       { isLeadOfAnyTeam: true },
       'team-a'
     );
@@ -75,7 +75,7 @@ describe('canAssignUserToTeam', () => {
 
   it('autorise un lead à rattacher un collaborateur (non-lead) à sa propre équipe', () => {
     const decision = canAssignUserToTeam(
-      actor({ canManageTeamAssignment: true, ledTeamIds: ['team-a'] }),
+      actor({ canManageTeamAssignment: true, leadTeamIds: ['team-a'] }),
       { isLeadOfAnyTeam: false },
       'team-a'
     );
