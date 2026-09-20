@@ -13,7 +13,8 @@ vi.mock('../services/api', () => ({
     getReview: vi.fn(),
     defineObjectives: vi.fn(),
     updateManagerAssessment: vi.fn(),
-    getTeamMembers: vi.fn()
+    getTeamMembers: vi.fn(),
+    importOkr: vi.fn()
   },
   teamApi: {
     list: vi.fn(),
@@ -346,7 +347,8 @@ describe('TeamPerformancePage', () => {
     await screen.findByRole('button', { name: 'Gestion équipes & cycles' });
     fireEvent.click(screen.getByRole('button', { name: 'Gestion équipes & cycles' }));
 
-    expect(await screen.findByRole('heading', { name: 'Équipes' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Import des entretiens' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Équipes' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Cycles de performance' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Réaffecter un collaborateur' })).toBeInTheDocument();
     // Le suivi des fiches n'est plus affiché tant qu'on est sur l'onglet gestion.

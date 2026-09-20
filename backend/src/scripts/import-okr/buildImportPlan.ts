@@ -68,12 +68,11 @@ function teamHintFromRelativePath(relativePath: string): string {
   return parent === '.' ? '—' : parent;
 }
 
-/**
- * Construit le plan d'import S2-2026 à partir des fichiers présents sous `Entretiens-eval-perf/`,
- * rattachés au roster par le nom dans le fichier (ou un override). Aucune écriture.
- */
-export async function buildImportPlan(okrDir: string, roster: RosterCandidate[]): Promise<ImportPlanEntry[]> {
-  const interviewsDir = path.join(okrDir, 'Entretiens-eval-perf');
+/** Plan d'import à partir d'un dossier déjà rempli de fichiers d'entretien (CLI ou upload UI). */
+export async function buildImportPlanFromInterviewsDir(
+  interviewsDir: string,
+  roster: RosterCandidate[]
+): Promise<ImportPlanEntry[]> {
   const plan: ImportPlanEntry[] = [];
 
   for (const relativePath of collectInterviewFiles(interviewsDir)) {
@@ -182,4 +181,9 @@ export async function buildImportPlan(okrDir: string, roster: RosterCandidate[])
   }
 
   return plan;
+}
+
+/** CLI : scanne `OKR_ENTRETIEN_DIR/Entretiens-eval-perf/`. */
+export async function buildImportPlan(okrDir: string, roster: RosterCandidate[]): Promise<ImportPlanEntry[]> {
+  return buildImportPlanFromInterviewsDir(path.join(okrDir, 'Entretiens-eval-perf'), roster);
 }

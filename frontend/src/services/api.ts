@@ -17,7 +17,8 @@ import {
   type UpdatePerformanceCycleInput,
   type ObjectiveDefinitionInput,
   type AssessmentInput,
-  type ProgressUpdateInput
+  type ProgressUpdateInput,
+  type OkrImportResult
 } from '../domain/performance';
 import type { Team, CreateTeamInput, UpdateTeamInput, RosterUser } from '../domain/team';
 
@@ -754,6 +755,29 @@ export const performanceApi = {
     teamId?: string;
   }): Promise<{ success: boolean; members: PerformanceTeamMember[] }> => {
     const { data } = await api.get('/performance/team-members', { params });
+    return data;
+  },
+  /** Import fichiers d'entretien (session courante, rien n'est persisté hors objectifs). */
+  importOkr: async (input: {
+    files: File[];
+    cycleId: string;
+    dryRun: boolean;
+  }): Promise<OkrImportResult> => {
+    const form = new FormData();
+    form.append('cycleId', input.cycleId);
+    form.append('dryRun', String(input.dryRun));
+    input.files.forEach((file) => form.append('files', file));
+    const { data } = await api.post('/performance/import-okr', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      transformRequest: [
+        (body, headers) => {
+          if (body instanceof FormData) {
+            delete headers['Content-Type'];
+          }
+          return body;
+        }
+      ]
+    });
     return data;
   }
 };

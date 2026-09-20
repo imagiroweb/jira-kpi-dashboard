@@ -1,7 +1,15 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
 import mongoose from 'mongoose';
+import fs from 'fs';
+import os from 'os';
+import path from 'path';
+import multer from 'multer';
 import { logger } from '../utils/logger';
+import {
+  buildImportPlanFromInterviewsDir,
+  ImportPlanEntry
+} from '../scripts/import-okr/buildImportPlan';
 import {
   PerformanceCycle,
   IPerformanceCycle,
@@ -740,5 +748,160 @@ router.patch('/reviews/me/self-assessment', authenticate, async (req: Request, r
     fail(res, 500, "Erreur lors de l'application de l'auto-évaluation", error);
   }
 });
+
+const importUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 8 * 1024 * 1024, files: 40 },
+  fileFilter: (_req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    const base = path.basename(file.originalname);
+    cb(null, ['.xlsx', '.ods'].includes(ext) && !base.startsWith('~$') && !base.includes('..'));
+  }
+});
+
+function serializeImportPlanEntry(entry: ImportPlanEntry) {
+  return {
+    name: entry.name,
+    team: entry.team,
+    relativePath: entry.relativePath,
+    outcome: entry.outcome,
+    email: entry.matchedUser?.email ?? null,
+    warnings: entry.warnings,
+    errors: entry.errors,
+    objectiveTitles: entry.objectives?.map((o) => o.title) ?? []
+  };
+}
+
+/**
+ * Import des fichiers d'entretien (xlsx/ods) : scan + matching roster (email Entra),
+ * dry-run ou écriture des objectifs. CTO/super_admin uniquement. Les fichiers restent
+ * en mémoire le temps de la requête — aucun token ni fichier n'est persisté.
+ * POST /api/performance/import-okr
+ */
+router.post(
+  '/import-okr',
+  authenticate,
+  requireGlobalPerformanceAccess,
+  importUpload.array('files', 40),
+  async (req: Request, res: Response) => {
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    if (files.length === 0) {
+      return fail(res, 400, 'Ajoute au moins un fichier .xlsx ou .ods');
+    }
+
+    const cycleId = typeof req.body?.cycleId === 'string' ? req.body.cycleId : undefined;
+    const dryRun = req.body?.dryRun === 'true' || req.body?.dryRun === true;
+
+    const cycle = await resolveCycle(cycleId);
+    if (cycle === undefined) return fail(res, 400, 'Identifiant de cycle invalide');
+    if (!cycle) return fail(res, 404, cycleId ? 'Cycle introuvable' : 'Aucun cycle de performance actif');
+    if (!dryRun && cycle.status !== 'active') {
+      return fail(res, 403, 'Ce cycle n’est pas actif, les objectifs ne peuvent pas être importés');
+    }
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'okr-import-ui-'));
+    try {
+      for (const file of files) {
+        const base = path.basename(file.originalname);
+        fs.writeFileSync(path.join(tmpDir, base), file.buffer);
+      }
+
+      const users = await User.find({ isActive: true }).select('firstName lastName email teamId').lean();
+      const roster = users.map((u) => ({
+        id: u._id.toString(),
+        firstName: u.firstName,
+        lastName: u.lastName,
+        email: u.email,
+        teamId: u.teamId ? u.teamId.toString() : null
+      }));
+
+      const plan = await buildImportPlanFromInterviewsDir(tmpDir, roster);
+      const actor = await loadPerformanceActorContext(req.user!.userId);
+      if (!actor) return fail(res, 404, 'Utilisateur authentifié introuvable');
+
+      const writes: { name: string; email: string; ok: boolean; error?: string }[] = [];
+      if (!dryRun) {
+        for (const entry of plan) {
+          if (entry.outcome !== 'ready' || !entry.matchedUser || !entry.apiInput) continue;
+          try {
+            await writeImportedObjectives(req, actor, entry.matchedUser.id, entry.apiInput, cycle);
+            writes.push({ name: entry.name, email: entry.matchedUser.email, ok: true });
+          } catch (error) {
+            writes.push({
+              name: entry.name,
+              email: entry.matchedUser.email,
+              ok: false,
+              error: error instanceof Error ? error.message : 'Échec de l’écriture'
+            });
+          }
+        }
+      }
+
+      res.json({
+        success: true,
+        dryRun,
+        cycle: { id: cycle._id, label: cycle.label, status: cycle.status },
+        entries: plan.map(serializeImportPlanEntry),
+        writes
+      });
+    } catch (error) {
+      logger.error('Error importing OKR interview files:', error);
+      fail(res, 500, 'Erreur lors de l’import des fichiers d’entretien', error);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+);
+
+async function writeImportedObjectives(
+  req: Request,
+  actor: PerformanceScopeActor,
+  userId: string,
+  objectivesInput: ObjectiveDefinitionInput[],
+  cycle: IPerformanceCycle
+): Promise<void> {
+  let updated: IPerformanceReview | null = null;
+
+  for (let attempt = 0; attempt < REVIEW_UPDATE_RETRIES; attempt += 1) {
+    let current = await PerformanceReview.findOne({ user: userId, cycle: cycle._id });
+    const targetUser = current ? null : await User.findById(userId).select('teamId').lean();
+    if (!current && !targetUser) {
+      throw new Error('Collaborateur introuvable');
+    }
+
+    const reviewTeamId = current
+      ? current.team?.toString()
+      : targetUser?.teamId
+        ? targetUser.teamId.toString()
+        : undefined;
+
+    if (!canAccessReviewForTeam(actor, reviewTeamId)) {
+      throw new Error("Vous n'avez pas accès à la fiche de ce collaborateur");
+    }
+
+    const who = { ...author(req), role: resolveAuthorRole(actor, reviewTeamId) };
+
+    if (!current) {
+      current = await PerformanceReview.create({
+        user: userId,
+        cycle: cycle._id,
+        team: reviewTeamId,
+        createdBy: who
+      });
+    }
+
+    const objectives = applyObjectivesDefinition(current.toObject().objectives, objectivesInput);
+    const status = computeReviewStatus(objectives, current.status);
+
+    updated = await PerformanceReview.findOneAndUpdate(
+      { _id: current._id, __v: current.__v },
+      { $set: { objectives, definedBy: who, updatedBy: who, status } },
+      { new: true, runValidators: true }
+    );
+    if (updated) return;
+  }
+
+  throw new Error('La fiche a été modifiée en même temps, réessayez');
+}
 
 export { router as performanceRoutes };

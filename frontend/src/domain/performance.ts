@@ -194,6 +194,25 @@ export interface PerformanceTeamMember {
   teamId: string;
 }
 
+export interface OkrImportPlanEntry {
+  name: string;
+  team: string;
+  relativePath: string;
+  outcome: 'unrecognized_filename' | 'no_match' | 'worksheet_not_found' | 'read_error' | 'invalid' | 'ready';
+  email: string | null;
+  warnings: string[];
+  errors: string[];
+  objectiveTitles: string[];
+}
+
+export interface OkrImportResult {
+  success: boolean;
+  dryRun: boolean;
+  cycle: { id: string; label: string; status: string };
+  entries: OkrImportPlanEntry[];
+  writes: { name: string; email: string; ok: boolean; error?: string }[];
+}
+
 // --- Aides d'affichage pures (miroir de src/domain/performance/performanceReview.ts côté backend). ---
 // Le backend reste la seule source de vérité : ces fonctions ne font qu'anticiper le même calcul
 // côté client (barres de progression, validation immédiate d'un formulaire) avant l'appel API, qui

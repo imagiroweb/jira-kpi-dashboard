@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Loader2, AlertTriangle, Plus, Save, X } from 'lucide-react';
+import { Loader2, AlertTriangle, Plus, Save, X, Upload } from 'lucide-react';
 import { performanceApi, teamApi } from '../services/api';
 import type { Team, RosterUser } from '../domain/team';
-import type { PerformanceCycle, PerformanceCycleStatus } from '../domain/performance';
+import type { OkrImportResult, PerformanceCycle, PerformanceCycleStatus } from '../domain/performance';
 import { CYCLE_STATUS_LABELS } from '../domain/performance';
 
 function extractApiErrorMessage(err: unknown, fallback: string): string {
@@ -237,8 +237,124 @@ export function TeamsCyclesAdminPanel({ teams, cycles, onChanged }: TeamsCyclesA
     [cycles]
   );
 
+  const activeCycle = useMemo(
+    () => cycles.find((c) => c.status === 'active') ?? cycles[0] ?? null,
+    [cycles]
+  );
+  const [importCycleId, setImportCycleId] = useState('');
+  const [importFiles, setImportFiles] = useState<File[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importResult, setImportResult] = useState<OkrImportResult | null>(null);
+
+  useEffect(() => {
+    if (activeCycle && !importCycleId) setImportCycleId(activeCycle.id);
+  }, [activeCycle, importCycleId]);
+
+  async function handleImportOkr(dryRun: boolean) {
+    if (!importCycleId || importFiles.length === 0) return;
+    setImporting(true);
+    setImportError(null);
+    setImportResult(null);
+    try {
+      const result = await performanceApi.importOkr({ files: importFiles, cycleId: importCycleId, dryRun });
+      setImportResult(result);
+      if (!dryRun) onChanged();
+    } catch (err) {
+      setImportError(extractApiErrorMessage(err, 'Erreur lors de l’import des fichiers d’entretien'));
+    } finally {
+      setImporting(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
+      <div className="card-glass p-6 space-y-4">
+        <div>
+          <h3 className="text-base font-semibold text-surface-100">Import des entretiens</h3>
+          <p className="text-xs text-surface-500 mt-1">
+            Ta session sert d’authentification (rien n’est stocké côté serveur). Dépose les .xlsx /
+            .ods : le nom de fichier est rattaché à l’email Entra (`b` + `deguil-robin`).
+          </p>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div>
+            <label htmlFor="import-cycle" className="block text-xs text-surface-400 mb-1">
+              Cycle
+            </label>
+            <select
+              id="import-cycle"
+              className="input"
+              value={importCycleId}
+              onChange={(e) => setImportCycleId(e.target.value)}
+            >
+              {cycles.map((cyc) => (
+                <option key={cyc.id} value={cyc.id}>
+                  {cyc.label} ({CYCLE_STATUS_LABELS[cyc.status]})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="import-files" className="block text-xs text-surface-400 mb-1">
+              Fichiers d’entretien
+            </label>
+            <input
+              id="import-files"
+              type="file"
+              multiple
+              accept=".xlsx,.ods"
+              className="block w-full text-sm text-surface-300 file:mr-3 file:btn-secondary file:text-sm"
+              onChange={(e) => setImportFiles(Array.from(e.target.files ?? []))}
+            />
+            {importFiles.length > 0 && (
+              <p className="text-xs text-surface-500 mt-1">{importFiles.length} fichier(s) sélectionné(s)</p>
+            )}
+          </div>
+        </div>
+        {importError && <p className="text-xs text-danger-400">{importError}</p>}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className="btn-secondary text-sm"
+            disabled={importing || !importCycleId || importFiles.length === 0}
+            onClick={() => handleImportOkr(true)}
+          >
+            {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            Prévisualiser
+          </button>
+          <button
+            type="button"
+            className="btn-primary text-sm"
+            disabled={importing || !importCycleId || importFiles.length === 0}
+            onClick={() => handleImportOkr(false)}
+          >
+            {importing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Importer
+          </button>
+        </div>
+        {importResult && (
+          <div className="border border-surface-700/50 rounded-xl p-3 space-y-2 text-sm">
+            <p className="text-surface-300">
+              {importResult.dryRun ? 'Prévisualisation' : 'Import'} — {importResult.cycle.label} :{' '}
+              {importResult.entries.filter((e) => e.outcome === 'ready').length} prêt(s),{' '}
+              {importResult.entries.filter((e) => e.outcome !== 'ready').length} bloqué(s)
+              {!importResult.dryRun &&
+                `, ${importResult.writes.filter((w) => w.ok).length} écrit(s)`}
+            </p>
+            <ul className="space-y-1 max-h-56 overflow-y-auto">
+              {importResult.entries.map((entry) => (
+                <li key={entry.relativePath} className="text-xs text-surface-400">
+                  {entry.outcome === 'ready' ? '✓' : '✗'} {entry.name}
+                  {entry.email ? ` (${entry.email})` : ''} — {entry.outcome}
+                  {entry.errors.length > 0 ? ` : ${entry.errors.join(' ; ')}` : ''}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
       {/* Équipes */}
       <div className="card-glass p-6 space-y-4">
         <div className="flex items-center justify-between">
