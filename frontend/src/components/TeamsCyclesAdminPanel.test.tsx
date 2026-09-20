@@ -91,6 +91,8 @@ describe('TeamsCyclesAdminPanel', () => {
 
     expect(within(teamsCard()).getByText('Choco')).toBeInTheDocument();
     expect(within(teamsCard()).getByText('Cook')).toBeInTheDocument();
+    expect(within(teamsCard()).getByText(/1 collaborateur\(s\) : Alice Martin/)).toBeInTheDocument();
+    expect(within(teamsCard()).getByText('Aucun collaborateur rattaché')).toBeInTheDocument();
     expect(within(cyclesCard()).getByText('S2-2026')).toBeInTheDocument();
     expect(within(cyclesCard()).getByText('S1-2027')).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Réaffecter un collaborateur' })).toBeInTheDocument();

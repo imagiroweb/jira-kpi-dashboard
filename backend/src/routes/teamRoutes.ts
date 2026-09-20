@@ -7,6 +7,7 @@ import { canAssignUserToTeam, hasGlobalTeamManagementAccess, TeamAssignmentActor
 import { authenticate } from '../middleware/authMiddleware';
 import { User } from '../domain/user/entities/User';
 import { Role } from '../domain/user/entities/Role';
+import { ensureLeadTeamMembership, syncOpenCycleReviewsTeam } from '../domain/performance/reviewTeam';
 
 const router = Router();
 
@@ -20,9 +21,9 @@ function fail(res: Response, status: number, message: string, error?: unknown) {
 
 function serializeTeam(team: ITeam) {
   return {
-    id: team._id,
+    id: team._id.toString(),
     name: team.name,
-    leadIds: team.leadIds,
+    leadIds: (team.leadIds ?? []).map((id) => id.toString()),
     createdAt: team.createdAt,
     updatedAt: team.updatedAt
   };
@@ -100,11 +101,11 @@ router.get('/roster', authenticate, requireGlobalTeamManagementAccess, async (_r
     res.json({
       success: true,
       users: users.map((u) => ({
-        id: u._id,
+        id: u._id.toString(),
         firstName: u.firstName,
         lastName: u.lastName,
         email: u.email,
-        teamId: u.teamId ?? null
+        teamId: u.teamId ? u.teamId.toString() : null
       }))
     });
   } catch (error) {
@@ -132,6 +133,11 @@ router.post(
       if (existing) return fail(res, 400, 'Une équipe avec ce nom existe déjà');
 
       const team = await Team.create({ name, leadIds: leadIds ?? [] });
+      await ensureLeadTeamMembership(
+        team._id.toString(),
+        (leadIds ?? []).map((id: unknown) => String(id)),
+        team.name
+      );
       res.status(201).json({ success: true, team: serializeTeam(team) });
     } catch (error) {
       logger.error('Error creating team:', error);
@@ -162,6 +168,11 @@ router.patch(
       if (Array.isArray(req.body.leadIds)) team.leadIds = req.body.leadIds;
 
       await team.save();
+      await ensureLeadTeamMembership(
+        team._id.toString(),
+        (team.leadIds ?? []).map((id) => id.toString()),
+        team.name
+      );
       res.json({ success: true, team: serializeTeam(team) });
     } catch (error) {
       logger.error('Error updating team:', error);
@@ -197,9 +208,11 @@ router.patch(
       const actor = await loadActorContext(req.user!.userId);
       if (!actor) return fail(res, 404, 'Utilisateur authentifié introuvable');
 
+      let teamName: string | null = null;
       if (requestedTeamId !== null) {
         const targetTeam = await Team.findById(requestedTeamId);
         if (!targetTeam) return fail(res, 404, 'Équipe introuvable');
+        teamName = targetTeam.name;
       }
 
       const isLeadOfAnyTeam = (await Team.findOne({ leadIds: userId })) !== null;
@@ -210,9 +223,11 @@ router.patch(
       targetUser.teamId = requestedTeamId ? new mongoose.Types.ObjectId(requestedTeamId) : undefined;
       await targetUser.save();
 
+      await syncOpenCycleReviewsTeam(userId, requestedTeamId, teamName);
+
       res.json({
         success: true,
-        user: { id: targetUser._id, teamId: targetUser.teamId ?? null }
+        user: { id: targetUser._id.toString(), teamId: targetUser.teamId ? targetUser.teamId.toString() : null }
       });
     } catch (error) {
       logger.error('Error assigning user to team:', error);

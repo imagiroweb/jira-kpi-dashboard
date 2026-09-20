@@ -42,6 +42,7 @@ import { authenticate } from '../middleware/authMiddleware';
 import { User } from '../domain/user/entities/User';
 import { Role } from '../domain/user/entities/Role';
 import { Team } from '../domain/team/entities/Team';
+import { teamOverridesForReviews, toIdString } from '../domain/performance/reviewTeam';
 
 const router = Router();
 
@@ -63,13 +64,16 @@ function fail(res: Response, status: number, message: string, error?: unknown) {
   });
 }
 
-function serialize(review: IPerformanceReview) {
+function serialize(
+  review: IPerformanceReview,
+  teamOverride?: { team?: string; teamNameSnapshot?: string }
+) {
   return {
     id: review._id,
     user: review.user,
     cycle: review.cycle,
-    team: review.team,
-    teamNameSnapshot: review.teamNameSnapshot,
+    team: teamOverride?.team ?? toIdString(review.team),
+    teamNameSnapshot: teamOverride?.teamNameSnapshot ?? review.teamNameSnapshot,
     objectives: review.objectives,
     qualitative: completeQualitative(review.qualitative),
     competencyScores: completeCompetencyScores(review.competencyScores),
@@ -133,7 +137,11 @@ router.get('/reviews/me', authenticate, async (req: Request, res: Response) => {
 
     const existing = await PerformanceReview.findOne({ user: req.user!.userId, cycle: cycle._id });
     if (existing) {
-      return res.json({ success: true, review: serialize(existing) });
+      const overrides = await teamOverridesForReviews([existing]);
+      return res.json({
+        success: true,
+        review: serialize(existing, overrides.get(toIdString(existing._id) ?? ''))
+      });
     }
 
     if (cycle.status !== 'active') {
@@ -425,7 +433,11 @@ router.get('/reviews', authenticate, async (req: Request, res: Response) => {
       .populate('user', 'firstName lastName email')
       .sort({ updatedAt: -1 });
 
-    res.json({ success: true, reviews: reviews.map(serialize) });
+    const overrides = await teamOverridesForReviews(reviews);
+    res.json({
+      success: true,
+      reviews: reviews.map((review) => serialize(review, overrides.get(toIdString(review._id) ?? '')))
+    });
   } catch (error) {
     logger.error('Error listing performance reviews:', error);
     fail(res, 500, 'Erreur lors de la récupération des fiches de performance', error);
@@ -467,6 +479,22 @@ router.get('/team-members', authenticate, async (req: Request, res: Response) =>
       filter.teamId = { $in: actor.leadTeamIds };
     }
 
+    const scopedTeamQuery = requestedTeamId
+      ? { _id: requestedTeamId }
+      : isGlobal
+        ? {}
+        : { _id: { $in: actor.leadTeamIds } };
+    const scopedTeams = await Team.find(scopedTeamQuery).select('leadIds').lean();
+    const leadUserIds = [
+      ...new Set(scopedTeams.flatMap((team) => (team.leadIds ?? []).map((id) => id.toString())))
+    ];
+    if (leadUserIds.length > 0) {
+      const teamClause = { ...filter };
+      delete teamClause.isActive;
+      filter.$or = [teamClause, { _id: { $in: leadUserIds } }];
+      delete filter.teamId;
+    }
+
     const users = await User.find(filter)
       .select('firstName lastName email teamId')
       .sort({ firstName: 1, lastName: 1 });
@@ -474,11 +502,11 @@ router.get('/team-members', authenticate, async (req: Request, res: Response) =>
     res.json({
       success: true,
       members: users.map((u) => ({
-        id: u._id,
+        id: toIdString(u._id) ?? String(u._id),
         firstName: u.firstName,
         lastName: u.lastName,
         email: u.email,
-        teamId: u.teamId
+        teamId: toIdString(u.teamId) ?? ''
       }))
     });
   } catch (error) {
@@ -506,16 +534,19 @@ router.get('/reviews/:userId', authenticate, async (req: Request, res: Response)
     );
     if (!review) return fail(res, 404, 'Aucune fiche de performance pour ce cycle');
 
+    const overrides = await teamOverridesForReviews([review]);
+    const hydratedTeam = overrides.get(toIdString(review._id) ?? '');
+
     if (userId !== req.user!.userId) {
       const actor = await loadPerformanceActorContext(req.user!.userId);
       if (!actor) return fail(res, 404, 'Utilisateur authentifié introuvable');
-      const reviewTeamId = review.team ? review.team.toString() : undefined;
+      const reviewTeamId = hydratedTeam?.team ?? toIdString(review.team);
       if (!canAccessReviewForTeam(actor, reviewTeamId)) {
         return fail(res, 403, "Vous n'avez pas accès à la fiche de ce collaborateur");
       }
     }
 
-    res.json({ success: true, review: serialize(review) });
+    res.json({ success: true, review: serialize(review, hydratedTeam) });
   } catch (error) {
     logger.error('Error fetching performance review:', error);
     fail(res, 500, 'Erreur lors de la récupération de la fiche de performance', error);
@@ -558,16 +589,12 @@ router.patch('/reviews/:userId/objectives', authenticate, async (req: Request, r
     for (let attempt = 0; attempt < REVIEW_UPDATE_RETRIES; attempt += 1) {
       let current = await PerformanceReview.findOne({ user: userId, cycle: cycle._id });
 
-      const targetUser = current ? null : await User.findById(userId).select('teamId').lean();
+      const targetUser = await User.findById(userId).select('teamId').lean();
       if (!current && !targetUser) {
         return fail(res, 404, 'Collaborateur introuvable');
       }
 
-      const reviewTeamId = current
-        ? current.team?.toString()
-        : targetUser?.teamId
-        ? targetUser.teamId.toString()
-        : undefined;
+      const reviewTeamId = toIdString(current?.team) ?? toIdString(targetUser?.teamId);
 
       if (!canAccessReviewForTeam(actor, reviewTeamId)) {
         return fail(res, 403, "Vous n'avez pas accès à la fiche de ce collaborateur");
@@ -587,9 +614,12 @@ router.patch('/reviews/:userId/objectives', authenticate, async (req: Request, r
       const objectives = applyObjectivesDefinition(current.toObject().objectives, objectivesInput);
       const status = computeReviewStatus(objectives, current.status);
 
+      const $set: Record<string, unknown> = { objectives, definedBy: who, updatedBy: who, status };
+      if (reviewTeamId && !toIdString(current.team)) $set.team = reviewTeamId;
+
       updated = await PerformanceReview.findOneAndUpdate(
         { _id: current._id, __v: current.__v },
-        { $set: { objectives, definedBy: who, updatedBy: who, status } },
+        { $set },
         { new: true, runValidators: true }
       );
       if (updated) break;
@@ -864,16 +894,12 @@ async function writeImportedObjectives(
 
   for (let attempt = 0; attempt < REVIEW_UPDATE_RETRIES; attempt += 1) {
     let current = await PerformanceReview.findOne({ user: userId, cycle: cycle._id });
-    const targetUser = current ? null : await User.findById(userId).select('teamId').lean();
+    const targetUser = await User.findById(userId).select('teamId').lean();
     if (!current && !targetUser) {
       throw new Error('Collaborateur introuvable');
     }
 
-    const reviewTeamId = current
-      ? current.team?.toString()
-      : targetUser?.teamId
-        ? targetUser.teamId.toString()
-        : undefined;
+    const reviewTeamId = toIdString(current?.team) ?? toIdString(targetUser?.teamId);
 
     if (!canAccessReviewForTeam(actor, reviewTeamId)) {
       throw new Error("Vous n'avez pas accès à la fiche de ce collaborateur");
@@ -893,9 +919,12 @@ async function writeImportedObjectives(
     const objectives = applyObjectivesDefinition(current.toObject().objectives, objectivesInput);
     const status = computeReviewStatus(objectives, current.status);
 
+    const $set: Record<string, unknown> = { objectives, definedBy: who, updatedBy: who, status };
+    if (reviewTeamId && !toIdString(current.team)) $set.team = reviewTeamId;
+
     updated = await PerformanceReview.findOneAndUpdate(
       { _id: current._id, __v: current.__v },
-      { $set: { objectives, definedBy: who, updatedBy: who, status } },
+      { $set },
       { new: true, runValidators: true }
     );
     if (updated) return;

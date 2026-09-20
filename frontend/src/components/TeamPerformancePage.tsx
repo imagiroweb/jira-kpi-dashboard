@@ -210,19 +210,34 @@ export function TeamPerformancePage() {
   const cycle = useMemo(() => cycles.find((c) => c.status === 'active') ?? null, [cycles]);
   const isReadOnly = cycle != null && cycle.status !== 'active';
 
-  const teamsById = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
+  const teamsById = useMemo(() => new Map(teams.map((t) => [String(t.id), t.name])), [teams]);
+  const membersById = useMemo(() => new Map(members.map((m) => [String(m.id), m])), [members]);
   const filterableTeams = useMemo(
     () => (isGlobal ? teams : teams.filter((t) => leadTeamIds.includes(t.id))),
     [teams, isGlobal, leadTeamIds]
   );
 
-  const reviewedUserIds = useMemo(() => new Set(reviews.map((r) => reviewUserId(r))), [reviews]);
+  function teamLabelForReview(review: PerformanceReview): string {
+    const reviewTeamId = review.team ? String(review.team) : '';
+    if (reviewTeamId && teamsById.get(reviewTeamId)) return teamsById.get(reviewTeamId)!;
+    if (review.teamNameSnapshot) return review.teamNameSnapshot;
+    const userId = String(reviewUserId(review));
+    const member = membersById.get(userId);
+    if (member?.teamId && teamsById.get(String(member.teamId))) return teamsById.get(String(member.teamId))!;
+    const leadTeam = teams.find((team) =>
+      (team.leadIds ?? []).some((id) => String(id) === userId)
+    );
+    if (leadTeam) return leadTeam.name;
+    return '—';
+  }
+
+  const reviewedUserIds = useMemo(() => new Set(reviews.map((r) => String(reviewUserId(r)))), [reviews]);
   // Collaborateurs de la portée sans fiche encore ouverte pour ce cycle (jamais créée en base) :
   // on ne les affiche que si le filtre de statut ne les exclut pas explicitement.
   const virtualMembers = useMemo(
     () =>
       statusFilter === '' || statusFilter === 'dossier_manquant'
-        ? members.filter((m) => !reviewedUserIds.has(m.id))
+        ? members.filter((m) => !reviewedUserIds.has(String(m.id)))
         : [],
     [members, reviewedUserIds, statusFilter]
   );
@@ -601,9 +616,7 @@ export function TeamPerformancePage() {
                   {reviews.map((review) => (
                     <tr key={reviewUserId(review)} className="border-b border-surface-800/50">
                       <td className="p-3 text-surface-200">{reviewUserLabel(review)}</td>
-                      <td className="p-3 text-surface-400">
-                        {(review.team && teamsById.get(review.team)) || review.teamNameSnapshot || '—'}
-                      </td>
+                      <td className="p-3 text-surface-400">{teamLabelForReview(review)}</td>
                       <td className="p-3">
                         <span className={`badge ${REVIEW_STATUS_BADGE_CLASS[review.status]}`}>
                           {REVIEW_STATUS_LABELS[review.status]}
@@ -624,7 +637,7 @@ export function TeamPerformancePage() {
                   {virtualMembers.map((member) => (
                     <tr key={member.id} className="border-b border-surface-800/50">
                       <td className="p-3 text-surface-200">{memberLabel(member)}</td>
-                      <td className="p-3 text-surface-400">{teamsById.get(member.teamId) || '—'}</td>
+                      <td className="p-3 text-surface-400">{teamsById.get(String(member.teamId)) || '—'}</td>
                       <td className="p-3">
                         <span className={`badge ${REVIEW_STATUS_BADGE_CLASS.dossier_manquant}`}>
                           {REVIEW_STATUS_LABELS.dossier_manquant}

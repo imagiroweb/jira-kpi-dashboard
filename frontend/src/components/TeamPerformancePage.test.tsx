@@ -95,6 +95,46 @@ describe('TeamPerformancePage', () => {
     vi.mocked(teamApi.getRoster).mockResolvedValue({ success: true, users: [] });
   });
 
+  it("affiche l'équipe dont l'utilisateur est lead si teamId est vide", async () => {
+    seedUser({ performanceGlobalAccess: true, leadTeamIds: [] });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({
+      success: true,
+      teams: [{ ...TEAMS[0], leadIds: ['user-1'] }]
+    });
+    mockListReviews.mockResolvedValue({
+      success: true,
+      reviews: [makeReview({ team: undefined, teamNameSnapshot: undefined })]
+    });
+    mockGetTeamMembers.mockResolvedValue({ success: true, members: [] });
+
+    render(<TeamPerformancePage />);
+
+    expect(await screen.findByText('Alice Martin')).toBeInTheDocument();
+    const row = screen.getByText('Alice Martin').closest('tr');
+    expect(row).toHaveTextContent('Choco');
+  });
+
+  it("affiche l'équipe courante si la fiche n'a pas de team snapshotée", async () => {
+    seedUser({ performanceGlobalAccess: true, leadTeamIds: [] });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    mockListReviews.mockResolvedValue({
+      success: true,
+      reviews: [makeReview({ team: undefined, teamNameSnapshot: undefined })]
+    });
+    mockGetTeamMembers.mockResolvedValue({
+      success: true,
+      members: [{ id: 'user-1', firstName: 'Alice', lastName: 'Martin', email: 'alice@test.com', teamId: 'team-1' }]
+    });
+
+    render(<TeamPerformancePage />);
+
+    expect(await screen.findByText('Alice Martin')).toBeInTheDocument();
+    const row = screen.getByText('Alice Martin').closest('tr');
+    expect(row).toHaveTextContent('Choco');
+  });
+
   it("affiche la liste pour un CTO (accès global) avec le filtre 'toutes les équipes'", async () => {
     seedUser({ performanceGlobalAccess: true, leadTeamIds: [] });
     mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });

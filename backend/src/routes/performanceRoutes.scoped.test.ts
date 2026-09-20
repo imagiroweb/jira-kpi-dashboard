@@ -16,6 +16,7 @@ const mockReviewFindOne = jest.fn();
 const mockReviewCreate = jest.fn();
 const mockReviewFindOneAndUpdate = jest.fn();
 const mockUserFindById = jest.fn();
+const mockUserFind = jest.fn();
 const mockRoleFindById = jest.fn();
 const mockTeamFind = jest.fn();
 
@@ -48,7 +49,8 @@ jest.mock('../domain/performance/entities/PerformanceReview', () => {
 
 jest.mock('../domain/user/entities/User', () => ({
   User: {
-    findById: (...args: unknown[]) => mockUserFindById(...args)
+    findById: (...args: unknown[]) => mockUserFindById(...args),
+    find: (...args: unknown[]) => mockUserFind(...args)
   }
 }));
 
@@ -133,6 +135,7 @@ describe('performanceRoutes — portée équipe/CTO (TI)', () => {
       return { select: () => ({ lean: () => Promise.resolve({ teamId: null }) }) };
     });
     mockTeamFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([]) }) });
+    mockUserFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([]) }) });
     mockCycleFindOne.mockResolvedValue(null);
   });
 
@@ -270,6 +273,28 @@ describe('performanceRoutes — portée équipe/CTO (TI)', () => {
       expect(res.status).toBe(200);
       expect(res.body.reviews).toHaveLength(1);
       expect(mockReviewFind).toHaveBeenCalledWith({ cycle: ACTIVE_CYCLE._id });
+    });
+
+    it("renseigne l'équipe depuis User.teamId si la fiche n'en a pas", async () => {
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFind.mockReturnValue({
+        populate: () => ({ sort: () => Promise.resolve([makeReviewDoc({ team: null })]) })
+      });
+      mockUserFind.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve([{ _id: TARGET_USER_ID, teamId: TEAM_A_ID }]) })
+      });
+      mockTeamFind.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve([{ _id: TEAM_A_ID, name: 'Choco' }]) })
+      });
+
+      const res = await request(app).get('/api/performance/reviews');
+
+      expect(res.status).toBe(200);
+      expect(res.body.reviews[0].team).toBe(TEAM_A_ID);
+      expect(res.body.reviews[0].teamNameSnapshot).toBe('Choco');
     });
 
     it('200 un lead ne voit que les fiches de ses équipes', async () => {

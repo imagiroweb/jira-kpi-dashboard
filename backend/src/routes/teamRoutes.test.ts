@@ -12,6 +12,8 @@ const mockTeamCreate = jest.fn();
 const mockUserFindById = jest.fn();
 const mockUserFind = jest.fn();
 const mockRoleFindById = jest.fn();
+const mockCycleFind = jest.fn();
+const mockReviewUpdateMany = jest.fn();
 
 jest.mock('../domain/team/entities/Team', () => ({
   Team: {
@@ -22,10 +24,13 @@ jest.mock('../domain/team/entities/Team', () => ({
   }
 }));
 
+const mockUserUpdateMany = jest.fn();
+
 jest.mock('../domain/user/entities/User', () => ({
   User: {
     findById: (...args: unknown[]) => mockUserFindById(...args),
-    find: (...args: unknown[]) => mockUserFind(...args)
+    find: (...args: unknown[]) => mockUserFind(...args),
+    updateMany: (...args: unknown[]) => mockUserUpdateMany(...args)
   }
 }));
 
@@ -34,6 +39,26 @@ jest.mock('../domain/user/entities/Role', () => ({
     findById: (...args: unknown[]) => mockRoleFindById(...args)
   }
 }));
+
+jest.mock('../domain/performance/entities/PerformanceCycle', () => {
+  const actual = jest.requireActual('../domain/performance/entities/PerformanceCycle');
+  return {
+    ...actual,
+    PerformanceCycle: {
+      find: (...args: unknown[]) => mockCycleFind(...args)
+    }
+  };
+});
+
+jest.mock('../domain/performance/entities/PerformanceReview', () => {
+  const actual = jest.requireActual('../domain/performance/entities/PerformanceReview');
+  return {
+    ...actual,
+    PerformanceReview: {
+      updateMany: (...args: unknown[]) => mockReviewUpdateMany(...args)
+    }
+  };
+});
 
 jest.mock('../middleware/authMiddleware', () => {
   const auth = jest.requireActual<typeof import('../test/mocks/authMiddleware')>('../test/mocks/authMiddleware');
@@ -91,6 +116,9 @@ describe('teamRoutes (TI)', () => {
     mockUserFind.mockReturnValue({
       select: () => ({ sort: () => Promise.resolve([]) })
     });
+    mockCycleFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([]) }) });
+    mockReviewUpdateMany.mockResolvedValue({ acknowledged: true });
+    mockUserUpdateMany.mockResolvedValue({ acknowledged: true });
   });
 
   describe('GET /', () => {
@@ -353,12 +381,16 @@ describe('teamRoutes (TI)', () => {
       mockTeamFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([{ _id: TEAM_A_ID }]) }) });
       mockTeamFindById.mockResolvedValue({ _id: TEAM_A_ID, name: 'Choco' });
       mockTeamFindOne.mockResolvedValue(null); // target n'est lead d'aucune équipe
+      mockCycleFind.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve([{ _id: 'cycle-active' }]) })
+      });
 
       const res = await request(app).patch(url).send({ teamId: TEAM_A_ID });
 
       expect(res.status).toBe(200);
       expect(target.save).toHaveBeenCalled();
       expect(target.teamId?.toString()).toBe(TEAM_A_ID);
+      expect(mockReviewUpdateMany).toHaveBeenCalled();
     });
 
     it('200 le CTO/super_admin peut détacher un collaborateur (teamId null)', async () => {

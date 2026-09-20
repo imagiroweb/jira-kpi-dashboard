@@ -12,6 +12,8 @@ const mockReviewFindOne = jest.fn();
 const mockReviewCreate = jest.fn();
 const mockReviewFindOneAndUpdate = jest.fn();
 const mockUserFindById = jest.fn();
+const mockUserFind = jest.fn();
+const mockTeamFind = jest.fn();
 
 jest.mock('../domain/performance/entities/PerformanceCycle', () => {
   const actual = jest.requireActual('../domain/performance/entities/PerformanceCycle');
@@ -38,7 +40,14 @@ jest.mock('../domain/performance/entities/PerformanceReview', () => {
 
 jest.mock('../domain/user/entities/User', () => ({
   User: {
-    findById: (...args: unknown[]) => mockUserFindById(...args)
+    findById: (...args: unknown[]) => mockUserFindById(...args),
+    find: (...args: unknown[]) => mockUserFind(...args)
+  }
+}));
+
+jest.mock('../domain/team/entities/Team', () => ({
+  Team: {
+    find: (...args: unknown[]) => mockTeamFind(...args)
   }
 }));
 
@@ -118,6 +127,8 @@ describe('performanceRoutes (TI)', () => {
     mockUserFindById.mockReturnValue({
       select: () => ({ lean: () => Promise.resolve({ teamId: 'team-1' }) })
     });
+    mockUserFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([]) }) });
+    mockTeamFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([]) }) });
   });
 
   describe('GET /reviews/me', () => {

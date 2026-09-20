@@ -66,7 +66,18 @@ export function TeamsCyclesAdminPanel({ teams, cycles, onChanged }: TeamsCyclesA
     };
   }, [loadRoster]);
 
-  const rosterById = useMemo(() => new Map(roster.map((u) => [u.id, u])), [roster]);
+  const rosterById = useMemo(() => new Map(roster.map((u) => [String(u.id), u])), [roster]);
+  const membersByTeamId = useMemo(() => {
+    const map = new Map<string, RosterUser[]>();
+    for (const user of roster) {
+      if (!user.teamId) continue;
+      const key = String(user.teamId);
+      const list = map.get(key) ?? [];
+      list.push(user);
+      map.set(key, list);
+    }
+    return map;
+  }, [roster]);
 
   // --- Équipes ---
   const [showNewTeam, setShowNewTeam] = useState(false);
@@ -481,8 +492,20 @@ export function TeamsCyclesAdminPanel({ teams, cycles, onChanged }: TeamsCyclesA
                       {team.leadIds.length === 0
                         ? 'Aucun lead'
                         : team.leadIds
-                            .map((id) => (rosterById.has(id) ? userLabel(rosterById.get(id)!) : id))
+                            .map((id) => {
+                              const lead = rosterById.get(String(id));
+                              return lead ? userLabel(lead) : id;
+                            })
                             .join(', ')}
+                    </p>
+                    <p className="text-xs text-surface-500 mt-1">
+                      {(membersByTeamId.get(String(team.id)) ?? []).length === 0
+                        ? 'Aucun collaborateur rattaché'
+                        : `${(membersByTeamId.get(String(team.id)) ?? []).length} collaborateur(s) : ${(
+                            membersByTeamId.get(String(team.id)) ?? []
+                          )
+                            .map(userLabel)
+                            .join(', ')}`}
                     </p>
                   </div>
                   <button
