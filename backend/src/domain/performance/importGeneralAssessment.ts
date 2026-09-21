@@ -38,11 +38,26 @@ function cellText(worksheet: ExcelJS.Worksheet, address: string): string {
   return String(value).trim();
 }
 
-function cellNumber(worksheet: ExcelJS.Worksheet, address: string): number | null {
-  const value = worksheet.getCell(address).value;
+function numericLeaf(value: unknown): number | null {
   if (typeof value === 'number') return value;
   if (typeof value === 'string' && value.trim() !== '' && !Number.isNaN(Number(value))) {
     return Number(value);
+  }
+  return null;
+}
+
+/**
+ * La colonne F des fichiers réels contient une formule mise en cache
+ * (`IFERROR(MATCH(...),"")`) : `cell.value` est alors un objet `{ formula, result }`, pas un
+ * nombre brut — `result` peut lui-même être une chaîne vide si `MATCH` n'a rien trouvé (niveau
+ * non reconnu dans le référentiel). On lit le résultat mis en cache plutôt que la formule.
+ */
+function cellNumber(worksheet: ExcelJS.Worksheet, address: string): number | null {
+  const value = worksheet.getCell(address).value;
+  const direct = numericLeaf(value);
+  if (direct != null) return direct;
+  if (value && typeof value === 'object' && 'result' in value) {
+    return numericLeaf((value as { result: unknown }).result);
   }
   return null;
 }

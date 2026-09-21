@@ -8,7 +8,7 @@ import { findGeneralAssessmentWorksheet, parseGeneralAssessmentFromWorksheet } f
  * qu'on veut remplir pour le test, dans l'ordre (ligne 7 = rows[0], etc.).
  */
 function buildGeneralAssessmentWorksheet(
-  rows: { axis?: string; label?: string; score?: number | string }[],
+  rows: { axis?: string; label?: string; score?: number | string; rawScore?: boolean }[],
   opts: { sheetName?: string; name?: string } = {}
 ): ExcelJS.Worksheet {
   const workbook = new ExcelJS.Workbook();
@@ -20,7 +20,18 @@ function buildGeneralAssessmentWorksheet(
     const r = 7 + index;
     if (row.axis !== undefined) worksheet.getCell(`A${r}`).value = row.axis;
     if (row.label !== undefined) worksheet.getCell(`B${r}`).value = row.label;
-    if (row.score !== undefined) worksheet.getCell(`F${r}`).value = row.score;
+    if (row.score !== undefined) {
+      // Sur les fichiers réels, la colonne F est une formule mise en cache
+      // (`IFERROR(MATCH(...),"")`) : `cell.value` est un objet `{ formula, result }`, pas un
+      // nombre brut. On reproduit cette forme par défaut ; `rawScore: true` teste le cas d'un
+      // nombre écrit en dur, toujours supporté en repli.
+      worksheet.getCell(`F${r}`).value = row.rawScore
+        ? row.score
+        : ({
+            formula: "IFERROR(MATCH(C7,'Référentiel évaluation'!$D6:$H6,0),\"\")",
+            result: row.score
+          } as ExcelJS.CellFormulaValue);
+    }
   });
 
   return worksheet;
@@ -151,6 +162,35 @@ describe('parseGeneralAssessmentFromWorksheet', () => {
 
     expect(axes.leadership).toEqual([]);
     expect(warnings).toEqual(['Ligne 7 (Leadership — Note aberrante) : note 7 hors plage 1-5 — ignorée.']);
+  });
+
+  it('lit une note écrite en dur (sans formule), en repli', () => {
+    const worksheet = buildGeneralAssessmentWorksheet([
+      { axis: 'Technique', label: 'Qualité du code & revues', score: 4, rawScore: true }
+    ]);
+
+    const { axes, warnings } = parseGeneralAssessmentFromWorksheet(worksheet);
+
+    expect(warnings).toEqual([]);
+    expect(axes.technique).toEqual([{ label: 'Qualité du code & revues', score: 4 }]);
+  });
+
+  it("signale et ignore une note vide issue d'un IFERROR sans correspondance (niveau non reconnu par le référentiel)", () => {
+    const worksheet = new ExcelJS.Workbook().addWorksheet('Collaborateur Test');
+    worksheet.getCell('B3').value = 'Collaborateur Test';
+    worksheet.getCell('A7').value = 'Technique';
+    worksheet.getCell('B7').value = 'Qualité du code & revues';
+    worksheet.getCell('F7').value = {
+      formula: "IFERROR(MATCH(C7,'Référentiel évaluation'!$D6:$H6,0),\"\")",
+      result: ''
+    } as ExcelJS.CellFormulaValue;
+
+    const { axes, warnings } = parseGeneralAssessmentFromWorksheet(worksheet);
+
+    expect(axes.technique).toEqual([]);
+    expect(warnings).toEqual([
+      'Ligne 7 (Technique — Qualité du code & revues) : note manquante ou non numérique — ignorée.'
+    ]);
   });
 });
 
