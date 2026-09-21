@@ -23,6 +23,15 @@ export type CompetencyAxis = (typeof COMPETENCY_AXES)[number];
 export const REVIEW_AUTHOR_ROLES = ['collaborateur', 'lead', 'cto'] as const;
 export type ReviewAuthorRole = (typeof REVIEW_AUTHOR_ROLES)[number];
 
+/**
+ * Profils de poste utilisés pour la notation manager de la grille générale — miroir exact de
+ * `ROLE_PROFILES` côté backend (`PerformanceReview.ts`). La composante Technique du référentiel
+ * varie selon le profil ; les libellés d'affichage viennent du référentiel chargé via
+ * `GET /performance/general-assessment-referential` (champ `label`), pas d'une table statique ici.
+ */
+export const ROLE_PROFILES = ['dev_back', 'dev_front', 'qa', 'dba'] as const;
+export type RoleProfile = (typeof ROLE_PROFILES)[number];
+
 export const PERFORMANCE_CYCLE_STATUSES = ['draft', 'active', 'closed'] as const;
 export type PerformanceCycleStatus = (typeof PERFORMANCE_CYCLE_STATUSES)[number];
 
@@ -97,12 +106,60 @@ export type CompetencyScores = Record<CompetencyAxis, CompetencyScore>;
 export interface GeneralAssessmentSubCriterion {
   label: string;
   score: number;
+  /**
+   * Réponse verbeuse choisie — uniquement renseignée côté évaluation manager (le score est
+   * toujours résolu serveur à partir de cette réponse, voir `GeneralAssessmentManagerAxesInput`).
+   * Absente côté auto-évaluation (import Excel : seul le score y est connu).
+   */
+  answer?: string;
 }
 
 export type GeneralAssessmentAxes = Record<CompetencyAxis, GeneralAssessmentSubCriterion[]>;
 
-/** Payload de `PATCH .../general-self-assessment` et `PATCH .../general-manager-assessment` — un axe absent n'est pas modifié. */
+/** Payload de `PATCH .../general-self-assessment` — un axe absent n'est pas modifié. */
 export type GeneralAssessmentAxesInput = Partial<Record<CompetencyAxis, GeneralAssessmentSubCriterion[]>>;
+
+/**
+ * Un sous-critère tel que noté par le manager : uniquement la réponse verbeuse choisie (son
+ * texte exact, tel qu'il apparaît dans le référentiel du profil de poste ciblé) — jamais de note
+ * brute, résolue côté serveur (voir `GeneralAssessmentReferentialProfile`).
+ */
+export interface GeneralAssessmentManagerSubCriterionInput {
+  label: string;
+  answer: string;
+}
+
+/** Payload de `PATCH .../general-manager-assessment` — un axe absent n'est pas modifié. */
+export type GeneralAssessmentManagerAxesInput = Partial<Record<CompetencyAxis, GeneralAssessmentManagerSubCriterionInput[]>>;
+
+/** Une réponse verbeuse possible pour un sous-critère, avec ses points (1-5). */
+export interface ReferentialAnswer {
+  text: string;
+  points: number;
+}
+
+/** Un sous-critère noté : toujours 5 réponses, de la moins bonne à la meilleure. */
+export interface ReferentialCriterion {
+  label: string;
+  answers: ReferentialAnswer[];
+}
+
+export type ReferentialAxes = Record<CompetencyAxis, ReferentialCriterion[]>;
+
+/**
+ * Référentiel de notation détaillée d'un profil de poste (`GET /performance/general-assessment-referential`)
+ * — un document par profil, les 4 axes × leurs sous-critères × leurs 5 réponses possibles. Alimente
+ * le formulaire de notation manager (`GeneralManagerAssessmentForm`) : le manager choisit une
+ * réponse par sous-critère, jamais une note brute.
+ */
+export interface GeneralAssessmentReferentialProfile {
+  roleProfile: RoleProfile;
+  /** Libellé d'affichage, ex. "Développeur Back", "QA". */
+  label: string;
+  axes: ReferentialAxes;
+  updatedBy?: ReviewAuthor;
+  updatedAt: string;
+}
 
 /**
  * Référentiel des 12 sous-critères (4 axes × 3), identiques quel que soit le rôle du
@@ -140,6 +197,8 @@ export interface PerformanceReview {
   generalSelfAssessment: GeneralAssessmentAxes;
   /** Évaluation manager sur la même grille, pour rapprochement avec l'auto-évaluation. */
   generalManagerAssessment: GeneralAssessmentAxes;
+  /** Profil de poste choisi par le lead/CTO pour la notation manager de la grille générale (mémorisé sur la fiche). */
+  generalAssessmentRoleProfile?: RoleProfile;
   status: PerformanceReviewStatus;
   /** Qui a défini les objectifs de cette fiche (un lead pour son équipe, ou le CTO). */
   definedBy?: ReviewAuthor;

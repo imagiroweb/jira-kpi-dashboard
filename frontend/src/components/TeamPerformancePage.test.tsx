@@ -14,6 +14,7 @@ vi.mock('../services/api', () => ({
     defineObjectives: vi.fn(),
     updateManagerAssessment: vi.fn(),
     updateGeneralManagerAssessment: vi.fn(),
+    getGeneralAssessmentReferential: vi.fn(),
     getTeamMembers: vi.fn(),
     importOkr: vi.fn()
   },
@@ -32,6 +33,7 @@ const mockGetReview = vi.mocked(performanceApi.getReview);
 const mockDefineObjectives = vi.mocked(performanceApi.defineObjectives);
 const mockUpdateManagerAssessment = vi.mocked(performanceApi.updateManagerAssessment);
 const mockUpdateGeneralManagerAssessment = vi.mocked(performanceApi.updateGeneralManagerAssessment);
+const mockGetGeneralAssessmentReferential = vi.mocked(performanceApi.getGeneralAssessmentReferential);
 const mockGetTeamMembers = vi.mocked(performanceApi.getTeamMembers);
 const mockTeamList = vi.mocked(teamApi.list);
 
@@ -97,6 +99,7 @@ describe('TeamPerformancePage', () => {
     // déjà ouvertes) n'ont pas à s'en soucier ; les tests dédiés le redéfinissent explicitement.
     mockGetTeamMembers.mockResolvedValue({ success: true, members: [] });
     vi.mocked(teamApi.getRoster).mockResolvedValue({ success: true, users: [] });
+    mockGetGeneralAssessmentReferential.mockResolvedValue({ success: true, profiles: [] });
   });
 
   it("affiche l'équipe dont l'utilisateur est lead si teamId est vide", async () => {
@@ -351,9 +354,11 @@ describe('TeamPerformancePage', () => {
     render(<TeamPerformancePage />);
     await screen.findByText('Alice Martin');
     fireEvent.click(screen.getByRole('button', { name: 'Ouvrir' }));
-    await screen.findByText('Évaluation manager');
+    const objectiveEvaluationCard = (await screen.findByText('Évaluation manager', { selector: 'h3' })).closest(
+      '.card-glass'
+    ) as HTMLElement;
 
-    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'atteint' } });
+    fireEvent.change(within(objectiveEvaluationCard).getByRole('combobox'), { target: { value: 'atteint' } });
     fireEvent.click(screen.getByRole('button', { name: /Enregistrer l'évaluation/i }));
 
     await waitFor(() => {
@@ -366,12 +371,36 @@ describe('TeamPerformancePage', () => {
     });
   });
 
-  it("enregistre la grille manager de la grille générale avec la note saisie", async () => {
+  const REFERENTIAL_PROFILE = {
+    roleProfile: 'dev_back' as const,
+    label: 'Développeur Back',
+    axes: {
+      technique: [
+        {
+          label: 'Qualité du code & revues',
+          answers: [
+            { text: 'Très faible', points: 1 },
+            { text: 'Faible', points: 2 },
+            { text: 'Correct', points: 3 },
+            { text: 'Bon', points: 4 },
+            { text: 'Excellent', points: 5 }
+          ]
+        }
+      ],
+      impact: [],
+      collaboration: [],
+      leadership: []
+    },
+    updatedAt: '2026-09-01T00:00:00.000Z'
+  };
+
+  it("enregistre la grille manager de la grille générale avec la réponse choisie", async () => {
     seedUser({ performanceGlobalAccess: true });
     mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
     mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
     mockListReviews.mockResolvedValue({ success: true, reviews: [makeReview()] });
     mockGetReview.mockResolvedValue({ success: true, review: makeReview() });
+    mockGetGeneralAssessmentReferential.mockResolvedValue({ success: true, profiles: [REFERENTIAL_PROFILE] });
     mockUpdateGeneralManagerAssessment.mockResolvedValue({ success: true, review: makeReview() });
 
     render(<TeamPerformancePage />);
@@ -379,23 +408,25 @@ describe('TeamPerformancePage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Ouvrir' }));
     await screen.findByText('Évaluation manager — grille détaillée');
 
-    fireEvent.change(screen.getByLabelText('Qualité du code & revues'), { target: { value: '4' } });
+    fireEvent.change(screen.getByLabelText('Profil de poste'), { target: { value: 'dev_back' } });
+    fireEvent.change(await screen.findByLabelText('Qualité du code & revues'), { target: { value: 'Bon' } });
     fireEvent.click(screen.getByRole('button', { name: /Enregistrer la grille manager/i }));
 
     await waitFor(() => {
-      expect(mockUpdateGeneralManagerAssessment).toHaveBeenCalledWith(
-        'user-1',
-        expect.objectContaining({
-          technique: expect.arrayContaining([{ label: 'Qualité du code & revues', score: 4 }])
-        })
-      );
+      expect(mockUpdateGeneralManagerAssessment).toHaveBeenCalledWith('user-1', {
+        axes: expect.objectContaining({
+          technique: expect.arrayContaining([{ label: 'Qualité du code & revues', answer: 'Bon' }])
+        }),
+        roleProfile: 'dev_back'
+      });
     });
   });
 
-  it("signale un désaccord quand la note manager saisie s'écarte d'au moins 2 points de l'auto-évaluation", async () => {
+  it("signale un désaccord quand la réponse manager choisie s'écarte d'au moins 2 points de l'auto-évaluation", async () => {
     seedUser({ performanceGlobalAccess: true });
     mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
     mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    mockGetGeneralAssessmentReferential.mockResolvedValue({ success: true, profiles: [REFERENTIAL_PROFILE] });
     const reviewWithSelfScore = makeReview({
       generalSelfAssessment: {
         technique: [{ label: 'Qualité du code & revues', score: 5 }],
@@ -412,8 +443,10 @@ describe('TeamPerformancePage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Ouvrir' }));
     await screen.findByText('Évaluation manager — grille détaillée');
 
+    fireEvent.change(screen.getByLabelText('Profil de poste'), { target: { value: 'dev_back' } });
+
     expect(screen.queryByText('Désaccord')).not.toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText('Qualité du code & revues'), { target: { value: '2' } });
+    fireEvent.change(await screen.findByLabelText('Qualité du code & revues'), { target: { value: 'Faible' } });
     expect(screen.getByText('Désaccord')).toBeInTheDocument();
   });
 

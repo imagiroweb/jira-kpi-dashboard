@@ -17,9 +17,11 @@ import {
   type UpdatePerformanceCycleInput,
   type ObjectiveDefinitionInput,
   type AssessmentInput,
-  type GeneralAssessmentAxesInput,
+  type GeneralAssessmentManagerAxesInput,
+  type GeneralAssessmentReferentialProfile,
   type ProgressUpdateInput,
-  type OkrImportResult
+  type OkrImportResult,
+  type RoleProfile
 } from '../domain/performance';
 import type { Team, CreateTeamInput, UpdateTeamInput, RosterUser } from '../domain/team';
 
@@ -751,14 +753,26 @@ export const performanceApi = {
     const { data } = await api.patch(`/performance/reviews/${userId}/manager-assessment`, input);
     return { ...data, review: normalizePerformanceReview(data.review) };
   },
-  /** Évaluation manager sur la grille générale (4 axes × sous-critères) — pour rapprochement avec l'auto-évaluation. */
+  /**
+   * Évaluation manager sur la grille générale (4 axes × sous-critères) — le manager choisit une
+   * réponse verbeuse par sous-critère (`axes`), jamais une note brute : le score est résolu
+   * serveur à partir du référentiel du profil de poste ciblé (`roleProfile`, mémorisé sur la
+   * fiche s'il est fourni). Voir `getGeneralAssessmentReferential` pour charger les référentiels.
+   */
   updateGeneralManagerAssessment: async (
     userId: string,
-    axes: GeneralAssessmentAxesInput,
-    cycleId?: string
+    input: { axes: GeneralAssessmentManagerAxesInput; roleProfile?: RoleProfile; cycleId?: string }
   ): Promise<{ success: boolean; review: PerformanceReview }> => {
-    const { data } = await api.patch(`/performance/reviews/${userId}/general-manager-assessment`, { axes, cycleId });
+    const { data } = await api.patch(`/performance/reviews/${userId}/general-manager-assessment`, input);
     return { ...data, review: normalizePerformanceReview(data.review) };
+  },
+  /** Référentiels de notation détaillée (un par profil de poste), pour le formulaire de notation manager. */
+  getGeneralAssessmentReferential: async (): Promise<{
+    success: boolean;
+    profiles: GeneralAssessmentReferentialProfile[];
+  }> => {
+    const { data } = await api.get('/performance/general-assessment-referential');
+    return data;
   },
   /** Membres d'équipe dans la portée de l'acteur, avec ou sans fiche de performance ouverte. */
   getTeamMembers: async (params?: {

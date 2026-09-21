@@ -12,7 +12,7 @@ import {
 import { performanceApi, teamApi } from '../services/api';
 import { TeamsCyclesAdminPanel } from './TeamsCyclesAdminPanel';
 import { GeneralAssessmentSummary } from './GeneralAssessmentSummary';
-import { GeneralManagerAssessmentForm } from './GeneralManagerAssessmentForm';
+import { GeneralManagerAssessmentForm, GeneralManagerAssessmentSaveInput } from './GeneralManagerAssessmentForm';
 import { useSocketOptional } from '../hooks/useSocketContext';
 import { useStore } from '../store/useStore';
 import type { Team } from '../domain/team';
@@ -22,7 +22,7 @@ import {
   PerformanceCycle,
   ObjectiveDefinitionInput,
   AssessmentInput,
-  GeneralAssessmentAxesInput,
+  GeneralAssessmentReferentialProfile,
   ObjectiveAssessmentStatus,
   PerformanceReviewStatus,
   CompetencyAxis,
@@ -228,6 +228,9 @@ export function TeamPerformancePage() {
   const [savingManager, setSavingManager] = useState(false);
   const [savingGeneralManager, setSavingGeneralManager] = useState(false);
 
+  const [referentialProfiles, setReferentialProfiles] = useState<GeneralAssessmentReferentialProfile[]>([]);
+  const [loadingReferential, setLoadingReferential] = useState(true);
+
   const cycle = useMemo(() => cycles.find((c) => c.status === 'active') ?? null, [cycles]);
   const isReadOnly = cycle != null && cycle.status !== 'active';
 
@@ -271,6 +274,26 @@ export function TeamPerformancePage() {
     if (teamsResult.status === 'fulfilled' && teamsResult.value.success) {
       setTeams(teamsResult.value.teams);
     }
+  }, []);
+
+  // Référentiels de notation détaillée (un par profil de poste) : chargés une fois, indépendamment
+  // du cycle/de l'équipe — alimentent le formulaire de notation manager de la grille générale.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoadingReferential(true);
+      try {
+        const res = await performanceApi.getGeneralAssessmentReferential();
+        if (!cancelled && res.success) {
+          setReferentialProfiles(res.profiles);
+        }
+      } finally {
+        if (!cancelled) setLoadingReferential(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -540,11 +563,11 @@ export function TeamPerformancePage() {
     }
   }
 
-  async function handleSaveGeneralManagerAssessment(axes: GeneralAssessmentAxesInput) {
+  async function handleSaveGeneralManagerAssessment({ axes, roleProfile }: GeneralManagerAssessmentSaveInput) {
     if (!detail) return;
     setSavingGeneralManager(true);
     try {
-      const res = await performanceApi.updateGeneralManagerAssessment(reviewUserId(detail), axes);
+      const res = await performanceApi.updateGeneralManagerAssessment(reviewUserId(detail), { axes, roleProfile });
       const merged: PerformanceReview = { ...res.review, user: detail.user };
       setDetail(merged);
       upsertReviewInList(merged);
@@ -922,6 +945,9 @@ export function TeamPerformancePage() {
               <GeneralManagerAssessmentForm
                 selfAxes={detail.generalSelfAssessment}
                 managerAxes={detail.generalManagerAssessment}
+                roleProfile={detail.generalAssessmentRoleProfile}
+                referentialProfiles={referentialProfiles}
+                loadingReferential={loadingReferential}
                 disabled={isReadOnly}
                 saving={savingGeneralManager}
                 onSave={handleSaveGeneralManagerAssessment}
