@@ -6,6 +6,8 @@ import {
   applyManagerAssessment,
   applyObjectivesDefinition,
   applySelfAssessment,
+  computeGeneralAssessmentAxisScore,
+  computeGeneralAssessmentGlobalScore,
   computeObjectiveProgress,
   computeReviewScore,
   completeCompetencyScores,
@@ -18,7 +20,7 @@ import {
   validateObjectivesDefinition,
   weightsAreBalanced
 } from './performanceReview';
-import { IKeyResult, IObjective, IQualitative, ICompetencyScores, IReviewAuthor } from './entities/PerformanceReview';
+import { IKeyResult, IObjective, IQualitative, ICompetencyScores, IGeneralAssessmentAxes, IReviewAuthor } from './entities/PerformanceReview';
 
 function makeKr(overrides: Partial<IKeyResult> = {}): IKeyResult {
   return {
@@ -121,6 +123,78 @@ describe('computeReviewScore', () => {
     ];
     // 0.4*60 + 0.4*40 + 0.2*100 = 24 + 16 + 20 = 60
     expect(computeReviewScore(objectives)).toBeCloseTo(60);
+  });
+});
+
+describe('computeGeneralAssessmentAxisScore', () => {
+  it('retourne 0 pour un axe sans sous-critère', () => {
+    expect(computeGeneralAssessmentAxisScore([])).toBe(0);
+  });
+
+  it('reprend le cas réel Excel : 3 sous-critères à 5/5/5 => moyenne 5', () => {
+    const subCriteria = [
+      { label: 'Qualité du code & revues', score: 5 },
+      { label: 'Autonomie & résolution de bugs', score: 5 },
+      { label: 'Conception & architecture', score: 5 }
+    ];
+    expect(computeGeneralAssessmentAxisScore(subCriteria)).toBe(5);
+  });
+
+  it('moyenne des sous-critères quand ils diffèrent (cas réel Alexandre Parjouet, axe Impact : 4/4/3)', () => {
+    const subCriteria = [
+      { label: 'Livraison (delivery)', score: 4 },
+      { label: 'Contribution aux OKR', score: 4 },
+      { label: "Périmètre d'influence", score: 3 }
+    ];
+    expect(computeGeneralAssessmentAxisScore(subCriteria)).toBeCloseTo(3.6666666666666665);
+  });
+});
+
+describe('computeGeneralAssessmentGlobalScore', () => {
+  function emptyAxes(): IGeneralAssessmentAxes {
+    return { technique: [], impact: [], collaboration: [], leadership: [] };
+  }
+
+  it('retourne 0 quand aucun axe n\'a de sous-critère', () => {
+    expect(computeGeneralAssessmentGlobalScore(emptyAxes())).toBe(0);
+  });
+
+  it('reprend le cas réel Excel (Bruno Deguil-Robin) : axes 5/4.667/5/5 => moyenne ~4.917', () => {
+    const axes: IGeneralAssessmentAxes = {
+      technique: [
+        { label: 'Qualité du code & revues', score: 5 },
+        { label: 'Autonomie & résolution de bugs', score: 5 },
+        { label: 'Conception & architecture', score: 5 }
+      ],
+      impact: [
+        { label: 'Livraison (delivery)', score: 4 },
+        { label: 'Contribution aux OKR', score: 5 },
+        { label: "Périmètre d'influence", score: 5 }
+      ],
+      collaboration: [
+        { label: 'Communication & transparence', score: 5 },
+        { label: 'Partage & documentation', score: 5 },
+        { label: "Esprit d'équipe & rituels", score: 5 }
+      ],
+      leadership: [
+        { label: 'Initiative & autonomie', score: 5 },
+        { label: 'Mentorat & développement des autres', score: 5 },
+        { label: 'Vision & influence', score: 5 }
+      ]
+    };
+    // Score Technique 5, Impact 4.6667, Collaboration 5, Leadership 5 => moyenne (5+4.6667+5+5)/4
+    expect(computeGeneralAssessmentGlobalScore(axes)).toBeCloseTo(4.916666666666667);
+  });
+
+  it('exclut les axes sans sous-critère de la moyenne (ne les compte pas comme 0)', () => {
+    const axes: IGeneralAssessmentAxes = {
+      technique: [{ label: 'Qualité du code & revues', score: 4 }],
+      impact: [{ label: 'Livraison (delivery)', score: 2 }],
+      collaboration: [],
+      leadership: []
+    };
+    // Moyenne sur les 2 axes renseignés seulement : (4 + 2) / 2 = 3, pas /4
+    expect(computeGeneralAssessmentGlobalScore(axes)).toBe(3);
   });
 });
 

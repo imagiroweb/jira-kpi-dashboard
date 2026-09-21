@@ -109,6 +109,58 @@ describe('PerformanceReview', () => {
     expect(error).toBeDefined();
   });
 
+  it('déclare le sous-champ generalSelfAssessment (4 axes) sur le schéma', () => {
+    const schema = PerformanceReview.schema;
+    COMPETENCY_AXES.forEach((axis) => {
+      expect(schema.path(`generalSelfAssessment.axes.${axis}`)).toBeDefined();
+    });
+  });
+
+  it('remplit generalSelfAssessment avec les 4 axes vides par défaut', () => {
+    const review = new PerformanceReview(baseReview());
+    const axes = review.toObject().generalSelfAssessment.axes;
+    COMPETENCY_AXES.forEach((axis) => {
+      expect(axes[axis]).toEqual([]);
+    });
+  });
+
+  it('accepte des sous-critères notés (1-5) par axe pour generalSelfAssessment', () => {
+    const review = new PerformanceReview({
+      ...baseReview(),
+      generalSelfAssessment: {
+        axes: {
+          technique: [
+            { label: 'Qualité du code & revues', score: 3 },
+            { label: 'Autonomie & résolution de bugs', score: 4 },
+            { label: 'Conception & architecture', score: 3 }
+          ],
+          impact: [],
+          collaboration: [],
+          leadership: []
+        }
+      }
+    });
+    const error = review.validateSync();
+    expect(error).toBeUndefined();
+    expect(review.toObject().generalSelfAssessment.axes.technique).toHaveLength(3);
+  });
+
+  it('refuse un score de sous-critère hors de la plage 1-5', () => {
+    const review = new PerformanceReview({
+      ...baseReview(),
+      generalSelfAssessment: {
+        axes: {
+          technique: [{ label: 'Qualité du code & revues', score: 7 }],
+          impact: [],
+          collaboration: [],
+          leadership: []
+        }
+      }
+    });
+    const error = review.validateSync();
+    expect(error).toBeDefined();
+  });
+
   it('applique la contrainte d\'unicité (user, cycle) au niveau de l\'index', () => {
     const indexes = PerformanceReview.schema.indexes();
     const uniqueUserCycle = indexes.find(

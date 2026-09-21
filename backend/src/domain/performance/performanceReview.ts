@@ -11,6 +11,8 @@ import {
   IProgressUpdate,
   IQualitative,
   ICompetencyScores,
+  IGeneralAssessmentSubCriterion,
+  IGeneralAssessmentAxes,
   IReviewAuthor,
   ObjectiveAssessmentStatus,
   PerformanceReviewStatus,
@@ -63,6 +65,34 @@ export function computeReviewScore(objectives: Pick<IObjective, 'weight' | 'krs'
     0
   );
   return weightedSum / totalWeight;
+}
+
+/**
+ * Score d'un axe de l'auto-évaluation générale (0-5) : moyenne des scores de ses sous-critères,
+ * 0 si l'axe n'en a aucun — même logique que `computeObjectiveProgress`. Reprend la formule
+ * `AVERAGE(...)` déjà présente dans les fichiers `evaluations-individuelles/*.xlsx` (une par
+ * axe, sur ses 3 sous-critères).
+ */
+export function computeGeneralAssessmentAxisScore(subCriteria: IGeneralAssessmentSubCriterion[]): number {
+  if (subCriteria.length === 0) return 0;
+  const sum = subCriteria.reduce((total, subCriterion) => total + subCriterion.score, 0);
+  return sum / subCriteria.length;
+}
+
+/**
+ * Score global de l'auto-évaluation générale (0-5) : moyenne des scores des 4 axes — même
+ * formule que le "Score Global" trouvé dans `dashboard-all.xlsx` (grille de réconciliation
+ * auto-évaluation / évaluation manager), appliquée ici côté auto-évaluation. Un axe sans
+ * sous-critère renseigné est exclu de la moyenne plutôt que compté comme 0 ; 0 si aucun axe n'a
+ * de sous-critère.
+ */
+export function computeGeneralAssessmentGlobalScore(axes: IGeneralAssessmentAxes): number {
+  const axisScores = COMPETENCY_AXES.map((axis) => axes[axis]).filter((subCriteria) => subCriteria.length > 0);
+
+  if (axisScores.length === 0) return 0;
+
+  const sum = axisScores.reduce((total, subCriteria) => total + computeGeneralAssessmentAxisScore(subCriteria), 0);
+  return sum / axisScores.length;
 }
 
 /**

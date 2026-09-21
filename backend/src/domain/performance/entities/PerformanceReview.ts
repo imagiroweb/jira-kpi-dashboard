@@ -90,6 +90,26 @@ export interface ICompetencyScore {
 
 export type ICompetencyScores = Record<CompetencyAxis, ICompetencyScore>;
 
+/**
+ * Un sous-critère noté (1-5) de l'auto-évaluation générale — distincte du bilan de cycle
+ * (`qualitative` / `competencyScores` ci-dessus, remplis à chaque cycle par le collaborateur et
+ * son manager). Reprend la grille à 4 axes × 3 sous-critères des fichiers
+ * `evaluations-individuelles/*.xlsx` : une évaluation plus large des compétences, distincte du
+ * bilan des objectifs du cycle en cours (voir `applyGeneralSelfAssessment` dans
+ * `performanceReview.ts`).
+ */
+export interface IGeneralAssessmentSubCriterion {
+  label: string;
+  /** Score 1-5, voir le référentiel des fichiers d'évaluation. */
+  score: number;
+}
+
+export type IGeneralAssessmentAxes = Record<CompetencyAxis, IGeneralAssessmentSubCriterion[]>;
+
+export interface IGeneralSelfAssessment {
+  axes: IGeneralAssessmentAxes;
+}
+
 export interface IPerformanceReview extends Document {
   user: mongoose.Types.ObjectId;
   cycle: mongoose.Types.ObjectId;
@@ -99,6 +119,8 @@ export interface IPerformanceReview extends Document {
   objectives: IObjective[];
   qualitative: IQualitative;
   competencyScores: ICompetencyScores;
+  /** Auto-évaluation générale (4 axes × 3 sous-critères, score global calculé) — voir `IGeneralSelfAssessment`. */
+  generalSelfAssessment: IGeneralSelfAssessment;
   status: PerformanceReviewStatus;
   /** Qui a défini les objectifs de cette fiche (un lead pour son équipe, ou le CTO). */
   definedBy?: IReviewAuthor;
@@ -197,6 +219,26 @@ const CompetencyScoresSchema = new Schema<ICompetencyScores>(
   { _id: false }
 );
 
+const GeneralAssessmentSubCriterionSchema = new Schema<IGeneralAssessmentSubCriterion>(
+  {
+    label: { type: String, required: true, trim: true },
+    score: { type: Number, required: true, min: 1, max: 5 }
+  },
+  { _id: false }
+);
+
+const GeneralSelfAssessmentSchema = new Schema<IGeneralSelfAssessment>(
+  {
+    axes: {
+      technique: { type: [GeneralAssessmentSubCriterionSchema], default: [] },
+      impact: { type: [GeneralAssessmentSubCriterionSchema], default: [] },
+      collaboration: { type: [GeneralAssessmentSubCriterionSchema], default: [] },
+      leadership: { type: [GeneralAssessmentSubCriterionSchema], default: [] }
+    }
+  },
+  { _id: false }
+);
+
 const PerformanceReviewSchema = new Schema<IPerformanceReview>(
   {
     user: { type: Schema.Types.ObjectId, ref: 'User', required: true },
@@ -211,6 +253,10 @@ const PerformanceReviewSchema = new Schema<IPerformanceReview>(
     competencyScores: {
       type: CompetencyScoresSchema,
       default: () => ({ technique: {}, impact: {}, collaboration: {}, leadership: {} })
+    },
+    generalSelfAssessment: {
+      type: GeneralSelfAssessmentSchema,
+      default: () => ({ axes: { technique: [], impact: [], collaboration: [], leadership: [] } })
     },
     status: { type: String, enum: PERFORMANCE_REVIEW_STATUSES, default: 'dossier_manquant' },
     definedBy: { type: ReviewAuthorSchema },
