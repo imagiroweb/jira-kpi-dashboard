@@ -28,6 +28,7 @@ import {
   COMPETENCY_AXES,
   computeReviewScore,
   validateObjectivesDefinition,
+  suggestCompetencyAxes,
   OBJECTIVE_STATUS_LABELS,
   REVIEW_STATUS_LABELS,
   REVIEW_STATUS_BADGE_CLASS,
@@ -103,6 +104,9 @@ interface ObjectiveDraft {
   description: string;
   weightPct: string;
   krs: KrDraft[];
+  competencyAxes: CompetencyAxis[];
+  /** true dès que le lead/CTO a modifié les axes à la main — bloque alors la re-suggestion automatique au fil de la saisie. */
+  competencyAxesTouched: boolean;
 }
 
 function buildObjectivesDraft(objectives: PerformanceReview['objectives']): ObjectiveDraft[] {
@@ -111,7 +115,10 @@ function buildObjectivesDraft(objectives: PerformanceReview['objectives']): Obje
     title: o.title,
     description: o.description ?? '',
     weightPct: String(Math.round(o.weight * 100)),
-    krs: o.krs.map((kr) => ({ id: kr.id, label: kr.label, weightPct: String(Math.round(kr.weight * 100)) }))
+    krs: o.krs.map((kr) => ({ id: kr.id, label: kr.label, weightPct: String(Math.round(kr.weight * 100)) })),
+    competencyAxes: o.competencyAxes ?? [],
+    // Un objectif déjà défini a déjà des axes (éventuellement vides) choisis délibérément — on ne les re-suggère pas.
+    competencyAxesTouched: true
   }));
 }
 
@@ -121,6 +128,7 @@ function draftToDefinitionInput(objectives: ObjectiveDraft[]): ObjectiveDefiniti
     title: o.title.trim(),
     description: o.description.trim() || undefined,
     weight: (Number(o.weightPct) || 0) / 100,
+    competencyAxes: o.competencyAxes,
     krs: o.krs.map((kr) => ({
       id: kr.id,
       label: kr.label.trim(),
@@ -356,7 +364,15 @@ export function TeamPerformancePage() {
   function addObjective() {
     setObjectivesDraft((prev) => [
       ...prev,
-      { id: generateId('obj'), title: '', description: '', weightPct: '0', krs: [] }
+      {
+        id: generateId('obj'),
+        title: '',
+        description: '',
+        weightPct: '0',
+        krs: [],
+        competencyAxes: [],
+        competencyAxesTouched: false
+      }
     ]);
   }
 
@@ -365,7 +381,31 @@ export function TeamPerformancePage() {
   }
 
   function updateObjective(objectiveId: string, patch: Partial<Omit<ObjectiveDraft, 'krs'>>) {
-    setObjectivesDraft((prev) => prev.map((o) => (o.id === objectiveId ? { ...o, ...patch } : o)));
+    setObjectivesDraft((prev) =>
+      prev.map((o) => {
+        if (o.id !== objectiveId) return o;
+        const next = { ...o, ...patch };
+        // Re-suggère les axes tant que le lead/CTO n'y a pas touché lui-même (voir competencyAxesTouched).
+        if (!o.competencyAxesTouched && (patch.title !== undefined || patch.description !== undefined)) {
+          next.competencyAxes = suggestCompetencyAxes(next.title, next.description);
+        }
+        return next;
+      })
+    );
+  }
+
+  function toggleObjectiveCompetencyAxis(objectiveId: string, axis: CompetencyAxis) {
+    setObjectivesDraft((prev) =>
+      prev.map((o) => {
+        if (o.id !== objectiveId) return o;
+        const alreadySelected = o.competencyAxes.includes(axis);
+        if (!alreadySelected && o.competencyAxes.length >= 2) return o; // plafond à 2 axes
+        const competencyAxes = alreadySelected
+          ? o.competencyAxes.filter((a) => a !== axis)
+          : [...o.competencyAxes, axis];
+        return { ...o, competencyAxes, competencyAxesTouched: true };
+      })
+    );
   }
 
   function addKeyResult(objectiveId: string) {
@@ -748,6 +788,29 @@ export function TeamPerformancePage() {
                           <Trash2 className="w-4 h-4" />
                         </button>
                       )}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3 pl-1">
+                      <span className="text-xs text-surface-400">Axes de compétence (max 2) :</span>
+                      {COMPETENCY_AXES.map((axis) => {
+                        const checked = objective.competencyAxes.includes(axis);
+                        const disabled = isReadOnly || (!checked && objective.competencyAxes.length >= 2);
+                        return (
+                          <label
+                            key={axis}
+                            className="flex items-center gap-1.5 text-sm text-surface-300"
+                          >
+                            <input
+                              type="checkbox"
+                              className="rounded border-surface-600"
+                              checked={checked}
+                              disabled={disabled}
+                              onChange={() => toggleObjectiveCompetencyAxis(objective.id, axis)}
+                            />
+                            {COMPETENCY_AXIS_LABELS[axis]}
+                          </label>
+                        );
+                      })}
                     </div>
 
                     <div className="pl-2 space-y-2">

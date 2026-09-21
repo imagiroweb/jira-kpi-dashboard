@@ -61,6 +61,8 @@ export interface Objective {
   title: string;
   description?: string;
   weight: number;
+  /** Jusqu'à 2 axes de compétence associés à cet objectif (rapprochement OKR / grille de compétences). */
+  competencyAxes?: CompetencyAxis[];
   krs: KeyResult[];
   selfAssessment: ObjectiveAssessment;
   managerAssessment: ObjectiveAssessment;
@@ -139,6 +141,8 @@ export interface ObjectiveDefinitionInput {
   title: string;
   description?: string;
   weight: number;
+  /** Jusqu'à 2 axes de compétence associés (voir `suggestCompetencyAxes`), librement modifiables. */
+  competencyAxes?: CompetencyAxis[];
   krs: KeyResultDefinitionInput[];
 }
 
@@ -307,6 +311,40 @@ export function validateObjectivesDefinition(objectives: ObjectiveDefinitionInpu
   }
 
   return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Mots-clés associés à chaque axe de compétence, utilisés par
+ * `suggestCompetencyAxes` — miroir exact de `COMPETENCY_AXIS_KEYWORDS` côté
+ * backend (`src/domain/performance/performanceReview.ts`), à garder
+ * synchronisé si la table évolue.
+ */
+const COMPETENCY_AXIS_KEYWORDS: Record<CompetencyAxis, string[]> = {
+  technique: ['code', 'architecture', 'technique', 'technologie', 'dette technique', 'infrastructure', 'infra', 'sécurité'],
+  impact: ['client', 'business', 'arr', 'delivery', 'livraison', "chiffre d'affaires", 'roadmap produit', 'produit'],
+  collaboration: ['équipe', 'collaborat', 'communication', 'coordination', 'transverse'],
+  leadership: ['mentor', 'vision', 'manager', 'leadership', 'encadrement', 'recrutement']
+};
+
+/**
+ * Suggère jusqu'à 2 axes de compétence pour un objectif, par mots-clés sur
+ * son titre + sa description — pure fonction, miroir exact de
+ * `suggestCompetencyAxes` côté backend, qui reste la seule source de vérité
+ * (cette fonction anticipe le même calcul côté client pour un aperçu
+ * instantané dans le formulaire ; le lead/CTO reste libre de modifier la
+ * sélection avant enregistrement).
+ */
+export function suggestCompetencyAxes(title: string, description?: string): CompetencyAxis[] {
+  const haystack = `${title} ${description ?? ''}`.toLowerCase();
+
+  return COMPETENCY_AXES.map((axis) => ({
+    axis,
+    matchCount: COMPETENCY_AXIS_KEYWORDS[axis].filter((keyword) => haystack.includes(keyword)).length
+  }))
+    .filter((entry) => entry.matchCount > 0)
+    .sort((a, b) => b.matchCount - a.matchCount)
+    .slice(0, 2)
+    .map((entry) => entry.axis);
 }
 
 // --- Libellés d'affichage partagés (français) ---

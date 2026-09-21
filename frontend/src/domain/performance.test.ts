@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizePerformanceReview, type PerformanceReview } from './performance';
+import { normalizePerformanceReview, suggestCompetencyAxes, type PerformanceReview } from './performance';
 
 function incompleteReview(): PerformanceReview {
   return {
@@ -37,5 +37,28 @@ describe('normalizePerformanceReview', () => {
     expect(normalized.competencyScores.leadership).toEqual({});
     expect(normalized.objectives[0].selfAssessment).toEqual({});
     expect(normalized.objectives[0].managerAssessment).toEqual({});
+  });
+});
+
+
+describe('suggestCompetencyAxes', () => {
+  it('suggère un axe unique à partir d\'un mot-clé du titre', () => {
+    expect(suggestCompetencyAxes("Refactoriser l'architecture technique")).toEqual(['technique']);
+  });
+
+  it('suggère un axe à partir de la description quand le titre ne matche rien', () => {
+    expect(suggestCompetencyAxes('Objectif Q3', 'Améliorer la satisfaction client et le delivery')).toEqual(['impact']);
+  });
+
+  it('classe par nombre de correspondances et limite à 2 axes', () => {
+    const result = suggestCompetencyAxes(
+      "Mentorer l'équipe technique",
+      "Vision, encadrement, recrutement et collaboration transverse avec le code et l'architecture"
+    );
+    expect(result).toEqual(['leadership', 'technique']);
+  });
+
+  it('ne suggère rien quand aucun mot-clé ne correspond', () => {
+    expect(suggestCompetencyAxes('Titre neutre sans mot-clé particulier')).toEqual([]);
   });
 });

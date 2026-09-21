@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetStore } from '@/test/mocks/store';
 import { TEST_USER } from '@/test/fixtures/users';
@@ -201,12 +201,68 @@ describe('TeamPerformancePage', () => {
             title: 'Améliorer la fiabilité',
             description: undefined,
             weight: 1,
+            competencyAxes: [],
             krs: [{ id: 'kr-1', label: 'Réduire les incidents', weight: 1 }]
           }
         ],
         'cycle-1'
       );
     });
+  });
+
+  it("suggère automatiquement des axes de compétence à la saisie du titre d'un nouvel objectif", async () => {
+    seedUser({ performanceGlobalAccess: true });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [makeReview()] });
+    mockGetReview.mockResolvedValue({ success: true, review: makeReview() });
+
+    render(<TeamPerformancePage />);
+    await screen.findByText('Alice Martin');
+    fireEvent.click(screen.getByRole('button', { name: 'Ouvrir' }));
+    await screen.findByPlaceholderText("Titre de l'objectif");
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ajouter un objectif' }));
+
+    const titleInputs = screen.getAllByPlaceholderText("Titre de l'objectif");
+    const newTitleInput = titleInputs[titleInputs.length - 1];
+    fireEvent.change(newTitleInput, { target: { value: "Refactoriser l'architecture technique" } });
+
+    const newObjectiveCard = newTitleInput.closest('.border') as HTMLElement;
+    expect(within(newObjectiveCard).getByRole('checkbox', { name: 'Technique' })).toBeChecked();
+    expect(within(newObjectiveCard).getByRole('checkbox', { name: 'Impact' })).not.toBeChecked();
+  });
+
+  it('plafonne la sélection des axes de compétence à 2 par objectif et reste librement modifiable', async () => {
+    seedUser({ performanceGlobalAccess: true });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [makeReview()] });
+    mockGetReview.mockResolvedValue({ success: true, review: makeReview() });
+
+    render(<TeamPerformancePage />);
+    await screen.findByText('Alice Martin');
+    fireEvent.click(screen.getByRole('button', { name: 'Ouvrir' }));
+    await screen.findByPlaceholderText("Titre de l'objectif");
+
+    const objectiveCard = screen.getByPlaceholderText("Titre de l'objectif").closest('.border') as HTMLElement;
+    const technique = within(objectiveCard).getByRole('checkbox', { name: 'Technique' });
+    const impact = within(objectiveCard).getByRole('checkbox', { name: 'Impact' });
+    const collaboration = within(objectiveCard).getByRole('checkbox', { name: 'Collaboration' });
+
+    fireEvent.click(technique);
+    fireEvent.click(impact);
+    expect(technique).toBeChecked();
+    expect(impact).toBeChecked();
+
+    fireEvent.click(collaboration);
+    expect(collaboration).not.toBeChecked();
+
+    fireEvent.click(technique);
+    expect(technique).not.toBeChecked();
+
+    fireEvent.click(collaboration);
+    expect(collaboration).toBeChecked();
   });
 
   it("désactive l'enregistrement des objectifs si les poids ne sont pas équilibrés", async () => {
