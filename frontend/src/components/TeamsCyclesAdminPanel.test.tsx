@@ -242,6 +242,7 @@ describe('TeamsCyclesAdminPanel', () => {
     const file = new File(['x'], 'Perf-Eval-H1-26-Adoria-Deguil-Robin-BDR.xlsx', {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     });
+    expect(screen.getByText('Sélectionner des fichiers')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText('Fichiers d’entretien'), { target: { files: [file] } });
     fireEvent.click(screen.getByRole('button', { name: 'Prévisualiser' }));
 

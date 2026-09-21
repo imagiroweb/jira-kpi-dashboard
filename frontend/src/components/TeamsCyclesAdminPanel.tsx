@@ -310,14 +310,20 @@ export function TeamsCyclesAdminPanel({ teams, cycles, onChanged }: TeamsCyclesA
             <label htmlFor="import-files" className="block text-xs text-surface-400 mb-1">
               Fichiers d’entretien
             </label>
-            <input
-              id="import-files"
-              type="file"
-              multiple
-              accept=".xlsx,.ods"
-              className="block w-full text-sm text-surface-300 file:mr-3 file:btn-secondary file:text-sm"
-              onChange={(e) => setImportFiles(Array.from(e.target.files ?? []))}
-            />
+            <div className="relative inline-flex">
+              <span className="btn-secondary text-sm pointer-events-none inline-flex items-center gap-2">
+                <Upload className="w-4 h-4" />
+                Sélectionner des fichiers
+              </span>
+              <input
+                id="import-files"
+                type="file"
+                multiple
+                accept=".xlsx,.ods,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.oasis.opendocument.spreadsheet"
+                className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+                onChange={(e) => setImportFiles(Array.from(e.target.files ?? []))}
+              />
+            </div>
             {importFiles.length > 0 && (
               <p className="text-xs text-surface-500 mt-1">{importFiles.length} fichier(s) sélectionné(s)</p>
             )}
