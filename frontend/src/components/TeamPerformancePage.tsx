@@ -34,6 +34,8 @@ import {
   validateObjectivesDefinition,
   suggestCompetencyAxes,
   OBJECTIVE_STATUS_LABELS,
+  OBJECTIVE_STATUS_BADGE_CLASS,
+  summarizeObjectiveStatuses,
   REVIEW_STATUS_LABELS,
   REVIEW_STATUS_BADGE_CLASS,
   CYCLE_STATUS_LABELS,
@@ -68,6 +70,26 @@ function formatSelfAssessmentScore(axes: PerformanceReview['generalSelfAssessmen
 function memberLabel(member: PerformanceTeamMember): string {
   const name = `${member.firstName ?? ''} ${member.lastName ?? ''}`.trim();
   return name || member.email;
+}
+
+/**
+ * Résumé compact de la répartition des statuts d'objectifs d'une fiche (colonne "Objectifs" du
+ * tableau récap d'équipe) : un badge par statut présent avec son nombre d'objectifs, dans l'ordre
+ * du moins bon au meilleur (voir `summarizeObjectiveStatuses`). Aucun objectif statué (des deux
+ * côtés) -> tiret, pour rester cohérent avec les autres colonnes du tableau.
+ */
+function ObjectiveStatusBadges({ objectives }: { objectives: PerformanceReview['objectives'] }) {
+  const summary = summarizeObjectiveStatuses(objectives);
+  if (summary.length === 0) return <span className="text-surface-500">—</span>;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {summary.map(({ status, count }) => (
+        <span key={status} className={`badge ${OBJECTIVE_STATUS_BADGE_CLASS[status]}`}>
+          {count} {OBJECTIVE_STATUS_LABELS[status]}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function buildEmptyReviewForMember(member: PerformanceTeamMember, cycleId: string): PerformanceReview {
@@ -705,6 +727,7 @@ export function TeamPerformancePage() {
                     <th className="p-3 font-medium">Statut</th>
                     <th className="p-3 font-medium">Score</th>
                     <th className="p-3 font-medium">Score auto-évaluation</th>
+                    <th className="p-3 font-medium">Objectifs</th>
                     <th className="p-3" />
                   </tr>
                 </thead>
@@ -721,6 +744,9 @@ export function TeamPerformancePage() {
                       <td className="p-3 text-surface-300">{Math.round(computeReviewScore(review.objectives))}%</td>
                       <td className="p-3 text-surface-300">
                         {formatSelfAssessmentScore(review.generalSelfAssessment)}
+                      </td>
+                      <td className="p-3">
+                        <ObjectiveStatusBadges objectives={review.objectives} />
                       </td>
                       <td className="p-3 text-right">
                         <button
@@ -744,6 +770,7 @@ export function TeamPerformancePage() {
                       </td>
                       <td className="p-3 text-surface-300">—</td>
                       <td className="p-3 text-surface-300">—</td>
+                      <td className="p-3 text-surface-500">—</td>
                       <td className="p-3 text-right">
                         <button
                           type="button"
@@ -971,23 +998,30 @@ export function TeamPerformancePage() {
                             ))}
                           </div>
                           <div className="grid sm:grid-cols-[220px_1fr] gap-3">
-                            <select
-                              className="input"
-                              value={draft.status}
-                              disabled={isReadOnly}
-                              onChange={(e) =>
-                                updateManagerObjectiveDraft(objective.id, {
-                                  status: e.target.value as ObjectiveAssessmentStatus | ''
-                                })
-                              }
-                            >
-                              <option value="">Statut non renseigné</option>
-                              {OBJECTIVE_ASSESSMENT_STATUSES.map((status) => (
-                                <option key={status} value={status}>
-                                  {OBJECTIVE_STATUS_LABELS[status]}
-                                </option>
-                              ))}
-                            </select>
+                            <div className="flex items-center gap-2">
+                              <select
+                                className="input"
+                                value={draft.status}
+                                disabled={isReadOnly}
+                                onChange={(e) =>
+                                  updateManagerObjectiveDraft(objective.id, {
+                                    status: e.target.value as ObjectiveAssessmentStatus | ''
+                                  })
+                                }
+                              >
+                                <option value="">Statut non renseigné</option>
+                                {OBJECTIVE_ASSESSMENT_STATUSES.map((status) => (
+                                  <option key={status} value={status}>
+                                    {OBJECTIVE_STATUS_LABELS[status]}
+                                  </option>
+                                ))}
+                              </select>
+                              {draft.status && (
+                                <span className={`badge ${OBJECTIVE_STATUS_BADGE_CLASS[draft.status]}`}>
+                                  {OBJECTIVE_STATUS_LABELS[draft.status]}
+                                </span>
+                              )}
+                            </div>
                             <textarea
                               className="input min-h-[38px]"
                               placeholder="Votre commentaire"
@@ -997,8 +1031,11 @@ export function TeamPerformancePage() {
                             />
                           </div>
                           {objective.selfAssessment.status && (
-                            <p className="mt-2 text-xs text-surface-500">
-                              Bilan du cycle (collaborateur) : {OBJECTIVE_STATUS_LABELS[objective.selfAssessment.status]}
+                            <p className="mt-2 flex items-center gap-1.5 text-xs text-surface-500">
+                              Bilan du cycle (collaborateur) :
+                              <span className={`badge ${OBJECTIVE_STATUS_BADGE_CLASS[objective.selfAssessment.status]}`}>
+                                {OBJECTIVE_STATUS_LABELS[objective.selfAssessment.status]}
+                              </span>
                               {objective.selfAssessment.comment ? ` — ${objective.selfAssessment.comment}` : ''}
                             </p>
                           )}

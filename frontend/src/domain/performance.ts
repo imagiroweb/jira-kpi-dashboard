@@ -347,6 +347,34 @@ export function computeReviewScore(objectives: Pick<Objective, 'weight' | 'krs'>
   return weightedSum / totalWeight;
 }
 
+/** Une entrée du résumé de répartition des statuts d'objectifs (voir `summarizeObjectiveStatuses`). */
+export interface ObjectiveStatusSummary {
+  status: ObjectiveAssessmentStatus;
+  count: number;
+}
+
+/**
+ * Résume la répartition des statuts d'objectifs d'une fiche pour un affichage compact (ex.
+ * colonne "Objectifs" du tableau récap d'équipe) : le statut manager fait foi une fois renseigné,
+ * sinon on retombe sur le bilan du cycle du collaborateur (self) — un objectif sans statut des
+ * deux côtés n'est pas compté (rien de pertinent à afficher pour lui). Résultat trié dans l'ordre
+ * de `OBJECTIVE_ASSESSMENT_STATUSES` (du moins bon au meilleur) pour un affichage stable.
+ */
+export function summarizeObjectiveStatuses(
+  objectives: Pick<Objective, 'selfAssessment' | 'managerAssessment'>[]
+): ObjectiveStatusSummary[] {
+  const counts = new Map<ObjectiveAssessmentStatus, number>();
+  for (const objective of objectives) {
+    const status = objective.managerAssessment.status ?? objective.selfAssessment.status;
+    if (!status) continue;
+    counts.set(status, (counts.get(status) ?? 0) + 1);
+  }
+  return OBJECTIVE_ASSESSMENT_STATUSES.filter((status) => counts.has(status)).map((status) => ({
+    status,
+    count: counts.get(status) as number
+  }));
+}
+
 /** Score d'un axe de l'auto-évaluation générale (0-5) : moyenne des scores de ses sous-critères, 0 si aucun. */
 export function computeGeneralAssessmentAxisScore(subCriteria: GeneralAssessmentSubCriterion[]): number {
   if (subCriteria.length === 0) return 0;
@@ -477,6 +505,14 @@ export const REVIEW_STATUS_BADGE_CLASS: Record<PerformanceReviewStatus, string> 
   dossier_manquant: 'badge-danger',
   en_cours: 'badge-warning',
   complete: 'badge-success'
+};
+
+/** Couleur de badge par statut d'objectif — seules 4 classes existent (success/warning/danger/info) : 'depasse' utilise 'badge-info' pour rester visuellement distinct d'un simple 'atteint'. */
+export const OBJECTIVE_STATUS_BADGE_CLASS: Record<ObjectiveAssessmentStatus, string> = {
+  non_atteint: 'badge-danger',
+  partiellement_atteint: 'badge-warning',
+  atteint: 'badge-success',
+  depasse: 'badge-info'
 };
 
 export const CYCLE_STATUS_LABELS: Record<PerformanceCycleStatus, string> = {

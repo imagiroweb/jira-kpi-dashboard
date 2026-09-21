@@ -3,8 +3,20 @@ import {
   GENERAL_ASSESSMENT_REFERENTIAL,
   normalizePerformanceReview,
   suggestCompetencyAxes,
+  summarizeObjectiveStatuses,
+  type Objective,
   type PerformanceReview
 } from './performance';
+
+function objectiveWithStatuses(
+  selfStatus: Objective['selfAssessment']['status'],
+  managerStatus: Objective['managerAssessment']['status']
+): Pick<Objective, 'selfAssessment' | 'managerAssessment'> {
+  return {
+    selfAssessment: { status: selfStatus },
+    managerAssessment: { status: managerStatus }
+  };
+}
 
 function incompleteReview(): PerformanceReview {
   return {
@@ -67,6 +79,43 @@ describe('GENERAL_ASSESSMENT_REFERENTIAL', () => {
   });
 });
 
+
+describe('summarizeObjectiveStatuses', () => {
+  it('compte les objectifs par statut manager, trié du moins bon au meilleur', () => {
+    const summary = summarizeObjectiveStatuses([
+      objectiveWithStatuses(undefined, 'atteint'),
+      objectiveWithStatuses(undefined, 'non_atteint'),
+      objectiveWithStatuses(undefined, 'atteint')
+    ]);
+
+    expect(summary).toEqual([
+      { status: 'non_atteint', count: 1 },
+      { status: 'atteint', count: 2 }
+    ]);
+  });
+
+  it("retombe sur le statut collaborateur (self) quand le manager n'a pas encore statué", () => {
+    const summary = summarizeObjectiveStatuses([objectiveWithStatuses('partiellement_atteint', undefined)]);
+
+    expect(summary).toEqual([{ status: 'partiellement_atteint', count: 1 }]);
+  });
+
+  it('priorise le statut manager sur le statut collaborateur quand les deux sont renseignés', () => {
+    const summary = summarizeObjectiveStatuses([objectiveWithStatuses('non_atteint', 'depasse')]);
+
+    expect(summary).toEqual([{ status: 'depasse', count: 1 }]);
+  });
+
+  it("ignore les objectifs sans statut des deux côtés", () => {
+    const summary = summarizeObjectiveStatuses([objectiveWithStatuses(undefined, undefined)]);
+
+    expect(summary).toEqual([]);
+  });
+
+  it('renvoie un tableau vide sans objectif', () => {
+    expect(summarizeObjectiveStatuses([])).toEqual([]);
+  });
+});
 
 describe('suggestCompetencyAxes', () => {
   it('suggère un axe unique à partir d\'un mot-clé du titre', () => {

@@ -599,4 +599,82 @@ describe('TeamPerformancePage', () => {
     // Le suivi des fiches n'est plus affiché tant qu'on est sur l'onglet gestion.
     expect(screen.queryByText('Aucune fiche de performance dans votre périmètre pour ce cycle.')).not.toBeInTheDocument();
   });
+
+  it("affiche dans la colonne Objectifs le décompte des statuts d'objectifs (manager prioritaire sur self)", async () => {
+    seedUser({ performanceGlobalAccess: true });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    const reviewWithStatuses = makeReview({
+      objectives: [
+        {
+          id: 'obj-1',
+          title: 'Améliorer la fiabilité',
+          weight: 1,
+          krs: [],
+          selfAssessment: { status: 'non_atteint' },
+          managerAssessment: { status: 'atteint' }
+        },
+        {
+          id: 'obj-2',
+          title: 'Réduire la dette technique',
+          weight: 1,
+          krs: [],
+          selfAssessment: { status: 'depasse' },
+          managerAssessment: {}
+        }
+      ]
+    });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [reviewWithStatuses] });
+
+    render(<TeamPerformancePage />);
+
+    await screen.findByText('Alice Martin');
+    const row = screen.getByText('Alice Martin').closest('tr') as HTMLElement;
+    // obj-1 : statut manager ('atteint') prioritaire sur le statut self ('non_atteint').
+    expect(within(row).getByText('1 Atteint')).toBeInTheDocument();
+    // obj-2 : pas de statut manager -> on retombe sur le statut self ('depasse').
+    expect(within(row).getByText('1 Dépassé')).toBeInTheDocument();
+  });
+
+  it("affiche un tiret dans la colonne Objectifs quand aucun objectif n'est encore statué", async () => {
+    seedUser({ performanceGlobalAccess: true });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [makeReview()] });
+
+    render(<TeamPerformancePage />);
+
+    await screen.findByText('Alice Martin');
+    const row = screen.getByText('Alice Martin').closest('tr') as HTMLElement;
+    const cells = within(row).getAllByRole('cell');
+    // Colonne Objectifs = avant-dernière cellule (la dernière est l'action "Ouvrir").
+    expect(cells[cells.length - 2]).toHaveTextContent('—');
+  });
+
+  it("affiche un badge de statut pour le bilan du cycle du collaborateur dans l'évaluation manager", async () => {
+    seedUser({ performanceGlobalAccess: true });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    const reviewWithSelfStatus = makeReview({
+      objectives: [
+        {
+          id: 'obj-1',
+          title: 'Améliorer la fiabilité',
+          weight: 1,
+          krs: [],
+          selfAssessment: { status: 'partiellement_atteint' },
+          managerAssessment: {}
+        }
+      ]
+    });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [reviewWithSelfStatus] });
+    mockGetReview.mockResolvedValue({ success: true, review: reviewWithSelfStatus });
+
+    render(<TeamPerformancePage />);
+    await screen.findByText('Alice Martin');
+    fireEvent.click(screen.getByRole('button', { name: 'Ouvrir' }));
+
+    const bilanLine = (await screen.findByText('Bilan du cycle (collaborateur) :')).closest('p') as HTMLElement;
+    expect(within(bilanLine).getByText('Partiellement atteint')).toHaveClass('badge-warning');
+  });
 });
