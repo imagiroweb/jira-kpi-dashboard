@@ -22,14 +22,18 @@ import {
 } from '../domain/performance/entities/PerformanceReview';
 import {
   appendKeyResultProgress,
+  applyGeneralSelfAssessment,
   applyManagerAssessment,
   applyObjectivesDefinition,
   applySelfAssessment,
   AssessmentInput,
   completeCompetencyScores,
+  completeGeneralSelfAssessment,
   completeQualitative,
   computeReviewStatus,
+  GeneralSelfAssessmentInput,
   ObjectiveDefinitionInput,
+  validateGeneralSelfAssessment,
   validateObjectivesDefinition
 } from '../domain/performance/performanceReview';
 import {
@@ -77,6 +81,7 @@ function serialize(
     objectives: review.objectives,
     qualitative: completeQualitative(review.qualitative),
     competencyScores: completeCompetencyScores(review.competencyScores),
+    generalSelfAssessment: completeGeneralSelfAssessment(review.generalSelfAssessment?.axes),
     status: review.status,
     definedBy: review.definedBy,
     createdBy: review.createdBy,
@@ -633,6 +638,97 @@ router.patch('/reviews/:userId/objectives', authenticate, async (req: Request, r
   } catch (error) {
     logger.error('Error defining performance review objectives:', error);
     fail(res, 500, 'Erreur lors de la définition des objectifs', error);
+  }
+});
+
+/**
+ * (Re)définit l'auto-évaluation générale (4 axes de compétence × sous-critères notés 1-5) d'un
+ * collaborateur pour un cycle — lead pour son équipe, ou CTO/super_admin pour n'importe qui,
+ * même portée que PATCH /reviews/:userId/objectives. Distincte du "Bilan du cycle" (qualitative +
+ * competencyScores, remplis à chaque cycle par le collaborateur et son manager — voir
+ * self-assessment / manager-assessment ci-dessous) : une évaluation plus large des compétences,
+ * alimentée aujourd'hui par l'import Excel (voir `buildGeneralAssessmentImportPlan.ts` /
+ * `runGeneralAssessmentImport.ts`), pas encore par une UI de saisie manuelle. Remplace
+ * entièrement les sous-critères d'un axe fourni dans `axes` ; un axe absent du corps de la
+ * requête n'est pas modifié (pas de fusion par id, contrairement aux objectifs — pas
+ * d'avancement à préserver ici). Crée la fiche à la volée sur le cycle actif si elle n'existe pas
+ * encore, avec l'équipe actuelle du collaborateur (même règle que GET /reviews/me).
+ * PATCH /api/performance/reviews/:userId/general-self-assessment
+ */
+router.patch('/reviews/:userId/general-self-assessment', authenticate, async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const axesInput = req.body?.axes;
+    if (!axesInput || typeof axesInput !== 'object' || Array.isArray(axesInput)) {
+      return fail(res, 400, 'axes doit être un objet');
+    }
+
+    const validation = validateGeneralSelfAssessment(axesInput as GeneralSelfAssessmentInput);
+    if (!validation.valid) {
+      return fail(res, 400, validation.errors.join(', '));
+    }
+
+    const cycle = await resolveCycle(req.body?.cycleId);
+    if (cycle === undefined) return fail(res, 400, 'Identifiant de cycle invalide');
+    if (!cycle) return fail(res, 404, req.body?.cycleId ? 'Cycle introuvable' : 'Aucun cycle de performance actif');
+    if (cycle.status !== 'active') {
+      return fail(res, 403, "Ce cycle est clos, l'auto-évaluation générale ne peut plus être modifiée");
+    }
+
+    const actor = await loadPerformanceActorContext(req.user!.userId);
+    if (!actor) return fail(res, 404, 'Utilisateur authentifié introuvable');
+
+    let updated: IPerformanceReview | null = null;
+
+    for (let attempt = 0; attempt < REVIEW_UPDATE_RETRIES; attempt += 1) {
+      let current = await PerformanceReview.findOne({ user: userId, cycle: cycle._id });
+
+      const targetUser = await User.findById(userId).select('teamId').lean();
+      if (!current && !targetUser) {
+        return fail(res, 404, 'Collaborateur introuvable');
+      }
+
+      const reviewTeamId = toIdString(current?.team) ?? toIdString(targetUser?.teamId);
+
+      if (!canAccessReviewForTeam(actor, reviewTeamId)) {
+        return fail(res, 403, "Vous n'avez pas accès à la fiche de ce collaborateur");
+      }
+
+      const who = { ...author(req), role: resolveAuthorRole(actor, reviewTeamId) };
+
+      if (!current) {
+        current = await PerformanceReview.create({
+          user: userId,
+          cycle: cycle._id,
+          team: reviewTeamId,
+          createdBy: who
+        });
+      }
+
+      const generalSelfAssessment = applyGeneralSelfAssessment(
+        current.toObject().generalSelfAssessment?.axes,
+        axesInput as GeneralSelfAssessmentInput
+      );
+
+      const $set: Record<string, unknown> = { generalSelfAssessment: { axes: generalSelfAssessment }, updatedBy: who };
+      if (reviewTeamId && !toIdString(current.team)) $set.team = reviewTeamId;
+
+      updated = await PerformanceReview.findOneAndUpdate(
+        { _id: current._id, __v: current.__v },
+        { $set },
+        { new: true, runValidators: true }
+      );
+      if (updated) break;
+    }
+
+    if (!updated) {
+      return fail(res, 409, 'La fiche a été modifiée en même temps, réessayez');
+    }
+
+    res.json({ success: true, review: serialize(updated) });
+  } catch (error) {
+    logger.error('Error defining general self-assessment:', error);
+    fail(res, 500, "Erreur lors de la définition de l'auto-évaluation générale", error);
   }
 });
 

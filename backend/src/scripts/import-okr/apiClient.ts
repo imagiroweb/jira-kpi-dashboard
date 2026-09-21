@@ -1,6 +1,6 @@
 import axios from 'axios';
 import type { RosterCandidate } from '../../domain/performance/importCollaboratorMapping';
-import type { ObjectiveDefinitionInput } from '../../domain/performance/performanceReview';
+import type { ObjectiveDefinitionInput, GeneralSelfAssessmentInput } from '../../domain/performance/performanceReview';
 
 export interface ApiCycle {
   id: string;
@@ -58,6 +58,17 @@ export function createImportApiClient() {
       const { data } = await client.patch(`/performance/reviews/${userId}/objectives`, { objectives, cycleId });
       if (!data?.success) {
         throw new Error("Échec de l'écriture des objectifs");
+      }
+    },
+
+    /**
+     * PATCH /performance/reviews/:userId/general-self-assessment — (re)définit l'auto-évaluation
+     * générale d'un collaborateur pour le cycle donné (voir `importGeneralAssessment.ts`).
+     */
+    async writeGeneralAssessment(userId: string, axes: GeneralSelfAssessmentInput, cycleId: string): Promise<void> {
+      const { data } = await client.patch(`/performance/reviews/${userId}/general-self-assessment`, { axes, cycleId });
+      if (!data?.success) {
+        throw new Error("Échec de l'écriture de l'auto-évaluation générale");
       }
     }
   };

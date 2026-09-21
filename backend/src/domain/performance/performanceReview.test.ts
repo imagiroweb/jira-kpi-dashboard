@@ -3,6 +3,7 @@
  */
 import {
   appendKeyResultProgress,
+  applyGeneralSelfAssessment,
   applyManagerAssessment,
   applyObjectivesDefinition,
   applySelfAssessment,
@@ -11,12 +12,15 @@ import {
   computeObjectiveProgress,
   computeReviewScore,
   completeCompetencyScores,
+  completeGeneralSelfAssessment,
   completeQualitative,
   computeReviewStatus,
+  GeneralSelfAssessmentInput,
   isPlausibleEvidenceUrl,
   ObjectiveDefinitionInput,
   suggestCompetencyAxes,
   sumWeights,
+  validateGeneralSelfAssessment,
   validateObjectivesDefinition,
   weightsAreBalanced
 } from './performanceReview';
@@ -195,6 +199,95 @@ describe('computeGeneralAssessmentGlobalScore', () => {
     };
     // Moyenne sur les 2 axes renseignés seulement : (4 + 2) / 2 = 3, pas /4
     expect(computeGeneralAssessmentGlobalScore(axes)).toBe(3);
+  });
+});
+
+describe('validateGeneralSelfAssessment / applyGeneralSelfAssessment / completeGeneralSelfAssessment', () => {
+  function emptyAxes(): IGeneralAssessmentAxes {
+    return { technique: [], impact: [], collaboration: [], leadership: [] };
+  }
+
+  describe('validateGeneralSelfAssessment', () => {
+    it('valide une entrée vide (aucun axe fourni)', () => {
+      expect(validateGeneralSelfAssessment({})).toEqual({ valid: true, errors: [] });
+    });
+
+    it('valide un axe avec des sous-critères correctement notés', () => {
+      const input: GeneralSelfAssessmentInput = {
+        technique: [
+          { label: 'Qualité du code & revues', score: 5 },
+          { label: 'Autonomie & résolution de bugs', score: 4 }
+        ]
+      };
+      expect(validateGeneralSelfAssessment(input)).toEqual({ valid: true, errors: [] });
+    });
+
+    it("signale un axe inconnu (clé hors des 4 axes de COMPETENCY_AXES)", () => {
+      const input = { bonus: [{ label: 'Critère mystère', score: 3 }] } as unknown as GeneralSelfAssessmentInput;
+      const result = validateGeneralSelfAssessment(input);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual(['Axe inconnu : bonus']);
+    });
+
+    it('signale un sous-critère sans libellé', () => {
+      const input: GeneralSelfAssessmentInput = { impact: [{ label: '  ', score: 3 }] };
+      const result = validateGeneralSelfAssessment(input);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual(['Axe impact, sous-critère 1 : libellé requis']);
+    });
+
+    it('signale une note hors 1-5', () => {
+      const input: GeneralSelfAssessmentInput = { leadership: [{ label: 'Vision & influence', score: 7 }] };
+      const result = validateGeneralSelfAssessment(input);
+      expect(result.valid).toBe(false);
+      expect(result.errors).toEqual(['Axe leadership, sous-critère 1 : note requise entre 1 et 5']);
+    });
+  });
+
+  describe('applyGeneralSelfAssessment', () => {
+    it("remplace entièrement les sous-critères d'un axe fourni, sans fusion par id", () => {
+      const current: IGeneralAssessmentAxes = {
+        ...emptyAxes(),
+        technique: [{ label: 'Ancien critère', score: 2 }]
+      };
+      const result = applyGeneralSelfAssessment(current, {
+        technique: [
+          { label: 'Qualité du code & revues', score: 5 },
+          { label: 'Conception & architecture', score: 4 }
+        ]
+      });
+      expect(result.technique).toEqual([
+        { label: 'Qualité du code & revues', score: 5 },
+        { label: 'Conception & architecture', score: 4 }
+      ]);
+    });
+
+    it("ne touche pas aux axes absents de l'entrée", () => {
+      const current: IGeneralAssessmentAxes = {
+        technique: [{ label: 'Qualité du code & revues', score: 5 }],
+        impact: [{ label: 'Livraison (delivery)', score: 4 }],
+        collaboration: [{ label: 'Communication & transparence', score: 3 }],
+        leadership: [{ label: 'Vision & influence', score: 5 }]
+      };
+      const result = applyGeneralSelfAssessment(current, { impact: [{ label: 'Livraison (delivery)', score: 5 }] });
+
+      expect(result.impact).toEqual([{ label: 'Livraison (delivery)', score: 5 }]);
+      expect(result.technique).toEqual(current.technique);
+      expect(result.collaboration).toEqual(current.collaboration);
+      expect(result.leadership).toEqual(current.leadership);
+    });
+  });
+
+  describe('completeGeneralSelfAssessment', () => {
+    it('complète les 4 axes à partir de undefined/null (mêmes garanties que completeQualitative)', () => {
+      expect(completeGeneralSelfAssessment(undefined)).toEqual(emptyAxes());
+      expect(completeGeneralSelfAssessment(null)).toEqual(emptyAxes());
+    });
+
+    it('complète les axes manquants sans toucher à ceux fournis', () => {
+      const result = completeGeneralSelfAssessment({ technique: [{ label: 'X', score: 3 }] });
+      expect(result).toEqual({ ...emptyAxes(), technique: [{ label: 'X', score: 3 }] });
+    });
   });
 });
 

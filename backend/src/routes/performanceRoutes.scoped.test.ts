@@ -110,6 +110,7 @@ function makeReviewDoc(overrides: Record<string, unknown> = {}) {
     objectives: [] as unknown[],
     qualitative: {},
     competencyScores: {},
+    generalSelfAssessment: { axes: { technique: [], impact: [], collaboration: [], leadership: [] } },
     status: 'dossier_manquant',
     createdBy: { id: TEST_USER_ID, name: 'admin', role: 'collaborateur' },
     createdAt: new Date('2026-09-01'),
@@ -118,7 +119,13 @@ function makeReviewDoc(overrides: Record<string, unknown> = {}) {
   };
   return {
     ...base,
-    toObject: () => structuredClone({ objectives: base.objectives, qualitative: base.qualitative, competencyScores: base.competencyScores }),
+    toObject: () =>
+      structuredClone({
+        objectives: base.objectives,
+        qualitative: base.qualitative,
+        competencyScores: base.competencyScores,
+        generalSelfAssessment: base.generalSelfAssessment
+      }),
     populate: () => Promise.resolve(base)
   };
 }
@@ -437,6 +444,116 @@ describe('performanceRoutes — portée équipe/CTO (TI)', () => {
       const [, update] = mockReviewFindOneAndUpdate.mock.calls[0];
       expect(update.$set.objectives[0].krs[0].progress).toBe(70);
       expect(update.$set.objectives[0].krs[0].label).toBe('Nouveau libellé');
+    });
+
+    it('409 si la fiche a été modifiée en même temps (verrou optimiste épuisé)', async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(makeReviewDoc({ team: TEAM_A_ID }));
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      mockReviewFindOneAndUpdate.mockResolvedValue(null);
+
+      const res = await request(app).patch(url).send(validPayload);
+
+      expect(res.status).toBe(409);
+      expect(mockReviewFindOneAndUpdate).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  describe('PATCH /reviews/:userId/general-self-assessment', () => {
+    const url = `/api/performance/reviews/${TARGET_USER_ID}/general-self-assessment`;
+    const validPayload = { axes: { technique: [{ label: 'Qualité du code & revues', score: 5 }] } };
+
+    it("400 si axes n'est pas un objet", async () => {
+      const res = await request(app).patch(url).send({ axes: 'nope' });
+      expect(res.status).toBe(400);
+    });
+
+    it('400 si la définition est invalide (note hors 1-5)', async () => {
+      const res = await request(app)
+        .patch(url)
+        .send({ axes: { technique: [{ label: 'X', score: 7 }] } });
+      expect(res.status).toBe(400);
+    });
+
+    it('404 si aucun cycle actif', async () => {
+      mockCycleFindOne.mockResolvedValue(null);
+      const res = await request(app).patch(url).send(validPayload);
+      expect(res.status).toBe(404);
+    });
+
+    it('403 si le cycle ciblé est clos', async () => {
+      mockCycleFindById.mockResolvedValue(CLOSED_CYCLE);
+      const res = await request(app).patch(url).send({ ...validPayload, cycleId: VALID_CYCLE_OBJECT_ID });
+      expect(res.status).toBe(403);
+    });
+
+    it("403 si l'acteur n'a pas accès à l'équipe du collaborateur", async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(null);
+      mockUserFindById.mockImplementation((id: string) => {
+        if (id === TEST_USER_ID) return { select: () => ({ lean: () => Promise.resolve(actorLean()) }) };
+        return { select: () => ({ lean: () => Promise.resolve({ teamId: TEAM_A_ID }) }) };
+      });
+
+      const res = await request(app).patch(url).send(validPayload);
+      expect(res.status).toBe(403);
+    });
+
+    it("200 un lead définit l'auto-évaluation générale et crée la fiche à la volée pour un membre de son équipe", async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(null);
+      mockUserFindById.mockImplementation((id: string) => {
+        if (id === TEST_USER_ID) return { select: () => ({ lean: () => Promise.resolve(actorLean()) }) };
+        return { select: () => ({ lean: () => Promise.resolve({ teamId: TEAM_A_ID }) }) };
+      });
+      mockTeamFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([{ _id: TEAM_A_ID }]) }) });
+      mockReviewCreate.mockResolvedValue(makeReviewDoc({ team: TEAM_A_ID }));
+      mockReviewFindOneAndUpdate.mockResolvedValue(
+        makeReviewDoc({ team: TEAM_A_ID, generalSelfAssessment: { axes: { technique: [{ label: 'Qualité du code & revues', score: 5 }], impact: [], collaboration: [], leadership: [] } } })
+      );
+
+      const res = await request(app).patch(url).send(validPayload);
+
+      expect(res.status).toBe(200);
+      expect(mockReviewCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ user: TARGET_USER_ID, team: TEAM_A_ID })
+      );
+      expect(res.body.review.generalSelfAssessment.technique).toEqual([
+        { label: 'Qualité du code & revues', score: 5 }
+      ]);
+    });
+
+    it("200 remplace les sous-critères de l'axe fourni sans toucher aux autres axes déjà renseignés", async () => {
+      const existing = makeReviewDoc({
+        team: TEAM_A_ID,
+        generalSelfAssessment: {
+          axes: {
+            technique: [{ label: 'Ancien critère', score: 2 }],
+            impact: [{ label: 'Livraison (delivery)', score: 4 }],
+            collaboration: [],
+            leadership: []
+          }
+        }
+      });
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(existing);
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      mockReviewFindOneAndUpdate.mockResolvedValue(makeReviewDoc({ team: TEAM_A_ID }));
+
+      const res = await request(app).patch(url).send(validPayload);
+
+      expect(res.status).toBe(200);
+      const [, update] = mockReviewFindOneAndUpdate.mock.calls[0];
+      expect(update.$set.generalSelfAssessment.axes.technique).toEqual([
+        { label: 'Qualité du code & revues', score: 5 }
+      ]);
+      expect(update.$set.generalSelfAssessment.axes.impact).toEqual([
+        { label: 'Livraison (delivery)', score: 4 }
+      ]);
     });
 
     it('409 si la fiche a été modifiée en même temps (verrou optimiste épuisé)', async () => {

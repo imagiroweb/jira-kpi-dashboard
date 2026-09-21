@@ -442,3 +442,87 @@ export function completeCompetencyScores(raw?: Partial<ICompetencyScores> | null
     leadership: raw?.leadership ?? {}
   };
 }
+
+/** Un sous-critère noté tel que fourni en entrée (import Excel, ou futur formulaire de saisie). */
+export interface GeneralAssessmentSubCriterionInput {
+  label: string;
+  score: number;
+}
+
+/**
+ * (Re)définition de l'auto-évaluation générale, axe par axe. Un axe absent du corps de la
+ * requête n'est pas modifié — voir `applyGeneralSelfAssessment`. Distinct de `AssessmentInput` :
+ * pas de notion self/manager ici (l'auto-évaluation générale n'a qu'un seul auteur, le
+ * collaborateur, même quand c'est un lead/CTO qui saisit ou importe pour son compte).
+ */
+export type GeneralSelfAssessmentInput = Partial<Record<CompetencyAxis, GeneralAssessmentSubCriterionInput[]>>;
+
+export interface GeneralSelfAssessmentValidation {
+  valid: boolean;
+  errors: string[];
+}
+
+/**
+ * Valide une (re)définition de l'auto-évaluation générale, axe par axe : uniquement les 4 axes
+ * connus (voir `COMPETENCY_AXES`), un libellé non vide et une note 1-5 pour chaque sous-critère.
+ * Ne mute rien, ne consulte pas la base — même esprit que `validateObjectivesDefinition`.
+ */
+export function validateGeneralSelfAssessment(input: GeneralSelfAssessmentInput): GeneralSelfAssessmentValidation {
+  const errors: string[] = [];
+
+  for (const key of Object.keys(input)) {
+    if (!(COMPETENCY_AXES as readonly string[]).includes(key)) {
+      errors.push(`Axe inconnu : ${key}`);
+    }
+  }
+
+  for (const axis of COMPETENCY_AXES) {
+    const subCriteria = input[axis];
+    if (subCriteria === undefined) continue;
+    if (!Array.isArray(subCriteria)) {
+      errors.push(`L'axe ${axis} doit être un tableau de sous-critères`);
+      continue;
+    }
+    subCriteria.forEach((subCriterion, index) => {
+      if (!subCriterion?.label?.trim()) {
+        errors.push(`Axe ${axis}, sous-critère ${index + 1} : libellé requis`);
+      }
+      if (typeof subCriterion?.score !== 'number' || subCriterion.score < 1 || subCriterion.score > 5) {
+        errors.push(`Axe ${axis}, sous-critère ${index + 1} : note requise entre 1 et 5`);
+      }
+    });
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+/**
+ * Applique une (re)définition de l'auto-évaluation générale : remplace entièrement la liste de
+ * sous-critères d'un axe fourni en entrée (pas de fusion par id, contrairement aux objectifs —
+ * l'auto-évaluation générale n'a pas d'avancement à préserver d'un sous-critère à l'autre) ; un
+ * axe absent de l'entrée conserve sa valeur actuelle. Ne valide pas — appeler
+ * `validateGeneralSelfAssessment` avant.
+ */
+export function applyGeneralSelfAssessment(
+  current: IGeneralAssessmentAxes,
+  input: GeneralSelfAssessmentInput
+): IGeneralAssessmentAxes {
+  const next = { ...current };
+  for (const axis of COMPETENCY_AXES) {
+    const subCriteria = input[axis];
+    if (subCriteria !== undefined) {
+      next[axis] = subCriteria.map((subCriterion) => ({ label: subCriterion.label, score: subCriterion.score }));
+    }
+  }
+  return next;
+}
+
+/** Le défaut Mongoose couvre déjà les 4 axes, mais on protège l'API de la même façon que `completeQualitative`. */
+export function completeGeneralSelfAssessment(raw?: Partial<IGeneralAssessmentAxes> | null): IGeneralAssessmentAxes {
+  return {
+    technique: raw?.technique ?? [],
+    impact: raw?.impact ?? [],
+    collaboration: raw?.collaboration ?? [],
+    leadership: raw?.leadership ?? []
+  };
+}
