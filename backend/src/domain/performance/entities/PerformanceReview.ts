@@ -63,6 +63,8 @@ export interface IObjective {
   title: string;
   description?: string;
   weight: number;
+  /** Jusqu'à 2 axes de compétence associés à cet objectif (rapprochement OKR / grille de compétences). */
+  competencyAxes?: CompetencyAxis[];
   krs: IKeyResult[];
   selfAssessment: IObjectiveAssessment;
   managerAssessment: IObjectiveAssessment;
@@ -151,6 +153,7 @@ const ObjectiveSchema = new Schema<IObjective>(
     title: { type: String, default: '', trim: true },
     description: { type: String, trim: true },
     weight: { type: Number, default: 0, min: 0, max: 1 },
+    competencyAxes: { type: [String], enum: COMPETENCY_AXES, default: [] },
     krs: { type: [KeyResultSchema], default: [] },
     selfAssessment: { type: ObjectiveAssessmentSchema, default: () => ({}) },
     managerAssessment: { type: ObjectiveAssessmentSchema, default: () => ({}) }

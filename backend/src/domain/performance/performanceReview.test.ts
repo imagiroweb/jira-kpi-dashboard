@@ -13,6 +13,7 @@ import {
   computeReviewStatus,
   isPlausibleEvidenceUrl,
   ObjectiveDefinitionInput,
+  suggestCompetencyAxes,
   sumWeights,
   validateObjectivesDefinition,
   weightsAreBalanced
@@ -323,6 +324,52 @@ describe('applyObjectivesDefinition', () => {
 
     expect(existingKr.label).toBe('KR');
     expect(existing[0].title).toBe('X');
+  });
+
+  it("reprend les axes de compétence de la définition (remplacement, comme le titre/poids)", () => {
+    const existing: IObjective[] = [
+      { id: 'obj-1', title: 'X', weight: 1, competencyAxes: ['leadership'], krs: [], selfAssessment: {}, managerAssessment: {} }
+    ];
+
+    const result = applyObjectivesDefinition(existing, [
+      objectiveDef({ competencyAxes: ['technique', 'impact'] })
+    ]);
+
+    expect(result[0].competencyAxes).toEqual(['technique', 'impact']);
+  });
+
+  it('utilise un tableau vide quand la définition ne précise pas d\'axes de compétence', () => {
+    const result = applyObjectivesDefinition([], [objectiveDef()]);
+    expect(result[0].competencyAxes).toEqual([]);
+  });
+});
+
+describe('suggestCompetencyAxes', () => {
+  it('suggère un axe unique à partir d\'un mot-clé du titre', () => {
+    expect(suggestCompetencyAxes('Refactoriser l\'architecture technique')).toEqual(['technique']);
+  });
+
+  it('suggère un axe à partir de la description quand le titre ne matche rien', () => {
+    expect(suggestCompetencyAxes('Objectif Q3', 'Améliorer la satisfaction client et le delivery')).toEqual(['impact']);
+  });
+
+  it('classe par nombre de correspondances et limite à 2 axes', () => {
+    const result = suggestCompetencyAxes(
+      'Mentorer l\'équipe technique',
+      'Vision, encadrement, recrutement et collaboration transverse avec le code et l\'architecture'
+    );
+    expect(result).toHaveLength(2);
+    expect(result).toEqual(['leadership', 'technique']);
+  });
+
+  it('ne suggère rien quand aucun mot-clé ne correspond', () => {
+    expect(suggestCompetencyAxes('Titre neutre sans mot-clé particulier')).toEqual([]);
+  });
+
+  it('départage une égalité par l\'ordre de COMPETENCY_AXES', () => {
+    // "technique" (1er de COMPETENCY_AXES) et "impact" ont chacun 1 correspondance ;
+    // "collaboration" et "leadership" n'en ont aucune ici.
+    expect(suggestCompetencyAxes('code et client')).toEqual(['technique', 'impact']);
   });
 });
 

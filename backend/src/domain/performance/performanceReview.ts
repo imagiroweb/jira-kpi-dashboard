@@ -126,6 +126,8 @@ export interface ObjectiveDefinitionInput {
   title: string;
   description?: string;
   weight: number;
+  /** Jusqu'à 2 axes de compétence associés (voir `suggestCompetencyAxes`), librement modifiables par le lead/CTO. */
+  competencyAxes?: CompetencyAxis[];
   krs: KeyResultDefinitionInput[];
 }
 
@@ -225,11 +227,47 @@ export function applyObjectivesDefinition(
       title: objectiveDef.title,
       description: objectiveDef.description,
       weight: objectiveDef.weight,
+      competencyAxes: objectiveDef.competencyAxes ?? [],
       krs,
       selfAssessment: existingObjective?.selfAssessment ?? {},
       managerAssessment: existingObjective?.managerAssessment ?? {}
     };
   });
+}
+
+/**
+ * Mots-clés associés à chaque axe de compétence, utilisés par
+ * `suggestCompetencyAxes` pour rapprocher automatiquement un objectif de la
+ * grille de compétences (voir `COMPETENCY_AXES`). Recherche insensible à la
+ * casse sur le titre + la description de l'objectif.
+ */
+const COMPETENCY_AXIS_KEYWORDS: Record<CompetencyAxis, string[]> = {
+  technique: ['code', 'architecture', 'technique', 'technologie', 'dette technique', 'infrastructure', 'infra', 'sécurité'],
+  impact: ['client', 'business', 'arr', 'delivery', 'livraison', "chiffre d'affaires", 'roadmap produit', 'produit'],
+  collaboration: ['équipe', 'collaborat', 'communication', 'coordination', 'transverse'],
+  leadership: ['mentor', 'vision', 'manager', 'leadership', 'encadrement', 'recrutement']
+};
+
+/**
+ * Suggère jusqu'à 2 axes de compétence pour un objectif, à partir de
+ * correspondances par mots-clés sur son titre + sa description (pure
+ * fonction, pas d'appel externe — voir `COMPETENCY_AXIS_KEYWORDS`). Les axes
+ * sont classés par nombre de mots-clés trouvés (le plus pertinent en
+ * premier) ; en cas d'égalité, l'ordre de `COMPETENCY_AXES` départage. Ne
+ * renvoie que des axes ayant au moins une correspondance — une suggestion
+ * purement indicative, librement modifiable par le lead/CTO.
+ */
+export function suggestCompetencyAxes(title: string, description?: string): CompetencyAxis[] {
+  const haystack = `${title} ${description ?? ''}`.toLowerCase();
+
+  return COMPETENCY_AXES.map((axis) => ({
+    axis,
+    matchCount: COMPETENCY_AXIS_KEYWORDS[axis].filter((keyword) => haystack.includes(keyword)).length
+  }))
+    .filter((entry) => entry.matchCount > 0)
+    .sort((a, b) => b.matchCount - a.matchCount)
+    .slice(0, 2)
+    .map((entry) => entry.axis);
 }
 
 /** Évaluation (self ou manager) d'un objectif, par id d'objectif. */
