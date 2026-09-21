@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { performanceApi, teamApi } from '../services/api';
 import { TeamsCyclesAdminPanel } from './TeamsCyclesAdminPanel';
+import { GeneralAssessmentSummary } from './GeneralAssessmentSummary';
 import { useSocketOptional } from '../hooks/useSocketContext';
 import { useStore } from '../store/useStore';
 import type { Team } from '../domain/team';
@@ -79,6 +80,7 @@ function buildEmptyReviewForMember(member: PerformanceTeamMember, cycleId: strin
       collaboration: {},
       leadership: {}
     },
+    generalSelfAssessment: { technique: [], impact: [], collaboration: [], leadership: [] },
     status: 'dossier_manquant',
     createdBy: { id: member.id, name: memberLabel(member) },
     createdAt: new Date().toISOString(),
@@ -880,6 +882,8 @@ export function TeamPerformancePage() {
                 )}
               </div>
 
+              <GeneralAssessmentSummary axes={detail.generalSelfAssessment} objectives={detail.objectives} />
+
               {managerDraft && detail.objectives.length > 0 && (
                 <div className="card-glass p-6 space-y-6">
                   <h3 className="text-base font-semibold text-surface-100">Évaluation manager</h3>
@@ -925,7 +929,7 @@ export function TeamPerformancePage() {
                           </div>
                           {objective.selfAssessment.status && (
                             <p className="mt-2 text-xs text-surface-500">
-                              Auto-évaluation : {OBJECTIVE_STATUS_LABELS[objective.selfAssessment.status]}
+                              Bilan du cycle (collaborateur) : {OBJECTIVE_STATUS_LABELS[objective.selfAssessment.status]}
                               {objective.selfAssessment.comment ? ` — ${objective.selfAssessment.comment}` : ''}
                             </p>
                           )}

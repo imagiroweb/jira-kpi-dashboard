@@ -73,6 +73,7 @@ function makeReview(overrides: Partial<PerformanceReview> = {}): PerformanceRevi
       collaboration: {},
       leadership: {}
     },
+    generalSelfAssessment: { technique: [], impact: [], collaboration: [], leadership: [] },
     status: 'en_cours',
     createdBy: { id: 'user-1', name: 'bruno', role: 'collaborateur' },
     createdAt: '2026-08-01T00:00:00.000Z',
@@ -150,7 +151,7 @@ describe('MyPerformancePage', () => {
     expect(
       await screen.findByRole('heading', { name: 'Améliorer la fiabilité du produit', level: 3 })
     ).toBeInTheDocument();
-    expect(screen.getByText('Mon auto-évaluation')).toBeInTheDocument();
+    expect(screen.getByText('Bilan du cycle')).toBeInTheDocument();
   });
 
   it("affiche un message si aucun cycle de performance n'est actif", async () => {
@@ -224,7 +225,7 @@ describe('MyPerformancePage', () => {
     mockUpdateSelfAssessment.mockResolvedValue({ success: true, review: makeReview() });
 
     render(<MyPerformancePage />);
-    await screen.findByText('Mon auto-évaluation');
+    await screen.findByText('Bilan du cycle');
 
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'atteint' } });
     fireEvent.click(screen.getByRole('button', { name: /Enregistrer mon auto-évaluation/i }));

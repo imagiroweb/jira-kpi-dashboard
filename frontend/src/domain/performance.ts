@@ -88,6 +88,19 @@ export interface CompetencyScore {
 
 export type CompetencyScores = Record<CompetencyAxis, CompetencyScore>;
 
+/**
+ * Un sous-critère noté (1-5) de l'auto-évaluation générale — distincte du "Bilan du cycle"
+ * (`qualitative` / `competencyScores` ci-dessus, remplis à chaque cycle par le collaborateur et
+ * son manager). Reprend la grille à 4 axes × 3 sous-critères des fichiers Excel importés (voir
+ * `IGeneralAssessmentAxes` côté backend) ; pas encore éditable depuis l'UI, alimentée par l'import.
+ */
+export interface GeneralAssessmentSubCriterion {
+  label: string;
+  score: number;
+}
+
+export type GeneralAssessmentAxes = Record<CompetencyAxis, GeneralAssessmentSubCriterion[]>;
+
 /** Utilisateur tel que renvoyé quand la fiche est peuplée (listes/détail lead-CTO). */
 export interface PerformanceReviewUserRef {
   _id: string;
@@ -107,6 +120,8 @@ export interface PerformanceReview {
   objectives: Objective[];
   qualitative: Qualitative;
   competencyScores: CompetencyScores;
+  /** Auto-évaluation générale (4 axes × sous-critères) — voir `GeneralAssessmentAxes`. */
+  generalSelfAssessment: GeneralAssessmentAxes;
   status: PerformanceReviewStatus;
   /** Qui a défini les objectifs de cette fiche (un lead pour son équipe, ou le CTO). */
   definedBy?: ReviewAuthor;
@@ -253,6 +268,25 @@ export function computeReviewScore(objectives: Pick<Objective, 'weight' | 'krs'>
     0
   );
   return weightedSum / totalWeight;
+}
+
+/** Score d'un axe de l'auto-évaluation générale (0-5) : moyenne des scores de ses sous-critères, 0 si aucun. */
+export function computeGeneralAssessmentAxisScore(subCriteria: GeneralAssessmentSubCriterion[]): number {
+  if (subCriteria.length === 0) return 0;
+  const sum = subCriteria.reduce((total, subCriterion) => total + subCriterion.score, 0);
+  return sum / subCriteria.length;
+}
+
+/**
+ * Score global de l'auto-évaluation générale (0-5) : moyenne des scores des 4 axes, en excluant
+ * un axe sans sous-critère renseigné (pas compté comme 0) — miroir exact de
+ * `computeGeneralAssessmentGlobalScore` côté backend.
+ */
+export function computeGeneralAssessmentGlobalScore(axes: GeneralAssessmentAxes): number {
+  const axisScores = COMPETENCY_AXES.map((axis) => axes[axis]).filter((subCriteria) => subCriteria.length > 0);
+  if (axisScores.length === 0) return 0;
+  const sum = axisScores.reduce((total, subCriteria) => total + computeGeneralAssessmentAxisScore(subCriteria), 0);
+  return sum / axisScores.length;
 }
 
 export interface ObjectivesDefinitionValidation {
@@ -425,6 +459,21 @@ export function normalizeCompetencyScores(raw?: Partial<CompetencyScores> | null
   };
 }
 
+export function emptyGeneralAssessmentAxes(): GeneralAssessmentAxes {
+  return { technique: [], impact: [], collaboration: [], leadership: [] };
+}
+
+export function normalizeGeneralAssessmentAxes(raw?: Partial<GeneralAssessmentAxes> | null): GeneralAssessmentAxes {
+  const base = emptyGeneralAssessmentAxes();
+  if (!raw) return base;
+  return {
+    technique: raw.technique ?? [],
+    impact: raw.impact ?? [],
+    collaboration: raw.collaboration ?? [],
+    leadership: raw.leadership ?? []
+  };
+}
+
 export function normalizePerformanceReview(review: PerformanceReview): PerformanceReview {
   return {
     ...review,
@@ -435,7 +484,8 @@ export function normalizePerformanceReview(review: PerformanceReview): Performan
       managerAssessment: objective.managerAssessment ?? {}
     })),
     qualitative: normalizeQualitative(review.qualitative),
-    competencyScores: normalizeCompetencyScores(review.competencyScores)
+    competencyScores: normalizeCompetencyScores(review.competencyScores),
+    generalSelfAssessment: normalizeGeneralAssessmentAxes(review.generalSelfAssessment)
   };
 }
 

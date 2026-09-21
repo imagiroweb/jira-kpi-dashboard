@@ -66,6 +66,7 @@ function makeReview(overrides: Partial<PerformanceReview> = {}): PerformanceRevi
     ],
     qualitative: { successes: {}, challenges: {}, growthAreas: {}, overallReview: {} },
     competencyScores: { technique: {}, impact: {}, collaboration: {}, leadership: {} },
+    generalSelfAssessment: { technique: [], impact: [], collaboration: [], leadership: [] },
     status: 'en_cours',
     createdBy: { id: 'user-1', name: 'alice' },
     createdAt: '2026-08-01T00:00:00.000Z',

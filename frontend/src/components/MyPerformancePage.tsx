@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { performanceApi } from '../services/api';
 import { useSocketOptional } from '../hooks/useSocketContext';
+import { GeneralAssessmentSummary } from './GeneralAssessmentSummary';
 import {
   PerformanceReview,
   PerformanceCycle,
@@ -341,9 +342,11 @@ export function MyPerformancePage() {
                 ))}
               </div>
 
+              <GeneralAssessmentSummary axes={review.generalSelfAssessment} objectives={review.objectives} />
+
               {selfDraft && (
                 <div className="card-glass p-6 space-y-6">
-                  <h2 className="text-lg font-semibold text-surface-100">Mon auto-évaluation</h2>
+                  <h2 className="text-lg font-semibold text-surface-100">Bilan du cycle</h2>
 
                   <div className="space-y-4">
                     {review.objectives.map((objective) => {

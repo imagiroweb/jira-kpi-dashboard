@@ -18,6 +18,7 @@ function incompleteReview(): PerformanceReview {
     ],
     qualitative: {} as PerformanceReview['qualitative'],
     competencyScores: {} as PerformanceReview['competencyScores'],
+    generalSelfAssessment: undefined as unknown as PerformanceReview['generalSelfAssessment'],
     status: 'en_cours',
     createdBy: { id: 'user-1', name: 'bruno' },
     createdAt: '2026-08-01T00:00:00.000Z',
@@ -37,6 +38,12 @@ describe('normalizePerformanceReview', () => {
     expect(normalized.competencyScores.leadership).toEqual({});
     expect(normalized.objectives[0].selfAssessment).toEqual({});
     expect(normalized.objectives[0].managerAssessment).toEqual({});
+    expect(normalized.generalSelfAssessment).toEqual({
+      technique: [],
+      impact: [],
+      collaboration: [],
+      leadership: []
+    });
   });
 });
 
