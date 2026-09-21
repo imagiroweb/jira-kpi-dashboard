@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { normalizePerformanceReview, suggestCompetencyAxes, type PerformanceReview } from './performance';
+import {
+  GENERAL_ASSESSMENT_REFERENTIAL,
+  normalizePerformanceReview,
+  suggestCompetencyAxes,
+  type PerformanceReview
+} from './performance';
 
 function incompleteReview(): PerformanceReview {
   return {
@@ -19,6 +24,7 @@ function incompleteReview(): PerformanceReview {
     qualitative: {} as PerformanceReview['qualitative'],
     competencyScores: {} as PerformanceReview['competencyScores'],
     generalSelfAssessment: undefined as unknown as PerformanceReview['generalSelfAssessment'],
+    generalManagerAssessment: undefined as unknown as PerformanceReview['generalManagerAssessment'],
     status: 'en_cours',
     createdBy: { id: 'user-1', name: 'bruno' },
     createdAt: '2026-08-01T00:00:00.000Z',
@@ -43,6 +49,20 @@ describe('normalizePerformanceReview', () => {
       impact: [],
       collaboration: [],
       leadership: []
+    });
+    expect(normalized.generalManagerAssessment).toEqual({
+      technique: [],
+      impact: [],
+      collaboration: [],
+      leadership: []
+    });
+  });
+});
+
+describe('GENERAL_ASSESSMENT_REFERENTIAL', () => {
+  it('liste 3 sous-critères pour chacun des 4 axes', () => {
+    (['technique', 'impact', 'collaboration', 'leadership'] as const).forEach((axis) => {
+      expect(GENERAL_ASSESSMENT_REFERENTIAL[axis]).toHaveLength(3);
     });
   });
 });

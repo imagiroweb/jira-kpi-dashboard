@@ -13,6 +13,7 @@ vi.mock('../services/api', () => ({
     getReview: vi.fn(),
     defineObjectives: vi.fn(),
     updateManagerAssessment: vi.fn(),
+    updateGeneralManagerAssessment: vi.fn(),
     getTeamMembers: vi.fn(),
     importOkr: vi.fn()
   },
@@ -30,6 +31,7 @@ const mockListReviews = vi.mocked(performanceApi.listReviews);
 const mockGetReview = vi.mocked(performanceApi.getReview);
 const mockDefineObjectives = vi.mocked(performanceApi.defineObjectives);
 const mockUpdateManagerAssessment = vi.mocked(performanceApi.updateManagerAssessment);
+const mockUpdateGeneralManagerAssessment = vi.mocked(performanceApi.updateGeneralManagerAssessment);
 const mockGetTeamMembers = vi.mocked(performanceApi.getTeamMembers);
 const mockTeamList = vi.mocked(teamApi.list);
 
@@ -67,6 +69,7 @@ function makeReview(overrides: Partial<PerformanceReview> = {}): PerformanceRevi
     qualitative: { successes: {}, challenges: {}, growthAreas: {}, overallReview: {} },
     competencyScores: { technique: {}, impact: {}, collaboration: {}, leadership: {} },
     generalSelfAssessment: { technique: [], impact: [], collaboration: [], leadership: [] },
+    generalManagerAssessment: { technique: [], impact: [], collaboration: [], leadership: [] },
     status: 'en_cours',
     createdBy: { id: 'user-1', name: 'alice' },
     createdAt: '2026-08-01T00:00:00.000Z',
@@ -361,6 +364,57 @@ describe('TeamPerformancePage', () => {
         })
       );
     });
+  });
+
+  it("enregistre la grille manager de la grille générale avec la note saisie", async () => {
+    seedUser({ performanceGlobalAccess: true });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [makeReview()] });
+    mockGetReview.mockResolvedValue({ success: true, review: makeReview() });
+    mockUpdateGeneralManagerAssessment.mockResolvedValue({ success: true, review: makeReview() });
+
+    render(<TeamPerformancePage />);
+    await screen.findByText('Alice Martin');
+    fireEvent.click(screen.getByRole('button', { name: 'Ouvrir' }));
+    await screen.findByText('Évaluation manager — grille détaillée');
+
+    fireEvent.change(screen.getByLabelText('Qualité du code & revues'), { target: { value: '4' } });
+    fireEvent.click(screen.getByRole('button', { name: /Enregistrer la grille manager/i }));
+
+    await waitFor(() => {
+      expect(mockUpdateGeneralManagerAssessment).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({
+          technique: expect.arrayContaining([{ label: 'Qualité du code & revues', score: 4 }])
+        })
+      );
+    });
+  });
+
+  it("signale un désaccord quand la note manager saisie s'écarte d'au moins 2 points de l'auto-évaluation", async () => {
+    seedUser({ performanceGlobalAccess: true });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    const reviewWithSelfScore = makeReview({
+      generalSelfAssessment: {
+        technique: [{ label: 'Qualité du code & revues', score: 5 }],
+        impact: [],
+        collaboration: [],
+        leadership: []
+      }
+    });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [reviewWithSelfScore] });
+    mockGetReview.mockResolvedValue({ success: true, review: reviewWithSelfScore });
+
+    render(<TeamPerformancePage />);
+    await screen.findByText('Alice Martin');
+    fireEvent.click(screen.getByRole('button', { name: 'Ouvrir' }));
+    await screen.findByText('Évaluation manager — grille détaillée');
+
+    expect(screen.queryByText('Désaccord')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Qualité du code & revues'), { target: { value: '2' } });
+    expect(screen.getByText('Désaccord')).toBeInTheDocument();
   });
 
   it("affiche les badges d'axes de compétence associés à un objectif dans l'évaluation manager", async () => {

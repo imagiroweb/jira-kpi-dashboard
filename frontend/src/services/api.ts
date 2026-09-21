@@ -17,6 +17,7 @@ import {
   type UpdatePerformanceCycleInput,
   type ObjectiveDefinitionInput,
   type AssessmentInput,
+  type GeneralAssessmentAxesInput,
   type ProgressUpdateInput,
   type OkrImportResult
 } from '../domain/performance';
@@ -748,6 +749,15 @@ export const performanceApi = {
     input: AssessmentInput & { cycleId?: string }
   ): Promise<{ success: boolean; review: PerformanceReview }> => {
     const { data } = await api.patch(`/performance/reviews/${userId}/manager-assessment`, input);
+    return { ...data, review: normalizePerformanceReview(data.review) };
+  },
+  /** Évaluation manager sur la grille générale (4 axes × sous-critères) — pour rapprochement avec l'auto-évaluation. */
+  updateGeneralManagerAssessment: async (
+    userId: string,
+    axes: GeneralAssessmentAxesInput,
+    cycleId?: string
+  ): Promise<{ success: boolean; review: PerformanceReview }> => {
+    const { data } = await api.patch(`/performance/reviews/${userId}/general-manager-assessment`, { axes, cycleId });
     return { ...data, review: normalizePerformanceReview(data.review) };
   },
   /** Membres d'équipe dans la portée de l'acteur, avec ou sans fiche de performance ouverte. */

@@ -15,7 +15,8 @@
     "import:okr:dry-run": "ts-node src/scripts/import-okr/dryRun.ts",
     "import:okr:run": "ts-node src/scripts/import-okr/runImport.ts",
     "import:general-assessment:dry-run": "ts-node src/scripts/import-okr/dryRunGeneralAssessment.ts",
-    "import:general-assessment:run": "ts-node src/scripts/import-okr/runGeneralAssessmentImport.ts"
+    "import:general-assessment:run": "ts-node src/scripts/import-okr/runGeneralAssessmentImport.ts",
+    "import:general-assessment-referential:seed": "ts-node src/scripts/import-okr/seedGeneralAssessmentReferential.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",

@@ -1,6 +1,7 @@
 import axios from 'axios';
 import type { RosterCandidate } from '../../domain/performance/importCollaboratorMapping';
 import type { ObjectiveDefinitionInput, GeneralSelfAssessmentInput } from '../../domain/performance/performanceReview';
+import type { IReferentialAxes } from '../../domain/performance/entities/GeneralAssessmentReferentialProfile';
 
 export interface ApiCycle {
   id: string;
@@ -69,6 +70,18 @@ export function createImportApiClient() {
       const { data } = await client.patch(`/performance/reviews/${userId}/general-self-assessment`, { axes, cycleId });
       if (!data?.success) {
         throw new Error("Échec de l'écriture de l'auto-évaluation générale");
+      }
+    },
+
+    /**
+     * PUT /performance/general-assessment-referential/:roleProfile — (re)définit le référentiel
+     * de réponses verbeuses (et leurs points) d'un profil de poste donné, pour la grille de
+     * notation manager (voir `seedGeneralAssessmentReferential.ts`).
+     */
+    async writeGeneralAssessmentReferential(roleProfile: string, label: string, axes: IReferentialAxes): Promise<void> {
+      const { data } = await client.put(`/performance/general-assessment-referential/${roleProfile}`, { label, axes });
+      if (!data?.success) {
+        throw new Error(`Échec de l'écriture du référentiel pour le profil ${roleProfile}`);
       }
     }
   };

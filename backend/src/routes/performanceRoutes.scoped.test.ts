@@ -19,6 +19,8 @@ const mockUserFindById = jest.fn();
 const mockUserFind = jest.fn();
 const mockRoleFindById = jest.fn();
 const mockTeamFind = jest.fn();
+const mockProfileFind = jest.fn();
+const mockProfileFindOneAndUpdate = jest.fn();
 
 jest.mock('../domain/performance/entities/PerformanceCycle', () => {
   const actual = jest.requireActual('../domain/performance/entities/PerformanceCycle');
@@ -65,6 +67,17 @@ jest.mock('../domain/team/entities/Team', () => ({
     find: (...args: unknown[]) => mockTeamFind(...args)
   }
 }));
+
+jest.mock('../domain/performance/entities/GeneralAssessmentReferentialProfile', () => {
+  const actual = jest.requireActual('../domain/performance/entities/GeneralAssessmentReferentialProfile');
+  return {
+    ...actual,
+    GeneralAssessmentReferentialProfile: {
+      find: (...args: unknown[]) => mockProfileFind(...args),
+      findOneAndUpdate: (...args: unknown[]) => mockProfileFindOneAndUpdate(...args)
+    }
+  };
+});
 
 jest.mock('../middleware/authMiddleware', () => {
   const auth = jest.requireActual<typeof import('../test/mocks/authMiddleware')>('../test/mocks/authMiddleware');
@@ -689,6 +702,116 @@ describe('performanceRoutes — portée équipe/CTO (TI)', () => {
 
       expect(res.status).toBe(409);
       expect(mockReviewFindOneAndUpdate).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  describe('GET /general-assessment-referential', () => {
+    const url = '/api/performance/general-assessment-referential';
+
+    it('200 liste les profils triés et sérialisés', async () => {
+      const stored = [
+        {
+          roleProfile: 'dev_back',
+          label: 'Développeur Back',
+          axes: { technique: [], impact: [], collaboration: [], leadership: [] },
+          updatedBy: { id: TEST_USER_ID, name: 'admin' },
+          updatedAt: new Date('2026-09-01')
+        }
+      ];
+      mockProfileFind.mockReturnValue({ sort: jest.fn().mockResolvedValue(stored) });
+
+      const res = await request(app).get(url);
+
+      expect(res.status).toBe(200);
+      expect(res.body.profiles).toEqual([
+        expect.objectContaining({ roleProfile: 'dev_back', label: 'Développeur Back' })
+      ]);
+    });
+
+    it("200 renvoie une liste vide si aucun profil n'a encore été enregistré", async () => {
+      mockProfileFind.mockReturnValue({ sort: jest.fn().mockResolvedValue([]) });
+
+      const res = await request(app).get(url);
+
+      expect(res.status).toBe(200);
+      expect(res.body.profiles).toEqual([]);
+    });
+  });
+
+  describe('PUT /general-assessment-referential/:roleProfile', () => {
+    const url = '/api/performance/general-assessment-referential/dev_back';
+    const emptyAxes = { technique: [], impact: [], collaboration: [], leadership: [] };
+    const validPayload = { label: 'Développeur Back', axes: emptyAxes };
+
+    it("403 si l'acteur n'a pas d'accès global", async () => {
+      const res = await request(app).put(url).send(validPayload);
+      expect(res.status).toBe(403);
+      expect(mockProfileFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('400 si le profil de poste est inconnu', async () => {
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+
+      const res = await request(app)
+        .put('/api/performance/general-assessment-referential/product_owner')
+        .send(validPayload);
+
+      expect(res.status).toBe(400);
+      expect(mockProfileFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('400 si le label est manquant', async () => {
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+
+      const res = await request(app).put(url).send({ axes: emptyAxes });
+
+      expect(res.status).toBe(400);
+      expect(mockProfileFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('400 si les axes sont invalides (axe manquant)', async () => {
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      const { leadership: _leadership, ...incompleteAxes } = emptyAxes;
+
+      const res = await request(app)
+        .put(url)
+        .send({ label: 'Développeur Back', axes: incompleteAxes });
+
+      expect(res.status).toBe(400);
+      expect(mockProfileFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('200 crée ou met à jour le profil (upsert) et renvoie le profil sérialisé', async () => {
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      mockProfileFindOneAndUpdate.mockResolvedValue({
+        roleProfile: 'dev_back',
+        label: 'Développeur Back',
+        axes: emptyAxes,
+        updatedBy: { id: TEST_USER_ID, name: 'admin' },
+        updatedAt: new Date('2026-09-01')
+      });
+
+      const res = await request(app).put(url).send(validPayload);
+
+      expect(res.status).toBe(200);
+      expect(res.body.profile).toEqual(
+        expect.objectContaining({ roleProfile: 'dev_back', label: 'Développeur Back' })
+      );
+      expect(mockProfileFindOneAndUpdate).toHaveBeenCalledWith(
+        { roleProfile: 'dev_back' },
+        expect.objectContaining({
+          $set: expect.objectContaining({ label: 'Développeur Back', axes: emptyAxes })
+        }),
+        expect.objectContaining({ new: true, upsert: true, runValidators: true })
+      );
     });
   });
 

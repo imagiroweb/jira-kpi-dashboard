@@ -101,6 +101,22 @@ export interface GeneralAssessmentSubCriterion {
 
 export type GeneralAssessmentAxes = Record<CompetencyAxis, GeneralAssessmentSubCriterion[]>;
 
+/** Payload de `PATCH .../general-self-assessment` et `PATCH .../general-manager-assessment` — un axe absent n'est pas modifié. */
+export type GeneralAssessmentAxesInput = Partial<Record<CompetencyAxis, GeneralAssessmentSubCriterion[]>>;
+
+/**
+ * Référentiel des 12 sous-critères (4 axes × 3), identiques quel que soit le rôle du
+ * collaborateur — miroir exact de `GENERAL_ASSESSMENT_REFERENTIAL` côté backend
+ * (`src/domain/performance/performanceReview.ts`). Sert de trame fixe au formulaire de notation
+ * manager, pour que chaque sous-critère self soit comparable au même sous-critère manager.
+ */
+export const GENERAL_ASSESSMENT_REFERENTIAL: Record<CompetencyAxis, string[]> = {
+  technique: ['Qualité du code & revues', 'Autonomie & résolution de bugs', 'Conception & architecture'],
+  impact: ['Livraison (delivery)', 'Contribution aux OKR', "Périmètre d'influence"],
+  collaboration: ['Communication & transparence', 'Partage & documentation', "Esprit d'équipe & rituels"],
+  leadership: ['Initiative & autonomie', 'Mentorat & développement des autres', 'Vision & influence']
+};
+
 /** Utilisateur tel que renvoyé quand la fiche est peuplée (listes/détail lead-CTO). */
 export interface PerformanceReviewUserRef {
   _id: string;
@@ -122,6 +138,8 @@ export interface PerformanceReview {
   competencyScores: CompetencyScores;
   /** Auto-évaluation générale (4 axes × sous-critères) — voir `GeneralAssessmentAxes`. */
   generalSelfAssessment: GeneralAssessmentAxes;
+  /** Évaluation manager sur la même grille, pour rapprochement avec l'auto-évaluation. */
+  generalManagerAssessment: GeneralAssessmentAxes;
   status: PerformanceReviewStatus;
   /** Qui a défini les objectifs de cette fiche (un lead pour son équipe, ou le CTO). */
   definedBy?: ReviewAuthor;
@@ -485,7 +503,8 @@ export function normalizePerformanceReview(review: PerformanceReview): Performan
     })),
     qualitative: normalizeQualitative(review.qualitative),
     competencyScores: normalizeCompetencyScores(review.competencyScores),
-    generalSelfAssessment: normalizeGeneralAssessmentAxes(review.generalSelfAssessment)
+    generalSelfAssessment: normalizeGeneralAssessmentAxes(review.generalSelfAssessment),
+    generalManagerAssessment: normalizeGeneralAssessmentAxes(review.generalManagerAssessment)
   };
 }
 

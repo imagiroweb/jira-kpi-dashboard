@@ -12,6 +12,7 @@ import {
 import { performanceApi, teamApi } from '../services/api';
 import { TeamsCyclesAdminPanel } from './TeamsCyclesAdminPanel';
 import { GeneralAssessmentSummary } from './GeneralAssessmentSummary';
+import { GeneralManagerAssessmentForm } from './GeneralManagerAssessmentForm';
 import { useSocketOptional } from '../hooks/useSocketContext';
 import { useStore } from '../store/useStore';
 import type { Team } from '../domain/team';
@@ -21,6 +22,7 @@ import {
   PerformanceCycle,
   ObjectiveDefinitionInput,
   AssessmentInput,
+  GeneralAssessmentAxesInput,
   ObjectiveAssessmentStatus,
   PerformanceReviewStatus,
   CompetencyAxis,
@@ -88,6 +90,7 @@ function buildEmptyReviewForMember(member: PerformanceTeamMember, cycleId: strin
       leadership: {}
     },
     generalSelfAssessment: { technique: [], impact: [], collaboration: [], leadership: [] },
+    generalManagerAssessment: { technique: [], impact: [], collaboration: [], leadership: [] },
     status: 'dossier_manquant',
     createdBy: { id: member.id, name: memberLabel(member) },
     createdAt: new Date().toISOString(),
@@ -223,6 +226,7 @@ export function TeamPerformancePage() {
 
   const [managerDraft, setManagerDraft] = useState<ManagerDraft | null>(null);
   const [savingManager, setSavingManager] = useState(false);
+  const [savingGeneralManager, setSavingGeneralManager] = useState(false);
 
   const cycle = useMemo(() => cycles.find((c) => c.status === 'active') ?? null, [cycles]);
   const isReadOnly = cycle != null && cycle.status !== 'active';
@@ -533,6 +537,25 @@ export function TeamPerformancePage() {
       );
     } finally {
       setSavingManager(false);
+    }
+  }
+
+  async function handleSaveGeneralManagerAssessment(axes: GeneralAssessmentAxesInput) {
+    if (!detail) return;
+    setSavingGeneralManager(true);
+    try {
+      const res = await performanceApi.updateGeneralManagerAssessment(reviewUserId(detail), axes);
+      const merged: PerformanceReview = { ...res.review, user: detail.user };
+      setDetail(merged);
+      upsertReviewInList(merged);
+      socket?.notify?.success('Grille enregistrée', 'La grille manager a bien été sauvegardée');
+    } catch (err) {
+      socket?.notify?.error(
+        "Échec de l'enregistrement",
+        extractApiErrorMessage(err, "Erreur lors de l'enregistrement de la grille manager")
+      );
+    } finally {
+      setSavingGeneralManager(false);
     }
   }
 
@@ -895,6 +918,14 @@ export function TeamPerformancePage() {
               </div>
 
               <GeneralAssessmentSummary axes={detail.generalSelfAssessment} objectives={detail.objectives} />
+
+              <GeneralManagerAssessmentForm
+                selfAxes={detail.generalSelfAssessment}
+                managerAxes={detail.generalManagerAssessment}
+                disabled={isReadOnly}
+                saving={savingGeneralManager}
+                onSave={handleSaveGeneralManagerAssessment}
+              />
 
               {managerDraft && detail.objectives.length > 0 && (
                 <div className="card-glass p-6 space-y-6">

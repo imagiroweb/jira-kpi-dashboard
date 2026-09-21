@@ -21,6 +21,12 @@ import {
   PERFORMANCE_REVIEW_STATUSES
 } from '../domain/performance/entities/PerformanceReview';
 import {
+  GeneralAssessmentReferentialProfile,
+  IGeneralAssessmentReferentialProfile,
+  ROLE_PROFILES
+} from '../domain/performance/entities/GeneralAssessmentReferentialProfile';
+import { validateReferentialAxes } from '../domain/performance/generalAssessmentReferential';
+import {
   appendKeyResultProgress,
   applyGeneralAssessmentAxes,
   applyGeneralSelfAssessment,
@@ -127,6 +133,74 @@ async function resolveCycle(cycleId: unknown): Promise<IPerformanceCycle | null 
   }
   return PerformanceCycle.findOne({ status: 'active' });
 }
+
+function serializeReferentialProfile(profile: IGeneralAssessmentReferentialProfile) {
+  return {
+    roleProfile: profile.roleProfile,
+    label: profile.label,
+    axes: profile.axes,
+    updatedBy: profile.updatedBy,
+    updatedAt: profile.updatedAt
+  };
+}
+
+/**
+ * Référentiel de notation détaillée (réponses verbeuses + points), un profil par grande famille
+ * de poste — voir `entities/GeneralAssessmentReferentialProfile.ts`. Ouvert à tout utilisateur
+ * authentifié : nécessaire pour construire les menus déroulants du formulaire de notation, côté
+ * collaborateur comme côté manager.
+ * GET /api/performance/general-assessment-referential
+ */
+router.get('/general-assessment-referential', authenticate, async (_req: Request, res: Response) => {
+  try {
+    const profiles = await GeneralAssessmentReferentialProfile.find().sort({ roleProfile: 1 });
+    res.json({ success: true, profiles: profiles.map(serializeReferentialProfile) });
+  } catch (error) {
+    logger.error('Error listing general assessment referential profiles:', error);
+    fail(res, 500, 'Erreur lors de la récupération du référentiel', error);
+  }
+});
+
+/**
+ * (Re)définition complète des 4 axes d'un profil — CTO/super_admin uniquement. Remplace
+ * entièrement `axes` (pas de fusion partielle : un profil se pense comme un tout cohérent de 12
+ * sous-critères). Crée le profil s'il n'existe pas encore (upsert), pour amorcer le référentiel
+ * via le script de seed (voir `scripts/import-okr/seedGeneralAssessmentReferential.ts`), et reste
+ * la même route pour une édition manuelle ultérieure (texte des réponses ou points modifiés).
+ * PUT /api/performance/general-assessment-referential/:roleProfile
+ */
+router.put(
+  '/general-assessment-referential/:roleProfile',
+  authenticate,
+  requireGlobalPerformanceAccess,
+  async (req: Request, res: Response) => {
+    try {
+      const { roleProfile } = req.params;
+      if (!(ROLE_PROFILES as readonly string[]).includes(roleProfile)) {
+        return fail(res, 400, `Profil de poste inconnu : ${roleProfile}`);
+      }
+      if (typeof req.body?.label !== 'string' || !req.body.label.trim()) {
+        return fail(res, 400, 'label requis');
+      }
+
+      const validation = validateReferentialAxes(req.body?.axes);
+      if (!validation.valid) {
+        return fail(res, 400, validation.errors.join(', '));
+      }
+
+      const profile = await GeneralAssessmentReferentialProfile.findOneAndUpdate(
+        { roleProfile },
+        { $set: { label: req.body.label.trim(), axes: req.body.axes, updatedBy: author(req) } },
+        { new: true, upsert: true, runValidators: true }
+      );
+
+      res.json({ success: true, profile: serializeReferentialProfile(profile!) });
+    } catch (error) {
+      logger.error('Error updating general assessment referential profile:', error);
+      fail(res, 500, 'Erreur lors de la mise à jour du référentiel', error);
+    }
+  }
+);
 
 /**
  * Ma fiche de performance pour un cycle (le cycle actif par défaut).
