@@ -41,12 +41,24 @@ export interface ImportPlanEntry {
 
 const INTERVIEW_EXTENSIONS = new Set(['.xlsx', '.ods']);
 
-/** Fichiers d'entretien sous `Entretiens-eval-perf/`, chemins relatifs, hors fichiers temporaires Excel. */
+/**
+ * Fichiers d'entretien sous `Entretiens-eval-perf/`, chemins relatifs, hors fichiers temporaires
+ * Excel. Lève une erreur explicite si `interviewsDir` n'existe pas (plutôt que de renvoyer
+ * silencieusement une liste vide, ce qui produisait un résumé trompeur "0 écrit(s), 0 bloqué(s)"
+ * ressemblant à un succès alors qu'aucun fichier n'avait été scanné — piégeant en cas de chemin
+ * `OKR_ENTRETIEN_DIR` erroné).
+ */
 export function collectInterviewFiles(interviewsDir: string): string[] {
+  if (!fs.existsSync(interviewsDir)) {
+    throw new Error(
+      `Dossier d'entretiens introuvable : ${interviewsDir} — vérifie que OKR_ENTRETIEN_DIR pointe ` +
+        'sur le dossier qui contient directement "Entretiens-eval-perf/".'
+    );
+  }
+
   const out: string[] = [];
 
   function walk(dir: string): void {
-    if (!fs.existsSync(dir)) return;
     for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
       const full = path.join(dir, entry.name);
       if (entry.isDirectory()) {
