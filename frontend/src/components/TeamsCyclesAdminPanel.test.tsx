@@ -13,7 +13,8 @@ vi.mock('../services/api', () => ({
   performanceApi: {
     createCycle: vi.fn(),
     updateCycle: vi.fn(),
-    importOkr: vi.fn()
+    importOkr: vi.fn(),
+    importGeneralAssessment: vi.fn()
   }
 }));
 
@@ -27,6 +28,7 @@ const mockGetRoster = vi.mocked(teamApi.getRoster);
 const mockCreateCycle = vi.mocked(performanceApi.createCycle);
 const mockUpdateCycle = vi.mocked(performanceApi.updateCycle);
 const mockImportOkr = vi.mocked(performanceApi.importOkr);
+const mockImportGeneralAssessment = vi.mocked(performanceApi.importGeneralAssessment);
 
 const TEAMS: Team[] = [
   { id: 'team-1', name: 'Choco', leadIds: ['user-1'], createdAt: '2026-01-01', updatedAt: '2026-01-01' },
@@ -242,7 +244,7 @@ describe('TeamsCyclesAdminPanel', () => {
     const file = new File(['x'], 'Perf-Eval-H1-26-Adoria-Deguil-Robin-BDR.xlsx', {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     });
-    expect(screen.getByText('Sélectionner des fichiers')).toBeInTheDocument();
+    expect(screen.getAllByText('Sélectionner des fichiers').length).toBeGreaterThan(0);
     fireEvent.change(screen.getByLabelText('Fichiers d’entretien'), { target: { files: [file] } });
     fireEvent.click(screen.getByRole('button', { name: 'Prévisualiser' }));
 
@@ -252,5 +254,40 @@ describe('TeamsCyclesAdminPanel', () => {
       );
     });
     expect(await screen.findByText(/Prévisualisation — S2-2026/)).toBeInTheDocument();
+  });
+
+  it('prévisualise l’import des grilles d’auto-évaluation avec la session courante', async () => {
+    mockImportGeneralAssessment.mockResolvedValue({
+      success: true,
+      dryRun: true,
+      cycle: { id: 'cycle-1', label: 'S2-2026', status: 'active' },
+      entries: [
+        {
+          name: 'Bruno Deguil-Robin',
+          fileName: 'deguil-robin.xlsx',
+          outcome: 'ready',
+          email: 'bdeguil-robin@adoria.com',
+          warnings: [],
+          errors: [],
+          scoredAxisCount: 4
+        }
+      ],
+      writes: []
+    });
+    render(<TeamsCyclesAdminPanel teams={TEAMS} cycles={CYCLES} onChanged={onChanged} />);
+    await waitForRosterLoaded();
+
+    const file = new File(['x'], 'deguil-robin.xlsx', {
+      type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    });
+    fireEvent.change(screen.getByLabelText('Grilles individuelles'), { target: { files: [file] } });
+    fireEvent.click(screen.getByRole('button', { name: 'Prévisualiser les grilles' }));
+
+    await waitFor(() => {
+      expect(mockImportGeneralAssessment).toHaveBeenCalledWith(
+        expect.objectContaining({ cycleId: 'cycle-1', dryRun: true })
+      );
+    });
+    expect(await screen.findByText(/4 axe\(s\)/)).toBeInTheDocument();
   });
 });

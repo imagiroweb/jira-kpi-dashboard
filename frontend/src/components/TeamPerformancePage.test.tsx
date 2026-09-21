@@ -16,7 +16,8 @@ vi.mock('../services/api', () => ({
     updateGeneralManagerAssessment: vi.fn(),
     getGeneralAssessmentReferential: vi.fn(),
     getTeamMembers: vi.fn(),
-    importOkr: vi.fn()
+    importOkr: vi.fn(),
+    importGeneralAssessment: vi.fn()
   },
   teamApi: {
     list: vi.fn(),
@@ -638,6 +639,7 @@ describe('TeamPerformancePage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Gestion équipes & cycles' }));
 
     expect(await screen.findByRole('heading', { name: 'Import des entretiens' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Import des grilles d’auto-évaluation' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Équipes' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Cycles de performance' })).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Réaffecter un collaborateur' })).toBeInTheDocument();

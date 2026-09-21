@@ -2,7 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Loader2, AlertTriangle, Plus, Save, X, Upload } from 'lucide-react';
 import { performanceApi, teamApi } from '../services/api';
 import type { Team, RosterUser } from '../domain/team';
-import type { OkrImportResult, PerformanceCycle, PerformanceCycleStatus } from '../domain/performance';
+import type {
+  GeneralAssessmentImportResult,
+  OkrImportResult,
+  PerformanceCycle,
+  PerformanceCycleStatus
+} from '../domain/performance';
 import { CYCLE_STATUS_LABELS } from '../domain/performance';
 
 function extractApiErrorMessage(err: unknown, fallback: string): string {
@@ -257,10 +262,16 @@ export function TeamsCyclesAdminPanel({ teams, cycles, onChanged }: TeamsCyclesA
   const [importing, setImporting] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [importResult, setImportResult] = useState<OkrImportResult | null>(null);
+  const [gsaCycleId, setGsaCycleId] = useState('');
+  const [gsaFiles, setGsaFiles] = useState<File[]>([]);
+  const [gsaImporting, setGsaImporting] = useState(false);
+  const [gsaError, setGsaError] = useState<string | null>(null);
+  const [gsaResult, setGsaResult] = useState<GeneralAssessmentImportResult | null>(null);
 
   useEffect(() => {
     if (activeCycle && !importCycleId) setImportCycleId(activeCycle.id);
-  }, [activeCycle, importCycleId]);
+    if (activeCycle && !gsaCycleId) setGsaCycleId(activeCycle.id);
+  }, [activeCycle, importCycleId, gsaCycleId]);
 
   async function handleImportOkr(dryRun: boolean) {
     if (!importCycleId || importFiles.length === 0) return;
@@ -275,6 +286,26 @@ export function TeamsCyclesAdminPanel({ teams, cycles, onChanged }: TeamsCyclesA
       setImportError(extractApiErrorMessage(err, 'Erreur lors de l’import des fichiers d’entretien'));
     } finally {
       setImporting(false);
+    }
+  }
+
+  async function handleImportGeneralAssessment(dryRun: boolean) {
+    if (!gsaCycleId || gsaFiles.length === 0) return;
+    setGsaImporting(true);
+    setGsaError(null);
+    setGsaResult(null);
+    try {
+      const result = await performanceApi.importGeneralAssessment({
+        files: gsaFiles,
+        cycleId: gsaCycleId,
+        dryRun
+      });
+      setGsaResult(result);
+      if (!dryRun) onChanged();
+    } catch (err) {
+      setGsaError(extractApiErrorMessage(err, 'Erreur lors de l’import des grilles d’auto-évaluation'));
+    } finally {
+      setGsaImporting(false);
     }
   }
 
@@ -364,6 +395,98 @@ export function TeamsCyclesAdminPanel({ teams, cycles, onChanged }: TeamsCyclesA
                 <li key={entry.relativePath} className="text-xs text-surface-400">
                   {entry.outcome === 'ready' ? '✓' : '✗'} {entry.name}
                   {entry.email ? ` (${entry.email})` : ''} — {entry.outcome}
+                  {entry.errors.length > 0 ? ` : ${entry.errors.join(' ; ')}` : ''}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+
+      <div className="card-glass p-6 space-y-4">
+        <div>
+          <h3 className="text-base font-semibold text-surface-100">Import des grilles d’auto-évaluation</h3>
+          <p className="text-xs text-surface-500 mt-1">
+            Un fichier par collaborateur (ex. `deguil-robin.xlsx`). Le nom est lu dans le fichier
+            (cellule B3). Les agrégats `dashboard-all` / `grille-evaluations` sont ignorés.
+          </p>
+        </div>
+        <div className="grid sm:grid-cols-2 gap-3">
+          <div>
+            <label htmlFor="gsa-import-cycle" className="block text-xs text-surface-400 mb-1">
+              Cycle
+            </label>
+            <select
+              id="gsa-import-cycle"
+              className="input"
+              value={gsaCycleId}
+              onChange={(e) => setGsaCycleId(e.target.value)}
+            >
+              {cycles.map((cyc) => (
+                <option key={cyc.id} value={cyc.id}>
+                  {cyc.label} ({CYCLE_STATUS_LABELS[cyc.status]})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label htmlFor="gsa-import-files" className="block text-xs text-surface-400 mb-1">
+              Grilles individuelles
+            </label>
+            <div className="relative inline-flex">
+              <span className="btn-secondary text-sm pointer-events-none inline-flex items-center gap-2">
+                <Upload className="w-4 h-4" />
+                Sélectionner des fichiers
+              </span>
+              <input
+                id="gsa-import-files"
+                type="file"
+                multiple
+                accept=".xlsx,.ods,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.oasis.opendocument.spreadsheet"
+                className="absolute inset-0 z-10 h-full w-full cursor-pointer opacity-0"
+                onChange={(e) => setGsaFiles(Array.from(e.target.files ?? []))}
+              />
+            </div>
+            {gsaFiles.length > 0 && (
+              <p className="text-xs text-surface-500 mt-1">{gsaFiles.length} fichier(s) sélectionné(s)</p>
+            )}
+          </div>
+        </div>
+        {gsaError && <p className="text-xs text-danger-400">{gsaError}</p>}
+        <div className="flex gap-2">
+          <button
+            type="button"
+            className="btn-secondary text-sm"
+            disabled={gsaImporting || !gsaCycleId || gsaFiles.length === 0}
+            onClick={() => handleImportGeneralAssessment(true)}
+          >
+            {gsaImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+            Prévisualiser les grilles
+          </button>
+          <button
+            type="button"
+            className="btn-primary text-sm"
+            disabled={gsaImporting || !gsaCycleId || gsaFiles.length === 0}
+            onClick={() => handleImportGeneralAssessment(false)}
+          >
+            {gsaImporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Importer les grilles
+          </button>
+        </div>
+        {gsaResult && (
+          <div className="border border-surface-700/50 rounded-xl p-3 space-y-2 text-sm">
+            <p className="text-surface-300">
+              {gsaResult.dryRun ? 'Prévisualisation' : 'Import'} — {gsaResult.cycle.label} :{' '}
+              {gsaResult.entries.filter((e) => e.outcome === 'ready').length} prêt(s),{' '}
+              {gsaResult.entries.filter((e) => e.outcome !== 'ready').length} bloqué(s)
+              {!gsaResult.dryRun && `, ${gsaResult.writes.filter((w) => w.ok).length} écrit(s)`}
+            </p>
+            <ul className="space-y-1 max-h-56 overflow-y-auto">
+              {gsaResult.entries.map((entry) => (
+                <li key={entry.fileName} className="text-xs text-surface-400">
+                  {entry.outcome === 'ready' ? '✓' : '✗'} {entry.name}
+                  {entry.email ? ` (${entry.email})` : ''} — {entry.outcome}
+                  {entry.scoredAxisCount > 0 ? ` (${entry.scoredAxisCount} axe(s))` : ''}
                   {entry.errors.length > 0 ? ` : ${entry.errors.join(' ; ')}` : ''}
                 </li>
               ))}

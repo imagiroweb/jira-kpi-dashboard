@@ -300,6 +300,24 @@ export interface OkrImportResult {
   writes: { name: string; email: string; ok: boolean; error?: string }[];
 }
 
+export interface GeneralAssessmentImportPlanEntry {
+  name: string;
+  fileName: string;
+  outcome: 'no_match' | 'worksheet_not_found' | 'read_error' | 'empty' | 'ready';
+  email: string | null;
+  warnings: string[];
+  errors: string[];
+  scoredAxisCount: number;
+}
+
+export interface GeneralAssessmentImportResult {
+  success: boolean;
+  dryRun: boolean;
+  cycle: { id: string; label: string; status: string };
+  entries: GeneralAssessmentImportPlanEntry[];
+  writes: { name: string; email: string; ok: boolean; error?: string }[];
+}
+
 // --- Aides d'affichage pures (miroir de src/domain/performance/performanceReview.ts côté backend). ---
 // Le backend reste la seule source de vérité : ces fonctions ne font qu'anticiper le même calcul
 // côté client (barres de progression, validation immédiate d'un formulaire) avant l'appel API, qui

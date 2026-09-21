@@ -11,6 +11,10 @@ import {
   ImportPlanEntry
 } from '../scripts/import-okr/buildImportPlan';
 import {
+  buildGeneralAssessmentPlanFromDir,
+  GeneralAssessmentPlanEntry
+} from '../scripts/import-okr/buildGeneralAssessmentImportPlan';
+import {
   PerformanceCycle,
   IPerformanceCycle,
   PERFORMANCE_CYCLE_STATUSES
@@ -1210,6 +1214,99 @@ router.post(
   }
 );
 
+function serializeGeneralAssessmentPlanEntry(entry: GeneralAssessmentPlanEntry) {
+  return {
+    name: entry.name,
+    fileName: entry.fileName,
+    outcome: entry.outcome,
+    email: entry.matchedUser?.email ?? null,
+    warnings: entry.warnings,
+    errors: entry.errors,
+    scoredAxisCount: COMPETENCY_AXES.filter((axis) => (entry.axes?.[axis]?.length ?? 0) > 0).length
+  };
+}
+
+/**
+ * Import des grilles d'auto-évaluation individuelle (xlsx/ods), distinct de l'import d'entretiens :
+ * matching roster via le nom lu dans le fichier, dry-run ou écriture de `generalSelfAssessment`.
+ * CTO/super_admin uniquement. Les agrégats (`dashboard-all`, `grille-evaluations`) sont ignorés.
+ * POST /api/performance/import-general-assessment
+ */
+router.post(
+  '/import-general-assessment',
+  authenticate,
+  requireGlobalPerformanceAccess,
+  importUpload.array('files', 40),
+  async (req: Request, res: Response) => {
+    const files = (req.files as Express.Multer.File[] | undefined) ?? [];
+    if (files.length === 0) {
+      return fail(res, 400, 'Ajoute au moins un fichier .xlsx ou .ods');
+    }
+
+    const cycleId = typeof req.body?.cycleId === 'string' ? req.body.cycleId : undefined;
+    const dryRun = req.body?.dryRun === 'true' || req.body?.dryRun === true;
+
+    const cycle = await resolveCycle(cycleId);
+    if (cycle === undefined) return fail(res, 400, 'Identifiant de cycle invalide');
+    if (!cycle) return fail(res, 404, cycleId ? 'Cycle introuvable' : 'Aucun cycle de performance actif');
+    if (!dryRun && cycle.status !== 'active') {
+      return fail(res, 403, 'Ce cycle n’est pas actif, les grilles ne peuvent pas être importées');
+    }
+
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'gsa-import-ui-'));
+    try {
+      for (const file of files) {
+        const base = path.basename(file.originalname);
+        fs.writeFileSync(path.join(tmpDir, base), file.buffer);
+      }
+
+      const users = await User.find({ isActive: true }).select('firstName lastName email teamId').lean();
+      const roster = users.map((u) => ({
+        id: u._id.toString(),
+        firstName: u.firstName,
+        lastName: u.lastName,
+        email: u.email,
+        teamId: u.teamId ? u.teamId.toString() : null
+      }));
+
+      const plan = await buildGeneralAssessmentPlanFromDir(tmpDir, roster);
+      const actor = await loadPerformanceActorContext(req.user!.userId);
+      if (!actor) return fail(res, 404, 'Utilisateur authentifié introuvable');
+
+      const writes: { name: string; email: string; ok: boolean; error?: string }[] = [];
+      if (!dryRun) {
+        for (const entry of plan) {
+          if (entry.outcome !== 'ready' || !entry.matchedUser || !entry.axes) continue;
+          try {
+            await writeImportedGeneralAssessment(req, actor, entry.matchedUser.id, entry.axes, cycle);
+            writes.push({ name: entry.name, email: entry.matchedUser.email, ok: true });
+          } catch (error) {
+            writes.push({
+              name: entry.name,
+              email: entry.matchedUser.email,
+              ok: false,
+              error: error instanceof Error ? error.message : 'Échec de l’écriture'
+            });
+          }
+        }
+      }
+
+      res.json({
+        success: true,
+        dryRun,
+        cycle: { id: cycle._id, label: cycle.label, status: cycle.status },
+        entries: plan.map(serializeGeneralAssessmentPlanEntry),
+        writes
+      });
+    } catch (error) {
+      logger.error('Error importing general self-assessment files:', error);
+      fail(res, 500, 'Erreur lors de l’import des grilles d’auto-évaluation', error);
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+);
+
 async function writeImportedObjectives(
   req: Request,
   actor: PerformanceScopeActor,
@@ -1251,6 +1348,58 @@ async function writeImportedObjectives(
     );
 
     const $set: Record<string, unknown> = { objectives, definedBy: who, updatedBy: who, status };
+    if (reviewTeamId && !toIdString(current.team)) $set.team = reviewTeamId;
+
+    updated = await PerformanceReview.findOneAndUpdate(
+      { _id: current._id, __v: current.__v },
+      { $set },
+      { new: true, runValidators: true }
+    );
+    if (updated) return;
+  }
+
+  throw new Error('La fiche a été modifiée en même temps, réessayez');
+}
+
+async function writeImportedGeneralAssessment(
+  req: Request,
+  actor: PerformanceScopeActor,
+  userId: string,
+  axesInput: GeneralSelfAssessmentInput,
+  cycle: IPerformanceCycle
+): Promise<void> {
+  let updated: IPerformanceReview | null = null;
+
+  for (let attempt = 0; attempt < REVIEW_UPDATE_RETRIES; attempt += 1) {
+    let current = await PerformanceReview.findOne({ user: userId, cycle: cycle._id });
+    const targetUser = await User.findById(userId).select('teamId').lean();
+    if (!current && !targetUser) {
+      throw new Error('Collaborateur introuvable');
+    }
+
+    const reviewTeamId = toIdString(current?.team) ?? toIdString(targetUser?.teamId);
+
+    if (!canAccessReviewForTeam(actor, reviewTeamId)) {
+      throw new Error("Vous n'avez pas accès à la fiche de ce collaborateur");
+    }
+
+    const who = { ...author(req), role: resolveAuthorRole(actor, reviewTeamId) };
+
+    if (!current) {
+      current = await PerformanceReview.create({
+        user: userId,
+        cycle: cycle._id,
+        team: reviewTeamId,
+        createdBy: who
+      });
+    }
+
+    const generalSelfAssessment = applyGeneralSelfAssessment(
+      current.toObject().generalSelfAssessment?.axes,
+      axesInput
+    );
+
+    const $set: Record<string, unknown> = { generalSelfAssessment: { axes: generalSelfAssessment }, updatedBy: who };
     if (reviewTeamId && !toIdString(current.team)) $set.team = reviewTeamId;
 
     updated = await PerformanceReview.findOneAndUpdate(

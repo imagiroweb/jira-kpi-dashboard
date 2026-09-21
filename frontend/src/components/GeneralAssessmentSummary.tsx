@@ -21,8 +21,8 @@ function objectivesForAxis(objectives: Objective[], axis: CompetencyAxis): Objec
 /**
  * Résumé en lecture seule de l'auto-évaluation générale (4 axes × sous-critères notés 1-5,
  * distincte du "Bilan du cycle" ci-dessous) — alimentée aujourd'hui par l'import Excel (voir
- * `backend/src/scripts/import-okr/runGeneralAssessmentImport.ts`), pas encore par une UI de
- * saisie. Affiche pour chaque axe renseigné son score moyen, le détail des sous-critères, et une
+ * `POST /performance/import-general-assessment` ou le script CLI). Affiche pour chaque axe
+ * renseigné son score moyen, le détail des sous-critères, et une
  * première réconciliation avec les objectifs du cycle tagués de ce même axe
  * (`objective.competencyAxes`). Partagé entre `MyPerformancePage` (sa propre fiche) et
  * `TeamPerformancePage` (fiche d'un collaborateur, lead/CTO).
