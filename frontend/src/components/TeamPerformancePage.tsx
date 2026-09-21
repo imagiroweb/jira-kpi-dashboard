@@ -889,7 +889,14 @@ export function TeamPerformancePage() {
                       const draft = managerDraft.objectives[objective.id] ?? { status: '', comment: '' };
                       return (
                         <div key={objective.id} className="border border-surface-700/50 rounded-xl p-4">
-                          <p className="font-medium text-surface-200 mb-3">{objective.title}</p>
+                          <div className="flex items-center gap-2 flex-wrap mb-3">
+                            <p className="font-medium text-surface-200">{objective.title}</p>
+                            {(objective.competencyAxes ?? []).map((axis) => (
+                              <span key={axis} className="badge bg-surface-700/60 text-surface-300">
+                                {COMPETENCY_AXIS_LABELS[axis]}
+                              </span>
+                            ))}
+                          </div>
                           <div className="grid sm:grid-cols-[220px_1fr] gap-3">
                             <select
                               className="input"

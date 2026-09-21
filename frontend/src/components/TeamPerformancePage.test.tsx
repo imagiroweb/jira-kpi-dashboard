@@ -329,6 +329,34 @@ describe('TeamPerformancePage', () => {
     });
   });
 
+  it("affiche les badges d'axes de compétence associés à un objectif dans l'évaluation manager", async () => {
+    seedUser({ performanceGlobalAccess: true });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    const reviewWithAxes = makeReview({
+      objectives: [
+        {
+          id: 'obj-1',
+          title: 'Améliorer la fiabilité',
+          weight: 1,
+          competencyAxes: ['leadership'],
+          krs: [{ id: 'kr-1', label: 'Réduire les incidents', weight: 1, progress: 50, progressHistory: [] }],
+          selfAssessment: {},
+          managerAssessment: {}
+        }
+      ]
+    });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [reviewWithAxes] });
+    mockGetReview.mockResolvedValue({ success: true, review: reviewWithAxes });
+
+    render(<TeamPerformancePage />);
+    await screen.findByText('Alice Martin');
+    fireEvent.click(screen.getByRole('button', { name: 'Ouvrir' }));
+    await screen.findByText('Évaluation manager');
+
+    expect(screen.getAllByText('Leadership').length).toBeGreaterThan(0);
+  });
+
   it('ne plante pas si qualitative / competencyScores arrivent vides depuis l’API (détail manager)', async () => {
     seedUser({ performanceGlobalAccess: true });
     mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });

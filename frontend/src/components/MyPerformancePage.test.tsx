@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PerformanceCycle, PerformanceReview } from '../domain/performance';
 
@@ -102,6 +102,37 @@ describe('MyPerformancePage', () => {
     expect(screen.getByText('S2-2026 — Actif')).toBeInTheDocument();
     expect(screen.getByText('En cours')).toBeInTheDocument();
     expect(screen.getByText('Réduire le taux d’incidents de 30%')).toBeInTheDocument();
+  });
+
+  it('affiche les badges d\'axes de compétence associés à un objectif', async () => {
+    mockGetMyReview.mockResolvedValue({
+      success: true,
+      review: makeReview({
+        objectives: [
+          {
+            id: 'obj-1',
+            title: 'Améliorer la fiabilité du produit',
+            weight: 1,
+            competencyAxes: ['technique', 'impact'],
+            krs: [],
+            selfAssessment: {},
+            managerAssessment: {}
+          }
+        ]
+      })
+    });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+
+    render(<MyPerformancePage />);
+
+    const heading = await screen.findByRole('heading', {
+      name: 'Améliorer la fiabilité du produit',
+      level: 3
+    });
+    const objectiveCard = heading.closest('.card-glass') as HTMLElement;
+    expect(within(objectiveCard).getByText('Technique')).toBeInTheDocument();
+    expect(within(objectiveCard).getByText('Impact')).toBeInTheDocument();
+    expect(within(objectiveCard).queryByText('Collaboration')).not.toBeInTheDocument();
   });
 
   it('ne plante pas si qualitative / competencyScores arrivent vides depuis l’API', async () => {

@@ -350,7 +350,14 @@ export function MyPerformancePage() {
                       const draft = selfDraft.objectives[objective.id] ?? { status: '', comment: '' };
                       return (
                         <div key={objective.id} className="border border-surface-700/50 rounded-xl p-4">
-                          <p className="font-medium text-surface-200 mb-3">{objective.title}</p>
+                          <div className="flex items-center gap-2 flex-wrap mb-3">
+                            <p className="font-medium text-surface-200">{objective.title}</p>
+                            {(objective.competencyAxes ?? []).map((axis) => (
+                              <span key={axis} className="badge bg-surface-700/60 text-surface-300">
+                                {COMPETENCY_AXIS_LABELS[axis]}
+                              </span>
+                            ))}
+                          </div>
                           <div className="grid sm:grid-cols-[220px_1fr] gap-3">
                             <select
                               className="input"
@@ -478,7 +485,14 @@ function ObjectiveCard({
     <div className="card-glass p-6">
       <div className="flex items-start justify-between gap-4 mb-1">
         <div>
-          <h3 className="text-lg font-semibold text-surface-100">{objective.title}</h3>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-lg font-semibold text-surface-100">{objective.title}</h3>
+            {(objective.competencyAxes ?? []).map((axis) => (
+              <span key={axis} className="badge bg-surface-700/60 text-surface-300">
+                {COMPETENCY_AXIS_LABELS[axis]}
+              </span>
+            ))}
+          </div>
           {objective.description && <p className="text-sm text-surface-400 mt-1">{objective.description}</p>}
         </div>
         <span className="badge badge-info flex-shrink-0">Poids {Math.round(objective.weight * 100)}%</span>
