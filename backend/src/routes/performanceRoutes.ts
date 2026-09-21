@@ -22,17 +22,21 @@ import {
 } from '../domain/performance/entities/PerformanceReview';
 import {
   appendKeyResultProgress,
+  applyGeneralAssessmentAxes,
   applyGeneralSelfAssessment,
   applyManagerAssessment,
   applyObjectivesDefinition,
   applySelfAssessment,
   AssessmentInput,
   completeCompetencyScores,
+  completeGeneralAssessmentAxes,
   completeGeneralSelfAssessment,
   completeQualitative,
   computeReviewStatus,
+  GeneralAssessmentAxesInput,
   GeneralSelfAssessmentInput,
   ObjectiveDefinitionInput,
+  validateGeneralAssessmentAxes,
   validateGeneralSelfAssessment,
   validateObjectivesDefinition
 } from '../domain/performance/performanceReview';
@@ -82,6 +86,7 @@ function serialize(
     qualitative: completeQualitative(review.qualitative),
     competencyScores: completeCompetencyScores(review.competencyScores),
     generalSelfAssessment: completeGeneralSelfAssessment(review.generalSelfAssessment?.axes),
+    generalManagerAssessment: completeGeneralAssessmentAxes(review.generalManagerAssessment?.axes),
     status: review.status,
     definedBy: review.definedBy,
     createdBy: review.createdBy,
@@ -729,6 +734,96 @@ router.patch('/reviews/:userId/general-self-assessment', authenticate, async (re
   } catch (error) {
     logger.error('Error defining general self-assessment:', error);
     fail(res, 500, "Erreur lors de la définition de l'auto-évaluation générale", error);
+  }
+});
+
+/**
+ * Évaluation manager sur la grille générale (mêmes 4 axes × sous-critères que
+ * `generalSelfAssessment`, référentiel commun `GENERAL_ASSESSMENT_REFERENTIAL`) — permet de noter
+ * chaque sous-critère côté manager et de le rapprocher de l'auto-évaluation du collaborateur pour
+ * repérer d'éventuels désaccords. Même portée d'accès que l'évaluation manager par objectif :
+ * lead pour son équipe, ou CTO/super_admin pour n'importe qui. Remplace entièrement les
+ * sous-critères d'un axe fourni dans `axes` ; un axe absent du corps de la requête n'est pas
+ * modifié. Crée la fiche à la volée sur le cycle actif si elle n'existe pas encore.
+ * PATCH /api/performance/reviews/:userId/general-manager-assessment
+ */
+router.patch('/reviews/:userId/general-manager-assessment', authenticate, async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+    const axesInput = req.body?.axes;
+    if (!axesInput || typeof axesInput !== 'object' || Array.isArray(axesInput)) {
+      return fail(res, 400, 'axes doit être un objet');
+    }
+
+    const validation = validateGeneralAssessmentAxes(axesInput as GeneralAssessmentAxesInput);
+    if (!validation.valid) {
+      return fail(res, 400, validation.errors.join(', '));
+    }
+
+    const cycle = await resolveCycle(req.body?.cycleId);
+    if (cycle === undefined) return fail(res, 400, 'Identifiant de cycle invalide');
+    if (!cycle) return fail(res, 404, req.body?.cycleId ? 'Cycle introuvable' : 'Aucun cycle de performance actif');
+    if (cycle.status !== 'active') {
+      return fail(res, 403, "Ce cycle est clos, l'évaluation manager générale ne peut plus être modifiée");
+    }
+
+    const actor = await loadPerformanceActorContext(req.user!.userId);
+    if (!actor) return fail(res, 404, 'Utilisateur authentifié introuvable');
+
+    let updated: IPerformanceReview | null = null;
+
+    for (let attempt = 0; attempt < REVIEW_UPDATE_RETRIES; attempt += 1) {
+      let current = await PerformanceReview.findOne({ user: userId, cycle: cycle._id });
+
+      const targetUser = await User.findById(userId).select('teamId').lean();
+      if (!current && !targetUser) {
+        return fail(res, 404, 'Collaborateur introuvable');
+      }
+
+      const reviewTeamId = toIdString(current?.team) ?? toIdString(targetUser?.teamId);
+
+      if (!canAccessReviewForTeam(actor, reviewTeamId)) {
+        return fail(res, 403, "Vous n'avez pas accès à la fiche de ce collaborateur");
+      }
+
+      const who = { ...author(req), role: resolveAuthorRole(actor, reviewTeamId) };
+
+      if (!current) {
+        current = await PerformanceReview.create({
+          user: userId,
+          cycle: cycle._id,
+          team: reviewTeamId,
+          createdBy: who
+        });
+      }
+
+      const generalManagerAssessment = applyGeneralAssessmentAxes(
+        current.toObject().generalManagerAssessment?.axes,
+        axesInput as GeneralAssessmentAxesInput
+      );
+
+      const $set: Record<string, unknown> = {
+        generalManagerAssessment: { axes: generalManagerAssessment },
+        updatedBy: who
+      };
+      if (reviewTeamId && !toIdString(current.team)) $set.team = reviewTeamId;
+
+      updated = await PerformanceReview.findOneAndUpdate(
+        { _id: current._id, __v: current.__v },
+        { $set },
+        { new: true, runValidators: true }
+      );
+      if (updated) break;
+    }
+
+    if (!updated) {
+      return fail(res, 409, 'La fiche a été modifiée en même temps, réessayez');
+    }
+
+    res.json({ success: true, review: serialize(updated) });
+  } catch (error) {
+    logger.error('Error defining general manager assessment:', error);
+    fail(res, 500, "Erreur lors de la définition de l'évaluation manager générale", error);
   }
 });
 
