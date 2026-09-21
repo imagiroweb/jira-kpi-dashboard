@@ -375,6 +375,60 @@ export function summarizeObjectiveStatuses(
   }));
 }
 
+/** Résumé agrégé d'un ensemble de fiches (typiquement toutes celles d'une équipe) — voir `summarizeTeamReviews`. */
+export interface TeamPerformanceSummary {
+  reviewCount: number;
+  statusCounts: Record<PerformanceReviewStatus, number>;
+  /** Moyenne (0-100) sur les fiches ayant des objectifs définis ; null si aucune. */
+  avgObjectivesScore: number | null;
+  /** Moyenne (0-5) sur les fiches ayant au moins un axe noté ; null si aucune. */
+  avgSelfAssessmentScore: number | null;
+  /** Moyenne (0-5) sur les fiches ayant au moins un axe noté par le manager ; null si aucune. */
+  avgManagerAssessmentScore: number | null;
+}
+
+function average(values: number[]): number {
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+/**
+ * Résume un ensemble de fiches (typiquement toutes celles d'une équipe, ou tout le périmètre
+ * affiché) pour une vue agrégée : répartition des statuts de fiche, et scores moyens (objectifs,
+ * auto-évaluation, évaluation manager de la grille générale). Chaque moyenne ne porte que sur les
+ * fiches ayant une valeur exploitable (objectifs définis / axe noté) — une fiche vide n'est pas
+ * comptée comme un 0, pour ne pas tirer artificiellement la moyenne vers le bas.
+ */
+export function summarizeTeamReviews(
+  reviews: Pick<PerformanceReview, 'status' | 'objectives' | 'generalSelfAssessment' | 'generalManagerAssessment'>[]
+): TeamPerformanceSummary {
+  const statusCounts: Record<PerformanceReviewStatus, number> = {
+    dossier_manquant: 0,
+    en_cours: 0,
+    complete: 0
+  };
+  for (const review of reviews) {
+    statusCounts[review.status] += 1;
+  }
+
+  const objectivesScores = reviews
+    .filter((review) => review.objectives.length > 0)
+    .map((review) => computeReviewScore(review.objectives));
+  const selfScores = reviews
+    .map((review) => computeGeneralAssessmentGlobalScore(review.generalSelfAssessment))
+    .filter((score) => score > 0);
+  const managerScores = reviews
+    .map((review) => computeGeneralAssessmentGlobalScore(review.generalManagerAssessment))
+    .filter((score) => score > 0);
+
+  return {
+    reviewCount: reviews.length,
+    statusCounts,
+    avgObjectivesScore: objectivesScores.length > 0 ? average(objectivesScores) : null,
+    avgSelfAssessmentScore: selfScores.length > 0 ? average(selfScores) : null,
+    avgManagerAssessmentScore: managerScores.length > 0 ? average(managerScores) : null
+  };
+}
+
 /** Score d'un axe de l'auto-évaluation générale (0-5) : moyenne des scores de ses sous-critères, 0 si aucun. */
 export function computeGeneralAssessmentAxisScore(subCriteria: GeneralAssessmentSubCriterion[]): number {
   if (subCriteria.length === 0) return 0;

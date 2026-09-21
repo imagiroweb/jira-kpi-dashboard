@@ -600,6 +600,70 @@ describe('TeamPerformancePage', () => {
     expect(screen.queryByText('Aucune fiche de performance dans votre périmètre pour ce cycle.')).not.toBeInTheDocument();
   });
 
+  it("affiche une carte \"Répartition par équipe\" avec une ligne par équipe et les scores moyens agrégés", async () => {
+    seedUser({ performanceGlobalAccess: true });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    const reviewChoco = makeReview({
+      id: 'review-1',
+      user: { _id: 'user-1', firstName: 'Alice', lastName: 'Martin', email: 'alice@test.com' },
+      team: 'team-1',
+      status: 'complete',
+      objectives: [
+        {
+          id: 'obj-1',
+          title: 'Objectif',
+          weight: 1,
+          krs: [{ id: 'kr-1', label: 'KR', weight: 1, progress: 60, progressHistory: [] }],
+          selfAssessment: {},
+          managerAssessment: {}
+        }
+      ]
+    });
+    const reviewCook = makeReview({
+      id: 'review-2',
+      user: { _id: 'user-2', firstName: 'Bruno', lastName: 'Petit', email: 'bruno@test.com' },
+      team: 'team-2',
+      status: 'en_cours',
+      objectives: [
+        {
+          id: 'obj-2',
+          title: 'Autre objectif',
+          weight: 1,
+          krs: [{ id: 'kr-2', label: 'KR', weight: 1, progress: 40, progressHistory: [] }],
+          selfAssessment: {},
+          managerAssessment: {}
+        }
+      ]
+    });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [reviewChoco, reviewCook] });
+
+    render(<TeamPerformancePage />);
+
+    const summaryHeading = await screen.findByText('Répartition par équipe');
+    const summaryCard = summaryHeading.closest('.card-glass') as HTMLElement;
+
+    const chocoRow = within(summaryCard).getByText('Choco').closest('tr') as HTMLElement;
+    expect(within(chocoRow).getByText('1 Complète')).toBeInTheDocument();
+    expect(within(chocoRow).getByText('60.0%')).toBeInTheDocument();
+
+    const cookRow = within(summaryCard).getByText('Cook').closest('tr') as HTMLElement;
+    expect(within(cookRow).getByText('1 En cours')).toBeInTheDocument();
+    expect(within(cookRow).getByText('40.0%')).toBeInTheDocument();
+  });
+
+  it("n'affiche pas la carte \"Répartition par équipe\" quand aucune fiche n'est chargée", async () => {
+    seedUser({ performanceGlobalAccess: true });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [] });
+
+    render(<TeamPerformancePage />);
+
+    await screen.findByText('Aucune fiche de performance dans votre périmètre pour ce cycle.');
+    expect(screen.queryByText('Répartition par équipe')).not.toBeInTheDocument();
+  });
+
   it("affiche dans la colonne Objectifs le décompte des statuts d'objectifs (manager prioritaire sur self)", async () => {
     seedUser({ performanceGlobalAccess: true });
     mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });

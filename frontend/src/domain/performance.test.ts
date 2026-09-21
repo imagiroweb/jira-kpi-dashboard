@@ -4,6 +4,7 @@ import {
   normalizePerformanceReview,
   suggestCompetencyAxes,
   summarizeObjectiveStatuses,
+  summarizeTeamReviews,
   type Objective,
   type PerformanceReview
 } from './performance';
@@ -114,6 +115,92 @@ describe('summarizeObjectiveStatuses', () => {
 
   it('renvoie un tableau vide sans objectif', () => {
     expect(summarizeObjectiveStatuses([])).toEqual([]);
+  });
+});
+
+function reviewForTeamSummary(
+  overrides: Partial<
+    Pick<PerformanceReview, 'status' | 'objectives' | 'generalSelfAssessment' | 'generalManagerAssessment'>
+  > = {}
+): Pick<PerformanceReview, 'status' | 'objectives' | 'generalSelfAssessment' | 'generalManagerAssessment'> {
+  return {
+    status: 'dossier_manquant',
+    objectives: [],
+    generalSelfAssessment: { technique: [], impact: [], collaboration: [], leadership: [] },
+    generalManagerAssessment: { technique: [], impact: [], collaboration: [], leadership: [] },
+    ...overrides
+  };
+}
+
+describe('summarizeTeamReviews', () => {
+  it('renvoie des compteurs à zéro et des moyennes null sans fiche', () => {
+    const summary = summarizeTeamReviews([]);
+    expect(summary).toEqual({
+      reviewCount: 0,
+      statusCounts: { dossier_manquant: 0, en_cours: 0, complete: 0 },
+      avgObjectivesScore: null,
+      avgSelfAssessmentScore: null,
+      avgManagerAssessmentScore: null
+    });
+  });
+
+  it('compte les fiches par statut', () => {
+    const summary = summarizeTeamReviews([
+      reviewForTeamSummary({ status: 'dossier_manquant' }),
+      reviewForTeamSummary({ status: 'en_cours' }),
+      reviewForTeamSummary({ status: 'en_cours' }),
+      reviewForTeamSummary({ status: 'complete' })
+    ]);
+    expect(summary.reviewCount).toBe(4);
+    expect(summary.statusCounts).toEqual({ dossier_manquant: 1, en_cours: 2, complete: 1 });
+  });
+
+  it('moyenne le score objectifs uniquement sur les fiches ayant des objectifs définis', () => {
+    const summary = summarizeTeamReviews([
+      reviewForTeamSummary({
+        objectives: [{ id: 'o1', title: 'Objectif', weight: 1, krs: [{ id: 'kr1', label: 'KR', weight: 1, progress: 80, progressHistory: [] }], selfAssessment: {}, managerAssessment: {} }]
+      }),
+      reviewForTeamSummary({ objectives: [] })
+    ]);
+    expect(summary.avgObjectivesScore).toBe(80);
+  });
+
+  it("moyenne les scores de grille générale uniquement sur les fiches ayant un axe noté (n'inclut pas les fiches vides comme des 0)", () => {
+    const summary = summarizeTeamReviews([
+      reviewForTeamSummary({
+        generalSelfAssessment: {
+          technique: [{ label: 'Qualité du code', score: 4 }],
+          impact: [],
+          collaboration: [],
+          leadership: []
+        }
+      }),
+      reviewForTeamSummary()
+    ]);
+    expect(summary.avgSelfAssessmentScore).toBe(4);
+  });
+
+  it('moyenne le score de la grille générale manager séparément de celui du collaborateur', () => {
+    const summary = summarizeTeamReviews([
+      reviewForTeamSummary({
+        generalManagerAssessment: {
+          technique: [{ label: 'Qualité du code', score: 5, answer: 'Excellent' }],
+          impact: [],
+          collaboration: [],
+          leadership: []
+        }
+      }),
+      reviewForTeamSummary({
+        generalManagerAssessment: {
+          technique: [{ label: 'Qualité du code', score: 3, answer: 'Correct' }],
+          impact: [],
+          collaboration: [],
+          leadership: []
+        }
+      })
+    ]);
+    expect(summary.avgManagerAssessmentScore).toBe(4);
+    expect(summary.avgSelfAssessmentScore).toBeNull();
   });
 });
 

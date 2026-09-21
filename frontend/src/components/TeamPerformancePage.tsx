@@ -36,6 +36,7 @@ import {
   OBJECTIVE_STATUS_LABELS,
   OBJECTIVE_STATUS_BADGE_CLASS,
   summarizeObjectiveStatuses,
+  summarizeTeamReviews,
   REVIEW_STATUS_LABELS,
   REVIEW_STATUS_BADGE_CLASS,
   CYCLE_STATUS_LABELS,
@@ -68,6 +69,12 @@ function formatGeneralAssessmentScore(axes: PerformanceReview['generalSelfAssess
   return `${score.toFixed(1)} / 5`;
 }
 
+/** Formate une moyenne déjà calculée par `summarizeTeamReviews` (null = rien à afficher). */
+function formatAvgScore(score: number | null, suffix: string): string {
+  if (score == null) return '—';
+  return `${score.toFixed(1)}${suffix}`;
+}
+
 function memberLabel(member: PerformanceTeamMember): string {
   const name = `${member.firstName ?? ''} ${member.lastName ?? ''}`.trim();
   return name || member.email;
@@ -87,6 +94,25 @@ function ObjectiveStatusBadges({ objectives }: { objectives: PerformanceReview['
       {summary.map(({ status, count }) => (
         <span key={status} className={`badge ${OBJECTIVE_STATUS_BADGE_CLASS[status]}`}>
           {count} {OBJECTIVE_STATUS_LABELS[status]}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Résumé compact de la répartition des fiches par statut au sein d'une équipe (carte "Répartition
+ * par équipe") — un badge par statut représenté, dans l'ordre `PERFORMANCE_REVIEW_STATUSES`. Un
+ * statut à 0 fiche n'est pas affiché, pour ne pas surcharger la ligne.
+ */
+function ReviewStatusCountBadges({ statusCounts }: { statusCounts: Record<PerformanceReviewStatus, number> }) {
+  const present = PERFORMANCE_REVIEW_STATUSES.filter((status) => statusCounts[status] > 0);
+  if (present.length === 0) return <span className="text-surface-500">—</span>;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {present.map((status) => (
+        <span key={status} className={`badge ${REVIEW_STATUS_BADGE_CLASS[status]}`}>
+          {statusCounts[status]} {REVIEW_STATUS_LABELS[status]}
         </span>
       ))}
     </div>
@@ -288,6 +314,26 @@ export function TeamPerformancePage() {
         : [],
     [members, reviewedUserIds, statusFilter]
   );
+
+  // Vue agrégée par équipe (carte "Répartition par équipe") : regroupe les fiches actuellement
+  // chargées (déjà scopées par teamFilter/statusFilter côté API) par équipe, et résume chaque
+  // groupe via `summarizeTeamReviews`. Recalculé à chaque render (liste courte, pas besoin de
+  // dépendre de `teamLabelForReview` dans un useMemo).
+  const teamSummaries = (() => {
+    const grouped = new Map<string, PerformanceReview[]>();
+    for (const review of reviews) {
+      const label = teamLabelForReview(review);
+      const bucket = grouped.get(label);
+      if (bucket) {
+        bucket.push(review);
+      } else {
+        grouped.set(label, [review]);
+      }
+    }
+    return Array.from(grouped.entries())
+      .map(([label, teamReviews]) => ({ label, summary: summarizeTeamReviews(teamReviews) }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'fr'));
+  })();
 
   const loadTeamsAndCycles = useCallback(async () => {
     const [cyclesResult, teamsResult] = await Promise.allSettled([performanceApi.getCycles(), teamApi.list()]);
@@ -709,6 +755,36 @@ export function TeamPerformancePage() {
               ))}
             </select>
           </div>
+
+          {!listLoading && teamSummaries.length > 0 && (
+            <div className="card-glass overflow-hidden">
+              <h3 className="text-base font-semibold text-surface-100 p-4 pb-0">Répartition par équipe</h3>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-surface-700/50 text-left text-surface-400">
+                    <th className="p-3 font-medium">Équipe</th>
+                    <th className="p-3 font-medium">Fiches</th>
+                    <th className="p-3 font-medium">Score objectifs (moy.)</th>
+                    <th className="p-3 font-medium">Score auto-évaluation (moy.)</th>
+                    <th className="p-3 font-medium">Score évaluation manager (moy.)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {teamSummaries.map(({ label, summary }) => (
+                    <tr key={label} className="border-b border-surface-800/50">
+                      <td className="p-3 text-surface-200">{label}</td>
+                      <td className="p-3">
+                        <ReviewStatusCountBadges statusCounts={summary.statusCounts} />
+                      </td>
+                      <td className="p-3 text-surface-300">{formatAvgScore(summary.avgObjectivesScore, '%')}</td>
+                      <td className="p-3 text-surface-300">{formatAvgScore(summary.avgSelfAssessmentScore, ' / 5')}</td>
+                      <td className="p-3 text-surface-300">{formatAvgScore(summary.avgManagerAssessmentScore, ' / 5')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
 
           <div className="card-glass overflow-hidden">
             {listLoading ? (
