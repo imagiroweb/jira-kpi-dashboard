@@ -6,7 +6,8 @@ import {
   PerformanceReview,
   OBJECTIVE_ASSESSMENT_STATUSES,
   PERFORMANCE_REVIEW_STATUSES,
-  COMPETENCY_AXES
+  COMPETENCY_AXES,
+  ROLE_PROFILES
 } from './PerformanceReview';
 
 function baseReview() {
@@ -229,5 +230,60 @@ describe('PerformanceReview', () => {
       ([fields, options]) => fields.user === 1 && fields.cycle === 1 && options.unique
     );
     expect(uniqueUserCycle).toBeDefined();
+  });
+
+  it('accepte un sous-critère avec une réponse verbeuse (answer), en plus du score résolu', () => {
+    const review = new PerformanceReview({
+      ...baseReview(),
+      generalManagerAssessment: {
+        axes: {
+          technique: [{ label: 'Qualité du code & revues', score: 4, answer: 'Réponse correcte' }],
+          impact: [],
+          collaboration: [],
+          leadership: []
+        }
+      }
+    });
+    const error = review.validateSync();
+    expect(error).toBeUndefined();
+    expect(review.toObject().generalManagerAssessment.axes.technique).toEqual([
+      { label: 'Qualité du code & revues', score: 4, answer: 'Réponse correcte' }
+    ]);
+  });
+
+  it("n'exige pas de réponse (answer) : reste optionnelle, notamment pour generalSelfAssessment (import Excel)", () => {
+    const review = new PerformanceReview({
+      ...baseReview(),
+      generalSelfAssessment: {
+        axes: {
+          technique: [{ label: 'Qualité du code & revues', score: 3 }],
+          impact: [],
+          collaboration: [],
+          leadership: []
+        }
+      }
+    });
+    const error = review.validateSync();
+    expect(error).toBeUndefined();
+    expect(review.toObject().generalSelfAssessment.axes.technique[0].answer).toBeUndefined();
+  });
+
+  it('déclare generalAssessmentRoleProfile parmi les profils de poste autorisés (ROLE_PROFILES), champ optionnel', () => {
+    const schema = PerformanceReview.schema;
+    expect(schema.paths.generalAssessmentRoleProfile.options.enum).toEqual(ROLE_PROFILES);
+
+    const withoutProfile = new PerformanceReview(baseReview());
+    expect(withoutProfile.validateSync()).toBeUndefined();
+    expect(withoutProfile.toObject().generalAssessmentRoleProfile).toBeUndefined();
+
+    const withProfile = new PerformanceReview({ ...baseReview(), generalAssessmentRoleProfile: 'dev_back' });
+    expect(withProfile.validateSync()).toBeUndefined();
+    expect(withProfile.toObject().generalAssessmentRoleProfile).toBe('dev_back');
+  });
+
+  it('refuse une valeur de generalAssessmentRoleProfile hors de ROLE_PROFILES', () => {
+    const review = new PerformanceReview({ ...baseReview(), generalAssessmentRoleProfile: 'product_owner' });
+    const error = review.validateSync();
+    expect(error).toBeDefined();
   });
 });

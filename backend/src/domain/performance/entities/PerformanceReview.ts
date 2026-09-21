@@ -21,6 +21,19 @@ export type PerformanceReviewStatus = (typeof PERFORMANCE_REVIEW_STATUSES)[numbe
 export const COMPETENCY_AXES = ['technique', 'impact', 'collaboration', 'leadership'] as const;
 export type CompetencyAxis = (typeof COMPETENCY_AXES)[number];
 
+/**
+ * Profils de poste utilisés pour la notation manager de la grille générale (voir
+ * `GeneralAssessmentReferentialProfile`) : la composante Technique de la grille varie selon le
+ * poste (3 variantes réelles constatées sur les fichiers `evaluations-individuelles/*.xlsx` —
+ * Dev, QA, DBA — `dev_back`/`dev_front` partageant le même référentiel technique). Défini ici
+ * (plutôt que dans `GeneralAssessmentReferentialProfile.ts`, qui importe déjà `CompetencyAxis`
+ * depuis ce fichier) pour éviter un import circulaire avec `IPerformanceReview.generalAssessmentRoleProfile`
+ * ci-dessous ; ré-exporté depuis `GeneralAssessmentReferentialProfile.ts` pour ne pas casser les
+ * imports existants.
+ */
+export const ROLE_PROFILES = ['dev_back', 'dev_front', 'qa', 'dba'] as const;
+export type RoleProfile = (typeof ROLE_PROFILES)[number];
+
 export const REVIEW_AUTHOR_ROLES = ['collaborateur', 'lead', 'cto'] as const;
 export type ReviewAuthorRole = (typeof REVIEW_AUTHOR_ROLES)[number];
 
@@ -102,6 +115,13 @@ export interface IGeneralAssessmentSubCriterion {
   label: string;
   /** Score 1-5, voir le référentiel des fichiers d'évaluation. */
   score: number;
+  /**
+   * Réponse verbeuse choisie (texte exact d'une des 5 réponses du référentiel, voir
+   * `GeneralAssessmentReferentialProfile`) — uniquement renseignée côté évaluation manager, où le
+   * score ci-dessus est toujours résolu serveur à partir de cette réponse (jamais fourni tel quel
+   * par le client). Absente pour l'auto-évaluation (import Excel : le score y est déjà connu).
+   */
+  answer?: string;
 }
 
 export type IGeneralAssessmentAxes = Record<CompetencyAxis, IGeneralAssessmentSubCriterion[]>;
@@ -128,6 +148,13 @@ export interface IPerformanceReview extends Document {
   generalSelfAssessment: IGeneralSelfAssessment;
   /** Évaluation manager sur la même grille, pour rapprochement avec l'auto-évaluation (repérer les désaccords sous-critère par sous-critère). */
   generalManagerAssessment: IGeneralManagerAssessment;
+  /**
+   * Profil de poste choisi par le lead/CTO pour la notation manager de la grille générale — fixé
+   * sur la fiche (comme `team`/`teamNameSnapshot` ci-dessus) plutôt que dérivé d'un champ sur
+   * `User`, qui n'a pas de notion de profil de poste : c'est le manager qui le choisit au moment
+   * de noter, pas une propriété intrinsèque et durable du collaborateur.
+   */
+  generalAssessmentRoleProfile?: RoleProfile;
   status: PerformanceReviewStatus;
   /** Qui a défini les objectifs de cette fiche (un lead pour son équipe, ou le CTO). */
   definedBy?: IReviewAuthor;
@@ -229,7 +256,8 @@ const CompetencyScoresSchema = new Schema<ICompetencyScores>(
 const GeneralAssessmentSubCriterionSchema = new Schema<IGeneralAssessmentSubCriterion>(
   {
     label: { type: String, required: true, trim: true },
-    score: { type: Number, required: true, min: 1, max: 5 }
+    score: { type: Number, required: true, min: 1, max: 5 },
+    answer: { type: String, trim: true }
   },
   { _id: false }
 );
@@ -269,6 +297,7 @@ const PerformanceReviewSchema = new Schema<IPerformanceReview>(
       type: GeneralAssessmentGridSchema,
       default: () => ({ axes: { technique: [], impact: [], collaboration: [], leadership: [] } })
     },
+    generalAssessmentRoleProfile: { type: String, enum: ROLE_PROFILES },
     status: { type: String, enum: PERFORMANCE_REVIEW_STATUSES, default: 'dossier_manquant' },
     definedBy: { type: ReviewAuthorSchema },
     createdBy: { type: ReviewAuthorSchema, required: true },

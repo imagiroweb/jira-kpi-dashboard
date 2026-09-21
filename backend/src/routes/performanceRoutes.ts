@@ -18,14 +18,21 @@ import {
 import {
   PerformanceReview,
   IPerformanceReview,
-  PERFORMANCE_REVIEW_STATUSES
+  PERFORMANCE_REVIEW_STATUSES,
+  COMPETENCY_AXES
 } from '../domain/performance/entities/PerformanceReview';
 import {
   GeneralAssessmentReferentialProfile,
   IGeneralAssessmentReferentialProfile,
-  ROLE_PROFILES
+  ROLE_PROFILES,
+  RoleProfile
 } from '../domain/performance/entities/GeneralAssessmentReferentialProfile';
-import { validateReferentialAxes } from '../domain/performance/generalAssessmentReferential';
+import {
+  GeneralAssessmentManagerAxesInput,
+  resolveManagerAxesAnswers,
+  validateGeneralAssessmentManagerAxes,
+  validateReferentialAxes
+} from '../domain/performance/generalAssessmentReferential';
 import {
   appendKeyResultProgress,
   applyGeneralAssessmentAxes,
@@ -42,7 +49,6 @@ import {
   GeneralAssessmentAxesInput,
   GeneralSelfAssessmentInput,
   ObjectiveDefinitionInput,
-  validateGeneralAssessmentAxes,
   validateGeneralSelfAssessment,
   validateObjectivesDefinition
 } from '../domain/performance/performanceReview';
@@ -93,6 +99,7 @@ function serialize(
     competencyScores: completeCompetencyScores(review.competencyScores),
     generalSelfAssessment: completeGeneralSelfAssessment(review.generalSelfAssessment?.axes),
     generalManagerAssessment: completeGeneralAssessmentAxes(review.generalManagerAssessment?.axes),
+    generalAssessmentRoleProfile: review.generalAssessmentRoleProfile,
     status: review.status,
     definedBy: review.definedBy,
     createdBy: review.createdBy,
@@ -813,12 +820,23 @@ router.patch('/reviews/:userId/general-self-assessment', authenticate, async (re
 
 /**
  * Évaluation manager sur la grille générale (mêmes 4 axes × sous-critères que
- * `generalSelfAssessment`, référentiel commun `GENERAL_ASSESSMENT_REFERENTIAL`) — permet de noter
- * chaque sous-critère côté manager et de le rapprocher de l'auto-évaluation du collaborateur pour
- * repérer d'éventuels désaccords. Même portée d'accès que l'évaluation manager par objectif :
- * lead pour son équipe, ou CTO/super_admin pour n'importe qui. Remplace entièrement les
- * sous-critères d'un axe fourni dans `axes` ; un axe absent du corps de la requête n'est pas
- * modifié. Crée la fiche à la volée sur le cycle actif si elle n'existe pas encore.
+ * `generalSelfAssessment`) — le manager sélectionne, pour chaque sous-critère, une réponse
+ * verbeuse parmi les 5 du référentiel du profil de poste ciblé (`GeneralAssessmentReferentialProfile`,
+ * voir `resolveManagerAxesAnswers`) plutôt que de saisir une note brute : le score est TOUJOURS
+ * résolu serveur à partir de cette réponse, jamais fourni tel quel par le client, pour que
+ * chaque note reste traçable à une réponse réelle du référentiel. Permet ainsi de rapprocher
+ * chaque sous-critère de l'auto-évaluation du collaborateur et de repérer d'éventuels désaccords.
+ *
+ * `roleProfile` (optionnel dans le corps de la requête) choisit ou change le profil de poste
+ * utilisé pour la résolution ; une fois choisi, il est mémorisé sur la fiche
+ * (`generalAssessmentRoleProfile`, même logique de snapshot que `team`) et réutilisé aux appels
+ * suivants qui ne le repassent pas — un profil doit avoir été choisi (dans cet appel ou un
+ * précédent) dès qu'au moins un sous-critère est noté.
+ *
+ * Même portée d'accès que l'évaluation manager par objectif : lead pour son équipe, ou
+ * CTO/super_admin pour n'importe qui. Remplace entièrement les sous-critères d'un axe fourni
+ * dans `axes` ; un axe absent du corps de la requête n'est pas modifié. Crée la fiche à la volée
+ * sur le cycle actif si elle n'existe pas encore.
  * PATCH /api/performance/reviews/:userId/general-manager-assessment
  */
 router.patch('/reviews/:userId/general-manager-assessment', authenticate, async (req: Request, res: Response) => {
@@ -829,10 +847,22 @@ router.patch('/reviews/:userId/general-manager-assessment', authenticate, async 
       return fail(res, 400, 'axes doit être un objet');
     }
 
-    const validation = validateGeneralAssessmentAxes(axesInput as GeneralAssessmentAxesInput);
-    if (!validation.valid) {
-      return fail(res, 400, validation.errors.join(', '));
+    const shapeValidation = validateGeneralAssessmentManagerAxes(axesInput as GeneralAssessmentManagerAxesInput);
+    if (!shapeValidation.valid) {
+      return fail(res, 400, shapeValidation.errors.join(', '));
     }
+
+    let roleProfileInput: RoleProfile | undefined;
+    if (req.body?.roleProfile !== undefined) {
+      if (!(ROLE_PROFILES as readonly string[]).includes(req.body.roleProfile)) {
+        return fail(res, 400, `Profil de poste inconnu : ${req.body.roleProfile}`);
+      }
+      roleProfileInput = req.body.roleProfile as RoleProfile;
+    }
+
+    const hasSubCriteriaToResolve = COMPETENCY_AXES.some(
+      (axis) => ((axesInput as GeneralAssessmentManagerAxesInput)[axis]?.length ?? 0) > 0
+    );
 
     const cycle = await resolveCycle(req.body?.cycleId);
     if (cycle === undefined) return fail(res, 400, 'Identifiant de cycle invalide');
@@ -871,9 +901,30 @@ router.patch('/reviews/:userId/general-manager-assessment', authenticate, async 
         });
       }
 
+      const roleProfile = roleProfileInput ?? current.generalAssessmentRoleProfile;
+
+      let resolvedAxesInput: GeneralAssessmentAxesInput = {};
+      if (hasSubCriteriaToResolve) {
+        if (!roleProfile) {
+          return fail(res, 400, 'Un profil de poste doit être choisi avant de noter les sous-critères (roleProfile)');
+        }
+        const referentialProfile = await GeneralAssessmentReferentialProfile.findOne({ roleProfile });
+        if (!referentialProfile) {
+          return fail(res, 400, `Aucun référentiel de notation configuré pour le profil de poste "${roleProfile}"`);
+        }
+        const resolution = resolveManagerAxesAnswers(
+          axesInput as GeneralAssessmentManagerAxesInput,
+          referentialProfile.axes
+        );
+        if (resolution.errors.length > 0) {
+          return fail(res, 400, resolution.errors.join(', '));
+        }
+        resolvedAxesInput = resolution.axes;
+      }
+
       const generalManagerAssessment = applyGeneralAssessmentAxes(
         current.toObject().generalManagerAssessment?.axes,
-        axesInput as GeneralAssessmentAxesInput
+        resolvedAxesInput
       );
 
       const $set: Record<string, unknown> = {
@@ -881,6 +932,9 @@ router.patch('/reviews/:userId/general-manager-assessment', authenticate, async 
         updatedBy: who
       };
       if (reviewTeamId && !toIdString(current.team)) $set.team = reviewTeamId;
+      if (roleProfile && roleProfile !== current.generalAssessmentRoleProfile) {
+        $set.generalAssessmentRoleProfile = roleProfile;
+      }
 
       updated = await PerformanceReview.findOneAndUpdate(
         { _id: current._id, __v: current.__v },

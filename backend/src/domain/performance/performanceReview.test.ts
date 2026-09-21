@@ -281,6 +281,22 @@ describe('validateGeneralSelfAssessment / applyGeneralSelfAssessment / completeG
       expect(result.collaboration).toEqual(current.collaboration);
       expect(result.leadership).toEqual(current.leadership);
     });
+
+    it("reporte la réponse verbeuse (answer) quand elle est fournie en entrée (évaluation manager)", () => {
+      const current: IGeneralAssessmentAxes = emptyAxes();
+      const result = applyGeneralSelfAssessment(current, {
+        technique: [{ label: 'Qualité du code & revues', score: 4, answer: 'Réponse correcte' }]
+      });
+      expect(result.technique).toEqual([{ label: 'Qualité du code & revues', score: 4, answer: 'Réponse correcte' }]);
+    });
+
+    it("n'ajoute pas de champ answer quand il est absent de l'entrée (auto-évaluation)", () => {
+      const current: IGeneralAssessmentAxes = emptyAxes();
+      const result = applyGeneralSelfAssessment(current, {
+        technique: [{ label: 'Qualité du code & revues', score: 4 }]
+      });
+      expect(result.technique[0]).not.toHaveProperty('answer');
+    });
   });
 
   describe('completeGeneralSelfAssessment', () => {

@@ -3,8 +3,11 @@
  */
 import ExcelJS from 'exceljs';
 import {
+  GeneralAssessmentManagerAxesInput,
   parseReferentialFromWorksheet,
   resolveAnswerPoints,
+  resolveManagerAxesAnswers,
+  validateGeneralAssessmentManagerAxes,
   validateReferentialAxes
 } from './generalAssessmentReferential';
 import { IReferentialAxes } from './entities/GeneralAssessmentReferentialProfile';
@@ -207,5 +210,97 @@ describe('resolveAnswerPoints', () => {
 
   it("renvoie undefined si la réponse n'existe pas (ou plus) pour ce sous-critère", () => {
     expect(resolveAnswerPoints(axes, 'technique', 'Qualité du code & revues', 'Réponse inconnue')).toBeUndefined();
+  });
+});
+
+describe('validateGeneralAssessmentManagerAxes', () => {
+  it('valide une grille manager complète (libellé + réponse pour chaque sous-critère)', () => {
+    const result = validateGeneralAssessmentManagerAxes({
+      technique: [{ label: 'Qualité du code & revues', answer: 'Bon' }]
+    });
+    expect(result).toEqual({ valid: true, errors: [] });
+  });
+
+  it('signale un axe inconnu', () => {
+    const input = { supervision: [{ label: 'X', answer: 'Y' }] } as unknown as GeneralAssessmentManagerAxesInput;
+    const result = validateGeneralAssessmentManagerAxes(input);
+    expect(result.valid).toBe(false);
+    expect(result.errors).toEqual(['Axe inconnu : supervision']);
+  });
+
+  it('signale un sous-critère sans libellé', () => {
+    const result = validateGeneralAssessmentManagerAxes({
+      technique: [{ label: '', answer: 'Bon' }]
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toEqual(['Axe technique, sous-critère 1 : libellé requis']);
+  });
+
+  it('signale un sous-critère sans réponse', () => {
+    const result = validateGeneralAssessmentManagerAxes({
+      technique: [{ label: 'Qualité du code & revues', answer: '' }]
+    });
+    expect(result.valid).toBe(false);
+    expect(result.errors).toEqual(['Axe technique, sous-critère 1 : réponse requise']);
+  });
+
+  it("n'exige aucune note (score) — cette validation porte uniquement sur la forme, pas la résolution", () => {
+    const result = validateGeneralAssessmentManagerAxes({
+      technique: [{ label: 'Qualité du code & revues', answer: 'Réponse qui n\'existe pas dans le référentiel' }]
+    });
+    expect(result).toEqual({ valid: true, errors: [] });
+  });
+});
+
+describe('resolveManagerAxesAnswers', () => {
+  const referentialAxes: IReferentialAxes = {
+    technique: [
+      {
+        label: 'Qualité du code & revues',
+        answers: FIVE_ANSWERS.map((text, index) => ({ text, points: index + 1 }))
+      }
+    ],
+    impact: [
+      {
+        label: 'Livraison (delivery)',
+        answers: FIVE_ANSWERS.map((text, index) => ({ text, points: index + 1 }))
+      }
+    ],
+    collaboration: [],
+    leadership: []
+  };
+
+  it('résout le score de chaque réponse choisie et conserve la réponse elle-même', () => {
+    const result = resolveManagerAxesAnswers(
+      { technique: [{ label: 'Qualité du code & revues', answer: 'Bon' }] },
+      referentialAxes
+    );
+    expect(result.errors).toEqual([]);
+    expect(result.axes.technique).toEqual([{ label: 'Qualité du code & revues', score: 4, answer: 'Bon' }]);
+  });
+
+  it("ignore les axes absents de l'entrée (même sémantique que applyGeneralAssessmentAxes)", () => {
+    const result = resolveManagerAxesAnswers(
+      { impact: [{ label: 'Livraison (delivery)', answer: 'Excellent' }] },
+      referentialAxes
+    );
+    expect(result.axes.technique).toBeUndefined();
+    expect(result.axes.impact).toEqual([{ label: 'Livraison (delivery)', score: 5, answer: 'Excellent' }]);
+  });
+
+  it("signale une réponse introuvable dans le référentiel, sans faire échouer les autres sous-critères", () => {
+    const result = resolveManagerAxesAnswers(
+      {
+        technique: [
+          { label: 'Qualité du code & revues', answer: 'Réponse inconnue' },
+          { label: 'Sous-critère fantôme', answer: 'Bon' }
+        ]
+      },
+      referentialAxes
+    );
+    expect(result.errors).toEqual([
+      'Axe technique, sous-critère "Qualité du code & revues" : réponse "Réponse inconnue" introuvable dans le référentiel',
+      'Axe technique, sous-critère "Sous-critère fantôme" : réponse "Bon" introuvable dans le référentiel'
+    ]);
   });
 });

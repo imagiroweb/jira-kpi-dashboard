@@ -1,5 +1,5 @@
 import mongoose, { Document, Schema } from 'mongoose';
-import { CompetencyAxis } from './PerformanceReview';
+import { CompetencyAxis, ROLE_PROFILES, RoleProfile } from './PerformanceReview';
 
 /**
  * Profil de référentiel de notation détaillée — un profil par grande famille de poste. La
@@ -9,9 +9,12 @@ import { CompetencyAxis } from './PerformanceReview';
  * stockés comme deux profils distincts pour pouvoir diverger plus tard sans changement de schéma.
  * Les 3 autres axes (Impact/Collaboration/Leadership) sont identiques d'un profil à l'autre dans
  * les fichiers sources, mais sont dupliqués par profil pour la même raison.
+ *
+ * `ROLE_PROFILES`/`RoleProfile` sont définis dans `PerformanceReview.ts` (pour
+ * `IPerformanceReview.generalAssessmentRoleProfile`, sans import circulaire) et ré-exportés ici
+ * pour ne pas casser les imports existants (routes, scripts d'import, tests).
  */
-export const ROLE_PROFILES = ['dev_back', 'dev_front', 'qa', 'dba'] as const;
-export type RoleProfile = (typeof ROLE_PROFILES)[number];
+export { ROLE_PROFILES, RoleProfile };
 
 /**
  * Une réponse verbeuse possible pour un sous-critère, avec ses points. Les points sont stockés

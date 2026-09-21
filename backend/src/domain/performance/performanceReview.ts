@@ -447,6 +447,8 @@ export function completeCompetencyScores(raw?: Partial<ICompetencyScores> | null
 export interface GeneralAssessmentSubCriterionInput {
   label: string;
   score: number;
+  /** Réponse verbeuse résolue (évaluation manager uniquement) — voir `resolveManagerAxesAnswers` dans `generalAssessmentReferential.ts`. */
+  answer?: string;
 }
 
 /**
@@ -529,7 +531,11 @@ export function applyGeneralAssessmentAxes(
   for (const axis of COMPETENCY_AXES) {
     const subCriteria = input[axis];
     if (subCriteria !== undefined) {
-      next[axis] = subCriteria.map((subCriterion) => ({ label: subCriterion.label, score: subCriterion.score }));
+      next[axis] = subCriteria.map((subCriterion) => ({
+        label: subCriterion.label,
+        score: subCriterion.score,
+        ...(subCriterion.answer !== undefined ? { answer: subCriterion.answer } : {})
+      }));
     }
   }
   return next;

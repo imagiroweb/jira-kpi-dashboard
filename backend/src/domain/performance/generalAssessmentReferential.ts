@@ -9,6 +9,7 @@
 import type ExcelJS from 'exceljs';
 import { COMPETENCY_AXES, CompetencyAxis } from './entities/PerformanceReview';
 import { IReferentialAnswer, IReferentialAxes, IReferentialCriterion } from './entities/GeneralAssessmentReferentialProfile';
+import type { GeneralAssessmentAxesInput } from './performanceReview';
 
 const LABEL_COL = 'C';
 const ANSWER_COLS = ['D', 'E', 'F', 'G', 'H'];
@@ -152,4 +153,99 @@ export function resolveAnswerPoints(
 ): number | undefined {
   const criterion = axes[axis].find((entry) => entry.label === criterionLabel);
   return criterion?.answers.find((answer) => answer.text === answerText)?.points;
+}
+
+/**
+ * Un sous-critère tel que noté par le manager : uniquement la réponse verbeuse choisie (son
+ * texte exact, tel qu'il apparaît dans le référentiel du profil de poste ciblé) — jamais de note
+ * brute. Décision produit : le manager sélectionne une réponse parmi les 5 du référentiel plutôt
+ * que de saisir un chiffre, pour que le score reste toujours traçable à une réponse réelle (voir
+ * `resolveManagerAxesAnswers`).
+ */
+export interface GeneralAssessmentManagerSubCriterionInput {
+  label: string;
+  answer: string;
+}
+
+/** (Re)notation manager, axe par axe — même absence-vaut-non-modifié que `GeneralAssessmentAxesInput`. */
+export type GeneralAssessmentManagerAxesInput = Partial<Record<CompetencyAxis, GeneralAssessmentManagerSubCriterionInput[]>>;
+
+export interface ManagerAxesValidation {
+  valid: boolean;
+  errors: string[];
+}
+
+/**
+ * Valide la FORME d'une notation manager (axes connus, libellé et réponse non vides pour chaque
+ * sous-critère) — ne résout PAS les points de chaque réponse, qui nécessite le référentiel du
+ * profil de poste ciblé : voir `resolveManagerAxesAnswers`, appelée séparément une fois le profil
+ * connu.
+ */
+export function validateGeneralAssessmentManagerAxes(input: GeneralAssessmentManagerAxesInput): ManagerAxesValidation {
+  const errors: string[] = [];
+
+  for (const key of Object.keys(input)) {
+    if (!(COMPETENCY_AXES as readonly string[]).includes(key)) {
+      errors.push(`Axe inconnu : ${key}`);
+    }
+  }
+
+  for (const axis of COMPETENCY_AXES) {
+    const subCriteria = input[axis];
+    if (subCriteria === undefined) continue;
+    if (!Array.isArray(subCriteria)) {
+      errors.push(`L'axe ${axis} doit être un tableau de sous-critères`);
+      continue;
+    }
+    subCriteria.forEach((subCriterion, index) => {
+      if (!subCriterion?.label?.trim()) {
+        errors.push(`Axe ${axis}, sous-critère ${index + 1} : libellé requis`);
+      }
+      if (!subCriterion?.answer?.trim()) {
+        errors.push(`Axe ${axis}, sous-critère ${index + 1} : réponse requise`);
+      }
+    });
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+export interface ResolvedManagerAxes {
+  /** Prêt à passer à `applyGeneralAssessmentAxes` : chaque sous-critère porte son score résolu ET la réponse d'origine. */
+  axes: GeneralAssessmentAxesInput;
+  errors: string[];
+}
+
+/**
+ * Résout chaque réponse verbeuse choisie par le manager en son score (1-5), à partir du
+ * référentiel COURANT du profil de poste ciblé — jamais de score fourni par le client. Une
+ * réponse introuvable dans le référentiel (texte modifié ou retiré entre-temps côté admin, ou
+ * réponse invalide envoyée par le client) est signalée en erreur plutôt que notée à 0 en
+ * silence, pour ne jamais enregistrer une note qui ne correspondrait à aucune réponse réelle.
+ * Un axe absent de `input` n'apparaît pas dans le résultat (même sémantique "non modifié" que
+ * `applyGeneralAssessmentAxes`).
+ */
+export function resolveManagerAxesAnswers(
+  input: GeneralAssessmentManagerAxesInput,
+  referentialAxes: IReferentialAxes
+): ResolvedManagerAxes {
+  const errors: string[] = [];
+  const axes: GeneralAssessmentAxesInput = {};
+
+  for (const axis of COMPETENCY_AXES) {
+    const subCriteria = input[axis];
+    if (subCriteria === undefined) continue;
+
+    axes[axis] = subCriteria.map((subCriterion) => {
+      const points = resolveAnswerPoints(referentialAxes, axis, subCriterion.label, subCriterion.answer);
+      if (points === undefined) {
+        errors.push(
+          `Axe ${axis}, sous-critère "${subCriterion.label}" : réponse "${subCriterion.answer}" introuvable dans le référentiel`
+        );
+      }
+      return { label: subCriterion.label, score: points ?? 0, answer: subCriterion.answer };
+    });
+  }
+
+  return { axes, errors };
 }
