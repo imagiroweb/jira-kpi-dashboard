@@ -41,7 +41,6 @@ import {
   applyObjectivesDefinition,
   applySelfAssessment,
   AssessmentInput,
-  completeCompetencyScores,
   completeGeneralAssessmentAxes,
   completeGeneralSelfAssessment,
   completeQualitative,
@@ -96,7 +95,6 @@ function serialize(
     teamNameSnapshot: teamOverride?.teamNameSnapshot ?? review.teamNameSnapshot,
     objectives: review.objectives,
     qualitative: completeQualitative(review.qualitative),
-    competencyScores: completeCompetencyScores(review.competencyScores),
     generalSelfAssessment: completeGeneralSelfAssessment(review.generalSelfAssessment?.axes),
     generalManagerAssessment: completeGeneralAssessmentAxes(review.generalManagerAssessment?.axes),
     generalAssessmentRoleProfile: review.generalAssessmentRoleProfile,
@@ -734,9 +732,9 @@ router.patch('/reviews/:userId/objectives', authenticate, async (req: Request, r
 /**
  * (Re)définit l'auto-évaluation générale (4 axes de compétence × sous-critères notés 1-5) d'un
  * collaborateur pour un cycle — lead pour son équipe, ou CTO/super_admin pour n'importe qui,
- * même portée que PATCH /reviews/:userId/objectives. Distincte du "Bilan du cycle" (qualitative +
- * competencyScores, remplis à chaque cycle par le collaborateur et son manager — voir
- * self-assessment / manager-assessment ci-dessous) : une évaluation plus large des compétences,
+ * même portée que PATCH /reviews/:userId/objectives. Distincte du "Bilan du cycle" (qualitative,
+ * rempli à chaque cycle par le collaborateur et son manager — voir self-assessment /
+ * manager-assessment ci-dessous) : une évaluation plus large des compétences,
  * alimentée aujourd'hui par l'import Excel (voir `buildGeneralAssessmentImportPlan.ts` /
  * `runGeneralAssessmentImport.ts`), pas encore par une UI de saisie manuelle. Remplace
  * entièrement les sous-critères d'un axe fourni dans `axes` ; un axe absent du corps de la
@@ -964,10 +962,9 @@ router.patch('/reviews/:userId/general-manager-assessment', authenticate, async 
 });
 
 /**
- * Évaluation manager d'une fiche existante (par objectif, bilan qualitatif
- * "manager", grille de compétences "manager") — lead pour son équipe, ou
- * CTO/super_admin pour n'importe qui. Ne crée jamais la fiche : les
- * objectifs doivent déjà avoir été définis.
+ * Évaluation manager d'une fiche existante (par objectif, bilan qualitatif "manager") — lead pour
+ * son équipe, ou CTO/super_admin pour n'importe qui. Ne crée jamais la fiche : les objectifs
+ * doivent déjà avoir été définis.
  * PATCH /api/performance/reviews/:userId/manager-assessment
  */
 router.patch('/reviews/:userId/manager-assessment', authenticate, async (req: Request, res: Response) => {
@@ -975,8 +972,7 @@ router.patch('/reviews/:userId/manager-assessment', authenticate, async (req: Re
     const { userId } = req.params;
     const input: AssessmentInput = {
       objectives: Array.isArray(req.body?.objectives) ? req.body.objectives : undefined,
-      qualitative: typeof req.body?.qualitative === 'object' ? req.body.qualitative : undefined,
-      competencyScores: typeof req.body?.competencyScores === 'object' ? req.body.competencyScores : undefined
+      qualitative: typeof req.body?.qualitative === 'object' ? req.body.qualitative : undefined
     };
 
     const cycle = await resolveCycle(req.body?.cycleId);
@@ -1006,7 +1002,7 @@ router.patch('/reviews/:userId/manager-assessment', authenticate, async (req: Re
       const plain = current.toObject();
 
       const result = applyManagerAssessment(
-        { objectives: plain.objectives, qualitative: plain.qualitative, competencyScores: plain.competencyScores },
+        { objectives: plain.objectives, qualitative: plain.qualitative },
         input
       );
       const status = computeReviewStatus(
@@ -1021,7 +1017,6 @@ router.patch('/reviews/:userId/manager-assessment', authenticate, async (req: Re
           $set: {
             objectives: result.objectives,
             qualitative: result.qualitative,
-            competencyScores: result.competencyScores,
             updatedBy: who,
             status
           }
@@ -1044,19 +1039,17 @@ router.patch('/reviews/:userId/manager-assessment', authenticate, async (req: Re
 
 
 /**
- * Auto-évaluation du collaborateur sur sa propre fiche (par objectif, bilan
- * qualitatif "self", grille de compétences "self") — jamais côté d'un autre
- * collaborateur (voir PATCH /reviews/:userId/manager-assessment pour le
- * pendant lead/CTO). Ne crée jamais la fiche : les objectifs doivent déjà
- * avoir été définis par un lead/CTO.
+ * Auto-évaluation du collaborateur sur sa propre fiche (par objectif, bilan qualitatif "self") —
+ * jamais côté d'un autre collaborateur (voir PATCH /reviews/:userId/manager-assessment pour le
+ * pendant lead/CTO). Ne crée jamais la fiche : les objectifs doivent déjà avoir été définis par
+ * un lead/CTO.
  * PATCH /api/performance/reviews/me/self-assessment
  */
 router.patch('/reviews/me/self-assessment', authenticate, async (req: Request, res: Response) => {
   try {
     const input: AssessmentInput = {
       objectives: Array.isArray(req.body?.objectives) ? req.body.objectives : undefined,
-      qualitative: typeof req.body?.qualitative === 'object' ? req.body.qualitative : undefined,
-      competencyScores: typeof req.body?.competencyScores === 'object' ? req.body.competencyScores : undefined
+      qualitative: typeof req.body?.qualitative === 'object' ? req.body.qualitative : undefined
     };
 
     const cycle = await resolveCycle(req.body?.cycleId);
@@ -1078,7 +1071,7 @@ router.patch('/reviews/me/self-assessment', authenticate, async (req: Request, r
 
       const plain = current.toObject();
       const result = applySelfAssessment(
-        { objectives: plain.objectives, qualitative: plain.qualitative, competencyScores: plain.competencyScores },
+        { objectives: plain.objectives, qualitative: plain.qualitative },
         input
       );
       const status = computeReviewStatus(
@@ -1093,7 +1086,6 @@ router.patch('/reviews/me/self-assessment', authenticate, async (req: Request, r
           $set: {
             objectives: result.objectives,
             qualitative: result.qualitative,
-            competencyScores: result.competencyScores,
             updatedBy: who,
             status
           }

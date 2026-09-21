@@ -30,6 +30,8 @@ import {
   OBJECTIVE_ASSESSMENT_STATUSES,
   COMPETENCY_AXES,
   computeReviewScore,
+  computeObjectiveProgress,
+  computeAutoObjectiveStatus,
   computeGeneralAssessmentGlobalScore,
   validateObjectivesDefinition,
   suggestCompetencyAxes,
@@ -132,12 +134,6 @@ function buildEmptyReviewForMember(member: PerformanceTeamMember, cycleId: strin
       growthAreas: {},
       overallReview: {}
     },
-    competencyScores: {
-      technique: {},
-      impact: {},
-      collaboration: {},
-      leadership: {}
-    },
     generalSelfAssessment: { technique: [], impact: [], collaboration: [], leadership: [] },
     generalManagerAssessment: { technique: [], impact: [], collaboration: [], leadership: [] },
     status: 'dossier_manquant',
@@ -208,7 +204,6 @@ interface ManagerObjectiveDraft {
 interface ManagerDraft {
   objectives: Record<string, ManagerObjectiveDraft>;
   qualitative: Record<QualitativeKey, string>;
-  competencyScores: Record<CompetencyAxis, string>;
 }
 
 function buildManagerDraft(review: PerformanceReview): ManagerDraft {
@@ -217,7 +212,10 @@ function buildManagerDraft(review: PerformanceReview): ManagerDraft {
     objectives: Object.fromEntries(
       normalized.objectives.map((o) => [
         o.id,
-        { status: o.managerAssessment.status ?? '', comment: o.managerAssessment.comment ?? '' }
+        {
+          status: o.managerAssessment.status ?? computeAutoObjectiveStatus(computeObjectiveProgress(o)),
+          comment: o.managerAssessment.comment ?? ''
+        }
       ])
     ),
     qualitative: {
@@ -225,24 +223,6 @@ function buildManagerDraft(review: PerformanceReview): ManagerDraft {
       challenges: normalized.qualitative.challenges.manager ?? '',
       growthAreas: normalized.qualitative.growthAreas.manager ?? '',
       overallReview: normalized.qualitative.overallReview.manager ?? ''
-    },
-    competencyScores: {
-      technique:
-        normalized.competencyScores.technique.manager != null
-          ? String(normalized.competencyScores.technique.manager)
-          : '',
-      impact:
-        normalized.competencyScores.impact.manager != null
-          ? String(normalized.competencyScores.impact.manager)
-          : '',
-      collaboration:
-        normalized.competencyScores.collaboration.manager != null
-          ? String(normalized.competencyScores.collaboration.manager)
-          : '',
-      leadership:
-        normalized.competencyScores.leadership.manager != null
-          ? String(normalized.competencyScores.leadership.manager)
-          : ''
     }
   };
 }
@@ -582,12 +562,6 @@ export function TeamPerformancePage() {
     setManagerDraft((prev) => (prev ? { ...prev, qualitative: { ...prev.qualitative, [field]: value } } : prev));
   }
 
-  function updateManagerCompetency(axis: CompetencyAxis, value: string) {
-    setManagerDraft((prev) =>
-      prev ? { ...prev, competencyScores: { ...prev.competencyScores, [axis]: value } } : prev
-    );
-  }
-
   async function handleSaveManagerAssessment() {
     if (!detail || !managerDraft) return;
 
@@ -605,13 +579,7 @@ export function TeamPerformancePage() {
         challenges: managerDraft.qualitative.challenges.trim() || undefined,
         growthAreas: managerDraft.qualitative.growthAreas.trim() || undefined,
         overallReview: managerDraft.qualitative.overallReview.trim() || undefined
-      },
-      competencyScores: Object.fromEntries(
-        COMPETENCY_AXES.filter((axis) => managerDraft.competencyScores[axis].trim() !== '').map((axis) => [
-          axis,
-          Number(managerDraft.competencyScores[axis])
-        ])
-      )
+      }
     };
 
     setSavingManager(true);
@@ -1141,31 +1109,6 @@ export function TeamPerformancePage() {
                         )}
                       </div>
                     ))}
-                  </div>
-
-                  <div>
-                    <p className="text-sm font-medium text-surface-300 mb-2">Grille de compétences (1 à 5)</p>
-                    <div className="grid sm:grid-cols-4 gap-3">
-                      {COMPETENCY_AXES.map((axis) => (
-                        <div key={axis}>
-                          <label className="block text-xs text-surface-400 mb-1">{COMPETENCY_AXIS_LABELS[axis]}</label>
-                          <input
-                            type="number"
-                            min={1}
-                            max={5}
-                            className="input"
-                            value={managerDraft.competencyScores[axis]}
-                            disabled={isReadOnly}
-                            onChange={(e) => updateManagerCompetency(axis, e.target.value)}
-                          />
-                          {detail.competencyScores[axis].self != null && (
-                            <p className="mt-1 text-xs text-surface-500">
-                              Collaborateur : {detail.competencyScores[axis].self}
-                            </p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
                   </div>
 
                   <button

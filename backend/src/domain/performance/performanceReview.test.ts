@@ -7,15 +7,12 @@ import {
   applyManagerAssessment,
   applyObjectivesDefinition,
   applySelfAssessment,
-  computeCompetencyStatus,
   computeGeneralAssessmentAxisScore,
   computeGeneralAssessmentGlobalScore,
   computeGeneralAssessmentGlobalScoreOrNull,
   computeKeyResultProgressStatus,
-  computeManagerPriority,
   computeObjectiveProgress,
   computeReviewScore,
-  completeCompetencyScores,
   completeGeneralSelfAssessment,
   completeQualitative,
   computeReviewStatus,
@@ -30,7 +27,7 @@ import {
   validateObjectivesDefinition,
   weightsAreBalanced
 } from './performanceReview';
-import { IKeyResult, IObjective, IQualitative, ICompetencyScores, IGeneralAssessmentAxes, IReviewAuthor } from './entities/PerformanceReview';
+import { IKeyResult, IObjective, IQualitative, IGeneralAssessmentAxes, IReviewAuthor } from './entities/PerformanceReview';
 
 function makeKr(overrides: Partial<IKeyResult> = {}): IKeyResult {
   return {
@@ -336,46 +333,6 @@ describe('computeGeneralAssessmentGlobalScoreOrNull', () => {
   });
 });
 
-describe('computeCompetencyStatus', () => {
-  it('renvoie null pour un score null (rien d’évalué)', () => {
-    expect(computeCompetencyStatus(null)).toBeNull();
-  });
-
-  it('classe "performant" à partir de 4', () => {
-    expect(computeCompetencyStatus(4)).toBe('performant');
-    expect(computeCompetencyStatus(5)).toBe('performant');
-  });
-
-  it('classe "en_progression" entre 3 (inclus) et 4', () => {
-    expect(computeCompetencyStatus(3)).toBe('en_progression');
-    expect(computeCompetencyStatus(3.9)).toBe('en_progression');
-  });
-
-  it('classe "a_accompagner" en dessous de 3', () => {
-    expect(computeCompetencyStatus(2.99)).toBe('a_accompagner');
-    expect(computeCompetencyStatus(1)).toBe('a_accompagner');
-  });
-});
-
-describe('computeManagerPriority', () => {
-  it('renvoie null pour un score null (rien d’évalué)', () => {
-    expect(computeManagerPriority(null)).toBeNull();
-  });
-
-  it('déclenche "entretien_urgent" en dessous de 3', () => {
-    expect(computeManagerPriority(2.99)).toBe('entretien_urgent');
-  });
-
-  it('déclenche "plan_de_progression" à partir de 4', () => {
-    expect(computeManagerPriority(4)).toBe('plan_de_progression');
-  });
-
-  it('sinon "suivi_normal" (entre 3 inclus et 4 exclus)', () => {
-    expect(computeManagerPriority(3)).toBe('suivi_normal');
-    expect(computeManagerPriority(3.5)).toBe('suivi_normal');
-  });
-});
-
 describe('computeKeyResultProgressStatus', () => {
   it('"on_track" à partir de 80%', () => {
     expect(computeKeyResultProgressStatus(80)).toBe('on_track');
@@ -646,15 +603,6 @@ function baseQualitative(): IQualitative {
   return { successes: {}, challenges: {}, growthAreas: {}, overallReview: {} };
 }
 
-function baseCompetencyScores(): ICompetencyScores {
-  return {
-    technique: {},
-    impact: {},
-    collaboration: {},
-    leadership: {}
-  };
-}
-
 describe('applyManagerAssessment', () => {
   it("applique l'évaluation manager d'un objectif sans toucher au self", () => {
     const objectives: IObjective[] = [
@@ -669,7 +617,7 @@ describe('applyManagerAssessment', () => {
     ];
 
     const result = applyManagerAssessment(
-      { objectives, qualitative: baseQualitative(), competencyScores: baseCompetencyScores() },
+      { objectives, qualitative: baseQualitative() },
       { objectives: [{ id: 'obj-1', status: 'depasse', comment: 'Bravo' }] }
     );
 
@@ -682,7 +630,7 @@ describe('applyManagerAssessment', () => {
       { id: 'obj-1', title: 'X', weight: 1, krs: [], selfAssessment: {}, managerAssessment: {} }
     ];
     const result = applyManagerAssessment(
-      { objectives, qualitative: baseQualitative(), competencyScores: baseCompetencyScores() },
+      { objectives, qualitative: baseQualitative() },
       { objectives: [{ id: 'obj-inconnu', status: 'atteint' }] }
     );
     expect(result.objectives[0].managerAssessment).toEqual({});
@@ -697,7 +645,7 @@ describe('applyManagerAssessment', () => {
     };
 
     const result = applyManagerAssessment(
-      { objectives: [], qualitative, competencyScores: baseCompetencyScores() },
+      { objectives: [], qualitative },
       { qualitative: { successes: 'Manager : bonne collaboration' } }
     );
 
@@ -708,33 +656,10 @@ describe('applyManagerAssessment', () => {
     expect(result.qualitative.challenges).toEqual({});
   });
 
-  it('met à jour la grille de compétences manager par axe, sans toucher aux autres', () => {
-    const competencyScores: ICompetencyScores = {
-      technique: { self: 4 },
-      impact: {},
-      collaboration: {},
-      leadership: {}
-    };
-
-    const result = applyManagerAssessment(
-      { objectives: [], qualitative: baseQualitative(), competencyScores },
-      { competencyScores: { technique: 3, impact: 5 } }
-    );
-
-    expect(result.competencyScores.technique).toEqual({ self: 4, manager: 3 });
-    expect(result.competencyScores.impact).toEqual({ manager: 5 });
-    expect(result.competencyScores.collaboration).toEqual({});
-  });
-
   it('ne mute pas les objets reçus', () => {
     const qualitative = baseQualitative();
-    const competencyScores = baseCompetencyScores();
-    applyManagerAssessment(
-      { objectives: [], qualitative, competencyScores },
-      { qualitative: { successes: 'X' }, competencyScores: { technique: 5 } }
-    );
+    applyManagerAssessment({ objectives: [], qualitative }, { qualitative: { successes: 'X' } });
     expect(qualitative.successes).toEqual({});
-    expect(competencyScores.technique).toEqual({});
   });
 });
 
@@ -842,7 +767,7 @@ describe('applySelfAssessment', () => {
     ];
 
     const result = applySelfAssessment(
-      { objectives, qualitative: baseQualitative(), competencyScores: baseCompetencyScores() },
+      { objectives, qualitative: baseQualitative() },
       { objectives: [{ id: 'obj-1', status: 'depasse', comment: 'Je suis fier du résultat' }] }
     );
 
@@ -859,7 +784,7 @@ describe('applySelfAssessment', () => {
     };
 
     const result = applySelfAssessment(
-      { objectives: [], qualitative, competencyScores: baseCompetencyScores() },
+      { objectives: [], qualitative },
       { qualitative: { successes: 'Auto : livraison à temps' } }
     );
 
@@ -869,42 +794,20 @@ describe('applySelfAssessment', () => {
     });
   });
 
-  it('met à jour la grille de compétences self par axe, sans toucher au manager', () => {
-    const competencyScores: ICompetencyScores = {
-      technique: { manager: 3 },
-      impact: {},
-      collaboration: {},
-      leadership: {}
-    };
-
-    const result = applySelfAssessment(
-      { objectives: [], qualitative: baseQualitative(), competencyScores },
-      { competencyScores: { technique: 4 } }
-    );
-
-    expect(result.competencyScores.technique).toEqual({ manager: 3, self: 4 });
-  });
-
   it('ne mute pas les objets reçus', () => {
     const qualitative = baseQualitative();
-    applySelfAssessment({ objectives: [], qualitative, competencyScores: baseCompetencyScores() }, { qualitative: { successes: 'X' } });
+    applySelfAssessment({ objectives: [], qualitative }, { qualitative: { successes: 'X' } });
     expect(qualitative.successes).toEqual({});
   });
 });
 
-describe('completeQualitative / completeCompetencyScores', () => {
+describe('completeQualitative', () => {
   it('remplit les sous-clés absentes d’un payload Mongoose vide', () => {
     expect(completeQualitative({})).toEqual({
       successes: {},
       challenges: {},
       growthAreas: {},
       overallReview: {}
-    });
-    expect(completeCompetencyScores({})).toEqual({
-      technique: {},
-      impact: {},
-      collaboration: {},
-      leadership: {}
     });
   });
 });

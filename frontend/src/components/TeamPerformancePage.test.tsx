@@ -69,7 +69,6 @@ function makeReview(overrides: Partial<PerformanceReview> = {}): PerformanceRevi
       }
     ],
     qualitative: { successes: {}, challenges: {}, growthAreas: {}, overallReview: {} },
-    competencyScores: { technique: {}, impact: {}, collaboration: {}, leadership: {} },
     generalSelfAssessment: { technique: [], impact: [], collaboration: [], leadership: [] },
     generalManagerAssessment: { technique: [], impact: [], collaboration: [], leadership: [] },
     status: 'en_cours',
@@ -371,6 +370,53 @@ describe('TeamPerformancePage', () => {
     });
   });
 
+  it('pré-remplit le statut de l’objectif à partir de son avancement côté manager, tout en restant modifiable', async () => {
+    seedUser({ performanceGlobalAccess: true });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [makeReview()] });
+    mockGetReview.mockResolvedValue({ success: true, review: makeReview() });
+
+    render(<TeamPerformancePage />);
+    await screen.findByText('Alice Martin');
+    fireEvent.click(screen.getByRole('button', { name: 'Ouvrir' }));
+    const objectiveEvaluationCard = (await screen.findByText('Évaluation manager', { selector: 'h3' })).closest(
+      '.card-glass'
+    ) as HTMLElement;
+
+    // Le KR de l'objectif est à 50% d'avancement → bande 50-95% → statut auto "partiellement atteint".
+    const select = within(objectiveEvaluationCard).getByRole('combobox') as HTMLSelectElement;
+    expect(select.value).toBe('partiellement_atteint');
+
+    fireEvent.change(select, { target: { value: 'non_atteint' } });
+    expect(select.value).toBe('non_atteint');
+  });
+
+  it("envoie le statut auto-calculé côté manager si le select n'a pas été modifié manuellement", async () => {
+    seedUser({ performanceGlobalAccess: true });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [makeReview()] });
+    mockGetReview.mockResolvedValue({ success: true, review: makeReview() });
+    mockUpdateManagerAssessment.mockResolvedValue({ success: true, review: makeReview() });
+
+    render(<TeamPerformancePage />);
+    await screen.findByText('Alice Martin');
+    fireEvent.click(screen.getByRole('button', { name: 'Ouvrir' }));
+    await screen.findByText('Évaluation manager', { selector: 'h3' });
+
+    fireEvent.click(screen.getByRole('button', { name: /Enregistrer l'évaluation/i }));
+
+    await waitFor(() => {
+      expect(mockUpdateManagerAssessment).toHaveBeenCalledWith(
+        'user-1',
+        expect.objectContaining({
+          objectives: [{ id: 'obj-1', status: 'partiellement_atteint', comment: undefined }]
+        })
+      );
+    });
+  });
+
   const REFERENTIAL_PROFILE = {
     roleProfile: 'dev_back' as const,
     label: 'Développeur Back',
@@ -478,7 +524,7 @@ describe('TeamPerformancePage', () => {
     expect(screen.getAllByText('Leadership').length).toBeGreaterThan(0);
   });
 
-  it('ne plante pas si qualitative / competencyScores arrivent vides depuis l’API (détail manager)', async () => {
+  it('ne plante pas si qualitative arrive vide depuis l’API (détail manager)', async () => {
     seedUser({ performanceGlobalAccess: true });
     mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
     mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
@@ -486,8 +532,7 @@ describe('TeamPerformancePage', () => {
     mockGetReview.mockResolvedValue({
       success: true,
       review: makeReview({
-        qualitative: {} as PerformanceReview['qualitative'],
-        competencyScores: {} as PerformanceReview['competencyScores']
+        qualitative: {} as PerformanceReview['qualitative']
       })
     });
 

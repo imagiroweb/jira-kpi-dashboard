@@ -17,12 +17,11 @@ import {
   PerformanceCycle,
   Objective,
   KeyResult,
-  CompetencyAxis,
   ObjectiveAssessmentStatus,
   AssessmentInput,
   OBJECTIVE_ASSESSMENT_STATUSES,
-  COMPETENCY_AXES,
   computeObjectiveProgress,
+  computeAutoObjectiveStatus,
   normalizePerformanceReview,
   OBJECTIVE_STATUS_LABELS,
   REVIEW_STATUS_LABELS,
@@ -56,7 +55,6 @@ interface SelfObjectiveDraft {
 interface SelfDraft {
   objectives: Record<string, SelfObjectiveDraft>;
   qualitative: Record<'successes' | 'challenges' | 'growthAreas' | 'overallReview', string>;
-  competencyScores: Record<CompetencyAxis, string>;
 }
 
 function buildSelfDraft(review: PerformanceReview): SelfDraft {
@@ -65,7 +63,10 @@ function buildSelfDraft(review: PerformanceReview): SelfDraft {
     objectives: Object.fromEntries(
       normalized.objectives.map((o) => [
         o.id,
-        { status: o.selfAssessment.status ?? '', comment: o.selfAssessment.comment ?? '' }
+        {
+          status: o.selfAssessment.status ?? computeAutoObjectiveStatus(computeObjectiveProgress(o)),
+          comment: o.selfAssessment.comment ?? ''
+        }
       ])
     ),
     qualitative: {
@@ -73,22 +74,6 @@ function buildSelfDraft(review: PerformanceReview): SelfDraft {
       challenges: normalized.qualitative.challenges.self ?? '',
       growthAreas: normalized.qualitative.growthAreas.self ?? '',
       overallReview: normalized.qualitative.overallReview.self ?? ''
-    },
-    competencyScores: {
-      technique:
-        normalized.competencyScores.technique.self != null
-          ? String(normalized.competencyScores.technique.self)
-          : '',
-      impact:
-        normalized.competencyScores.impact.self != null ? String(normalized.competencyScores.impact.self) : '',
-      collaboration:
-        normalized.competencyScores.collaboration.self != null
-          ? String(normalized.competencyScores.collaboration.self)
-          : '',
-      leadership:
-        normalized.competencyScores.leadership.self != null
-          ? String(normalized.competencyScores.leadership.self)
-          : ''
     }
   };
 }
@@ -217,12 +202,6 @@ export function MyPerformancePage() {
     setSelfDraft((prev) => (prev ? { ...prev, qualitative: { ...prev.qualitative, [field]: value } } : prev));
   }
 
-  function updateSelfCompetency(axis: CompetencyAxis, value: string) {
-    setSelfDraft((prev) =>
-      prev ? { ...prev, competencyScores: { ...prev.competencyScores, [axis]: value } } : prev
-    );
-  }
-
   async function handleSaveSelfAssessment() {
     if (!review || !selfDraft) return;
 
@@ -240,13 +219,7 @@ export function MyPerformancePage() {
         challenges: selfDraft.qualitative.challenges.trim() || undefined,
         growthAreas: selfDraft.qualitative.growthAreas.trim() || undefined,
         overallReview: selfDraft.qualitative.overallReview.trim() || undefined
-      },
-      competencyScores: Object.fromEntries(
-        COMPETENCY_AXES.filter((axis) => selfDraft.competencyScores[axis].trim() !== '').map((axis) => [
-          axis,
-          Number(selfDraft.competencyScores[axis])
-        ])
-      )
+      }
     };
 
     setSavingSelf(true);
@@ -415,31 +388,6 @@ export function MyPerformancePage() {
                         )}
                       </div>
                     ))}
-                  </div>
-
-                  <div>
-                    <p className="text-sm font-medium text-surface-300 mb-2">Grille de compétences (1 à 5)</p>
-                    <div className="grid sm:grid-cols-4 gap-3">
-                      {COMPETENCY_AXES.map((axis) => (
-                        <div key={axis}>
-                          <label className="block text-xs text-surface-400 mb-1">{COMPETENCY_AXIS_LABELS[axis]}</label>
-                          <input
-                            type="number"
-                            min={1}
-                            max={5}
-                            className="input"
-                            value={selfDraft.competencyScores[axis]}
-                            disabled={isReadOnly}
-                            onChange={(e) => updateSelfCompetency(axis, e.target.value)}
-                          />
-                          {review.competencyScores[axis].manager != null && (
-                            <p className="mt-1 text-xs text-surface-500">
-                              Manager : {review.competencyScores[axis].manager}
-                            </p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
                   </div>
 
                   <button

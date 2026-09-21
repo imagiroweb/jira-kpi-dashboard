@@ -48,17 +48,13 @@ describe('PerformanceReview', () => {
     expect(review.toObject().objectives).toEqual([]);
   });
 
-  it('déclare les sous-champs qualitative et competencyScores sur le schéma', () => {
+  it('déclare les sous-champs qualitative sur le schéma', () => {
     const schema = PerformanceReview.schema;
     expect(schema.path('qualitative.successes.self')).toBeDefined();
     expect(schema.path('qualitative.successes.manager')).toBeDefined();
     expect(schema.path('qualitative.challenges.self')).toBeDefined();
     expect(schema.path('qualitative.growthAreas.self')).toBeDefined();
     expect(schema.path('qualitative.overallReview.self')).toBeDefined();
-    COMPETENCY_AXES.forEach((axis) => {
-      expect(schema.path(`competencyScores.${axis}.self`)).toBeDefined();
-      expect(schema.path(`competencyScores.${axis}.manager`)).toBeDefined();
-    });
   });
 
   it('accepte un objectif avec KR et historique de progression', () => {

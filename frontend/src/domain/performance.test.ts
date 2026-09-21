@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   GENERAL_ASSESSMENT_REFERENTIAL,
+  computeAutoObjectiveStatus,
   normalizePerformanceReview,
   suggestCompetencyAxes,
   summarizeObjectiveStatuses,
@@ -35,7 +36,6 @@ function incompleteReview(): PerformanceReview {
       }
     ],
     qualitative: {} as PerformanceReview['qualitative'],
-    competencyScores: {} as PerformanceReview['competencyScores'],
     generalSelfAssessment: undefined as unknown as PerformanceReview['generalSelfAssessment'],
     generalManagerAssessment: undefined as unknown as PerformanceReview['generalManagerAssessment'],
     status: 'en_cours',
@@ -46,15 +46,13 @@ function incompleteReview(): PerformanceReview {
 }
 
 describe('normalizePerformanceReview', () => {
-  it('remplit qualitative / competencyScores / assessments manquants (payload Mongoose incomplet)', () => {
+  it('remplit qualitative / assessments manquants (payload Mongoose incomplet)', () => {
     const normalized = normalizePerformanceReview(incompleteReview());
 
     expect(normalized.qualitative.successes.self).toBeUndefined();
     expect(normalized.qualitative.challenges).toEqual({});
     expect(normalized.qualitative.growthAreas).toEqual({});
     expect(normalized.qualitative.overallReview).toEqual({});
-    expect(normalized.competencyScores.technique).toEqual({});
-    expect(normalized.competencyScores.leadership).toEqual({});
     expect(normalized.objectives[0].selfAssessment).toEqual({});
     expect(normalized.objectives[0].managerAssessment).toEqual({});
     expect(normalized.generalSelfAssessment).toEqual({
@@ -69,6 +67,27 @@ describe('normalizePerformanceReview', () => {
       collaboration: [],
       leadership: []
     });
+  });
+});
+
+describe('computeAutoObjectiveStatus', () => {
+  it('retourne "non_atteint" en dessous de 50%', () => {
+    expect(computeAutoObjectiveStatus(0)).toBe('non_atteint');
+    expect(computeAutoObjectiveStatus(49)).toBe('non_atteint');
+  });
+
+  it('retourne "partiellement_atteint" entre 50% (inclus) et 95% (exclu)', () => {
+    expect(computeAutoObjectiveStatus(50)).toBe('partiellement_atteint');
+    expect(computeAutoObjectiveStatus(94)).toBe('partiellement_atteint');
+  });
+
+  it('retourne "atteint" à partir de 95%', () => {
+    expect(computeAutoObjectiveStatus(95)).toBe('atteint');
+    expect(computeAutoObjectiveStatus(100)).toBe('atteint');
+  });
+
+  it('ne retourne jamais "depasse" (statut exclusivement manuel)', () => {
+    expect(computeAutoObjectiveStatus(100)).not.toBe('depasse');
   });
 });
 

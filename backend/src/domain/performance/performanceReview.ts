@@ -10,7 +10,6 @@ import {
   IObjectiveAssessment,
   IProgressUpdate,
   IQualitative,
-  ICompetencyScores,
   IGeneralAssessmentSubCriterion,
   IGeneralAssessmentAxes,
   IReviewAuthor,
@@ -318,13 +317,11 @@ export interface QualitativeAssessmentInput {
 export interface AssessmentInput {
   objectives?: ObjectiveAssessmentInput[];
   qualitative?: QualitativeAssessmentInput;
-  competencyScores?: Partial<Record<CompetencyAxis, number>>;
 }
 
 export interface AssessmentTarget {
   objectives: IObjective[];
   qualitative: IQualitative;
-  competencyScores: ICompetencyScores;
 }
 
 /** Alias conservés pour compatibilité — l'évaluation manager est un cas particulier de `AssessmentInput`/`AssessmentTarget`. */
@@ -334,11 +331,10 @@ export type ManagerAssessmentInput = AssessmentInput;
 export type ManagerAssessmentTarget = AssessmentTarget;
 
 /**
- * Applique une évaluation (`side`: "self" ou "manager") — par objectif,
- * bilan qualitatif, grille de compétences — sans jamais toucher au contenu
- * de l'autre côté ; pure fonction, ne mute rien. Un objectif dont l'id ne
- * correspond à aucun objectif existant est ignoré (l'évaluation porte sur
- * des objectifs déjà définis).
+ * Applique une évaluation (`side`: "self" ou "manager") — par objectif et bilan qualitatif —
+ * sans jamais toucher au contenu de l'autre côté ; pure fonction, ne mute rien. Un objectif dont
+ * l'id ne correspond à aucun objectif existant est ignoré (l'évaluation porte sur des objectifs
+ * déjà définis).
  */
 function applyAssessment(
   target: AssessmentTarget,
@@ -370,31 +366,20 @@ function applyAssessment(
     overallReview: mergeQualitativeEntry(target.qualitative.overallReview, qualitativeInput.overallReview)
   };
 
-  const competencyScoresInput = input.competencyScores ?? {};
-  const competencyScores = { ...target.competencyScores };
-  for (const axis of COMPETENCY_AXES) {
-    const score = competencyScoresInput[axis];
-    if (score !== undefined) {
-      competencyScores[axis] = { ...competencyScores[axis], [side]: score };
-    }
-  }
-
-  return { objectives, qualitative, competencyScores };
+  return { objectives, qualitative };
 }
 
 /**
- * Applique l'évaluation manager (par objectif, bilan qualitatif "manager",
- * grille de compétences "manager") sans jamais toucher au contenu "self"
- * (auto-évaluation du collaborateur).
+ * Applique l'évaluation manager (par objectif, bilan qualitatif "manager") sans jamais toucher
+ * au contenu "self" (auto-évaluation du collaborateur).
  */
 export function applyManagerAssessment(target: AssessmentTarget, input: AssessmentInput): AssessmentTarget {
   return applyAssessment(target, input, 'manager');
 }
 
 /**
- * Applique l'auto-évaluation du collaborateur (par objectif, bilan
- * qualitatif "self", grille de compétences "self") sans jamais toucher au
- * contenu "manager".
+ * Applique l'auto-évaluation du collaborateur (par objectif, bilan qualitatif "self") sans
+ * jamais toucher au contenu "manager".
  */
 export function applySelfAssessment(target: AssessmentTarget, input: AssessmentInput): AssessmentTarget {
   return applyAssessment(target, input, 'self');
@@ -444,15 +429,6 @@ export function completeQualitative(raw?: Partial<IQualitative> | null): IQualit
     challenges: raw?.challenges ?? {},
     growthAreas: raw?.growthAreas ?? {},
     overallReview: raw?.overallReview ?? {}
-  };
-}
-
-export function completeCompetencyScores(raw?: Partial<ICompetencyScores> | null): ICompetencyScores {
-  return {
-    technique: raw?.technique ?? {},
-    impact: raw?.impact ?? {},
-    collaboration: raw?.collaboration ?? {},
-    leadership: raw?.leadership ?? {}
   };
 }
 
@@ -585,37 +561,6 @@ export function hasAnyGeneralAssessmentScore(axes: IGeneralAssessmentAxes): bool
  */
 export function computeGeneralAssessmentGlobalScoreOrNull(axes: IGeneralAssessmentAxes): number | null {
   return hasAnyGeneralAssessmentScore(axes) ? computeGeneralAssessmentGlobalScore(axes) : null;
-}
-
-export const COMPETENCY_STATUSES = ['performant', 'en_progression', 'a_accompagner'] as const;
-export type CompetencyStatus = (typeof COMPETENCY_STATUSES)[number];
-
-/**
- * Statut dérivé du score global (0-5) d'une grille de compétences — reprend telle quelle la
- * formule `Collaborateurs!K` de `dashboard-all.xlsx` : `IF(J>=4,"Performant",IF(J>=3,"En
- * progression","À accompagner"))`. `null` en entrée (rien d'évalué) donne `null` en sortie.
- */
-export function computeCompetencyStatus(score: number | null): CompetencyStatus | null {
-  if (score == null) return null;
-  if (score >= 4) return 'performant';
-  if (score >= 3) return 'en_progression';
-  return 'a_accompagner';
-}
-
-export const MANAGER_PRIORITIES = ['entretien_urgent', 'plan_de_progression', 'suivi_normal'] as const;
-export type ManagerPriority = (typeof MANAGER_PRIORITIES)[number];
-
-/**
- * Priorité manager dérivée du score global (0-5) d'une grille de compétences — reprend la
- * formule de la colonne "Priorité manager" des onglets `Tableau de bord ...` de
- * `dashboard-all.xlsx` : `IF(J<3,"Entretien urgent",IF(J>=4,"Plan de progression","Suivi
- * normal"))`. `null` en entrée (rien d'évalué) donne `null` en sortie.
- */
-export function computeManagerPriority(score: number | null): ManagerPriority | null {
-  if (score == null) return null;
-  if (score < 3) return 'entretien_urgent';
-  if (score >= 4) return 'plan_de_progression';
-  return 'suivi_normal';
 }
 
 export const KEY_RESULT_PROGRESS_STATUSES = ['on_track', 'in_progress', 'at_risk'] as const;

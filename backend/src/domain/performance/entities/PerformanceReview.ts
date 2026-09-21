@@ -96,17 +96,10 @@ export interface IQualitative {
   overallReview: IQualitativeEntry;
 }
 
-export interface ICompetencyScore {
-  self?: number;
-  manager?: number;
-}
-
-export type ICompetencyScores = Record<CompetencyAxis, ICompetencyScore>;
-
 /**
  * Un sous-critère noté (1-5) de l'auto-évaluation générale — distincte du bilan de cycle
- * (`qualitative` / `competencyScores` ci-dessus, remplis à chaque cycle par le collaborateur et
- * son manager). Reprend la grille à 4 axes × 3 sous-critères des fichiers
+ * (`qualitative` ci-dessus, rempli à chaque cycle par le collaborateur et son manager). Reprend
+ * la grille à 4 axes × 3 sous-critères des fichiers
  * `evaluations-individuelles/*.xlsx` : une évaluation plus large des compétences, distincte du
  * bilan des objectifs du cycle en cours (voir `applyGeneralSelfAssessment` dans
  * `performanceReview.ts`).
@@ -143,7 +136,6 @@ export interface IPerformanceReview extends Document {
   teamNameSnapshot?: string;
   objectives: IObjective[];
   qualitative: IQualitative;
-  competencyScores: ICompetencyScores;
   /** Auto-évaluation générale (4 axes × 3 sous-critères, score global calculé) — voir `IGeneralSelfAssessment`. */
   generalSelfAssessment: IGeneralSelfAssessment;
   /** Évaluation manager sur la même grille, pour rapprochement avec l'auto-évaluation (repérer les désaccords sous-critère par sous-critère). */
@@ -235,24 +227,6 @@ const QualitativeSchema = new Schema<IQualitative>(
   { _id: false }
 );
 
-const CompetencyScoreSchema = new Schema<ICompetencyScore>(
-  {
-    self: { type: Number, min: 1, max: 5 },
-    manager: { type: Number, min: 1, max: 5 }
-  },
-  { _id: false }
-);
-
-const CompetencyScoresSchema = new Schema<ICompetencyScores>(
-  {
-    technique: { type: CompetencyScoreSchema, default: () => ({}) },
-    impact: { type: CompetencyScoreSchema, default: () => ({}) },
-    collaboration: { type: CompetencyScoreSchema, default: () => ({}) },
-    leadership: { type: CompetencyScoreSchema, default: () => ({}) }
-  },
-  { _id: false }
-);
-
 const GeneralAssessmentSubCriterionSchema = new Schema<IGeneralAssessmentSubCriterion>(
   {
     label: { type: String, required: true, trim: true },
@@ -284,10 +258,6 @@ const PerformanceReviewSchema = new Schema<IPerformanceReview>(
     qualitative: {
       type: QualitativeSchema,
       default: () => ({ successes: {}, challenges: {}, growthAreas: {}, overallReview: {} })
-    },
-    competencyScores: {
-      type: CompetencyScoresSchema,
-      default: () => ({ technique: {}, impact: {}, collaboration: {}, leadership: {} })
     },
     generalSelfAssessment: {
       type: GeneralAssessmentGridSchema,

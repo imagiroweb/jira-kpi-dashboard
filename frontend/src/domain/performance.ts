@@ -90,18 +90,11 @@ export interface Qualitative {
   overallReview: QualitativeEntry;
 }
 
-export interface CompetencyScore {
-  self?: number;
-  manager?: number;
-}
-
-export type CompetencyScores = Record<CompetencyAxis, CompetencyScore>;
-
 /**
  * Un sous-critère noté (1-5) de l'auto-évaluation générale — distincte du "Bilan du cycle"
- * (`qualitative` / `competencyScores` ci-dessus, remplis à chaque cycle par le collaborateur et
- * son manager). Reprend la grille à 4 axes × 3 sous-critères des fichiers Excel importés (voir
- * `IGeneralAssessmentAxes` côté backend) ; pas encore éditable depuis l'UI, alimentée par l'import.
+ * (`qualitative` ci-dessus, rempli à chaque cycle par le collaborateur et son manager). Reprend
+ * la grille à 4 axes × 3 sous-critères des fichiers Excel importés (voir `IGeneralAssessmentAxes`
+ * côté backend) ; pas encore éditable depuis l'UI, alimentée par l'import.
  */
 export interface GeneralAssessmentSubCriterion {
   label: string;
@@ -192,7 +185,6 @@ export interface PerformanceReview {
   teamNameSnapshot?: string;
   objectives: Objective[];
   qualitative: Qualitative;
-  competencyScores: CompetencyScores;
   /** Auto-évaluation générale (4 axes × sous-critères) — voir `GeneralAssessmentAxes`. */
   generalSelfAssessment: GeneralAssessmentAxes;
   /** Évaluation manager sur la même grille, pour rapprochement avec l'auto-évaluation. */
@@ -257,7 +249,6 @@ export interface QualitativeAssessmentInput {
 export interface AssessmentInput {
   objectives?: ObjectiveAssessmentInput[];
   qualitative?: QualitativeAssessmentInput;
-  competencyScores?: Partial<Record<CompetencyAxis, number>>;
 }
 
 /** Payload de `POST /reviews/me/objectives/:objectiveId/krs/:krId/progress`. */
@@ -334,6 +325,18 @@ export function computeObjectiveProgress(objective: Pick<Objective, 'krs'>): num
   if (totalWeight <= 0) return 0;
   const weightedSum = objective.krs.reduce((sum, kr) => sum + kr.weight * kr.progress, 0);
   return weightedSum / totalWeight;
+}
+
+/**
+ * Statut d'objectif suggéré à partir de son avancement (0-100), pour pré-remplir le select de
+ * statut du bilan du cycle avant toute saisie manuelle : 0-50 % → non atteint, 50-95 % →
+ * partiellement atteint, 95-100 % → atteint. "Dépassé" ne peut pas être déduit d'un avancement
+ * plafonné à 100 % et reste un choix exclusivement manuel : cette fonction ne le retourne jamais.
+ */
+export function computeAutoObjectiveStatus(progress: number): ObjectiveAssessmentStatus {
+  if (progress < 50) return 'non_atteint';
+  if (progress < 95) return 'partiellement_atteint';
+  return 'atteint';
 }
 
 /** Score global d'une fiche (0-100) : moyenne pondérée de l'avancement des objectifs. */
@@ -600,10 +603,6 @@ export function emptyQualitative(): Qualitative {
   return { successes: {}, challenges: {}, growthAreas: {}, overallReview: {} };
 }
 
-export function emptyCompetencyScores(): CompetencyScores {
-  return { technique: {}, impact: {}, collaboration: {}, leadership: {} };
-}
-
 export function normalizeQualitative(raw?: Partial<Qualitative> | null): Qualitative {
   const base = emptyQualitative();
   if (!raw) return base;
@@ -612,17 +611,6 @@ export function normalizeQualitative(raw?: Partial<Qualitative> | null): Qualita
     challenges: raw.challenges ?? {},
     growthAreas: raw.growthAreas ?? {},
     overallReview: raw.overallReview ?? {}
-  };
-}
-
-export function normalizeCompetencyScores(raw?: Partial<CompetencyScores> | null): CompetencyScores {
-  const base = emptyCompetencyScores();
-  if (!raw) return base;
-  return {
-    technique: raw.technique ?? {},
-    impact: raw.impact ?? {},
-    collaboration: raw.collaboration ?? {},
-    leadership: raw.leadership ?? {}
   };
 }
 
@@ -651,7 +639,6 @@ export function normalizePerformanceReview(review: PerformanceReview): Performan
       managerAssessment: objective.managerAssessment ?? {}
     })),
     qualitative: normalizeQualitative(review.qualitative),
-    competencyScores: normalizeCompetencyScores(review.competencyScores),
     generalSelfAssessment: normalizeGeneralAssessmentAxes(review.generalSelfAssessment),
     generalManagerAssessment: normalizeGeneralAssessmentAxes(review.generalManagerAssessment)
   };

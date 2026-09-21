@@ -67,12 +67,6 @@ function makeReview(overrides: Partial<PerformanceReview> = {}): PerformanceRevi
       growthAreas: {},
       overallReview: {}
     },
-    competencyScores: {
-      technique: {},
-      impact: {},
-      collaboration: {},
-      leadership: {}
-    },
     generalSelfAssessment: { technique: [], impact: [], collaboration: [], leadership: [] },
     generalManagerAssessment: { technique: [], impact: [], collaboration: [], leadership: [] },
     status: 'en_cours',
@@ -137,12 +131,11 @@ describe('MyPerformancePage', () => {
     expect(within(objectiveCard).queryByText('Collaboration')).not.toBeInTheDocument();
   });
 
-  it('ne plante pas si qualitative / competencyScores arrivent vides depuis l’API', async () => {
+  it('ne plante pas si qualitative arrive vide depuis l’API', async () => {
     mockGetMyReview.mockResolvedValue({
       success: true,
       review: makeReview({
-        qualitative: {} as PerformanceReview['qualitative'],
-        competencyScores: {} as PerformanceReview['competencyScores']
+        qualitative: {} as PerformanceReview['qualitative']
       })
     });
     mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
@@ -235,6 +228,40 @@ describe('MyPerformancePage', () => {
       expect(mockUpdateSelfAssessment).toHaveBeenCalledWith(
         expect.objectContaining({
           objectives: [{ id: 'obj-1', status: 'atteint', comment: undefined }]
+        })
+      );
+    });
+  });
+
+  it('pré-remplit le statut de l’objectif à partir de son avancement, tout en restant modifiable', async () => {
+    mockGetMyReview.mockResolvedValue({ success: true, review: makeReview() });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+
+    render(<MyPerformancePage />);
+    await screen.findByText('Bilan du cycle');
+
+    // Le KR de l'objectif est à 40% d'avancement → bande 0-50% → statut auto "non atteint".
+    const select = screen.getByRole('combobox') as HTMLSelectElement;
+    expect(select.value).toBe('non_atteint');
+
+    fireEvent.change(select, { target: { value: 'depasse' } });
+    expect(select.value).toBe('depasse');
+  });
+
+  it("envoie le statut auto-calculé si le select n'a pas été modifié manuellement", async () => {
+    mockGetMyReview.mockResolvedValue({ success: true, review: makeReview() });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockUpdateSelfAssessment.mockResolvedValue({ success: true, review: makeReview() });
+
+    render(<MyPerformancePage />);
+    await screen.findByText('Bilan du cycle');
+
+    fireEvent.click(screen.getByRole('button', { name: /Enregistrer mon auto-évaluation/i }));
+
+    await waitFor(() => {
+      expect(mockUpdateSelfAssessment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          objectives: [{ id: 'obj-1', status: 'non_atteint', comment: undefined }]
         })
       );
     });
