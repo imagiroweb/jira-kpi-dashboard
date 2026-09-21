@@ -150,6 +150,39 @@ describe('TeamPerformancePage', () => {
     expect(screen.getByRole('option', { name: 'Cook' })).toBeInTheDocument();
   });
 
+  it("affiche le score d'auto-évaluation global sur 5 dans la liste de suivi", async () => {
+    seedUser({ performanceGlobalAccess: true, leadTeamIds: [] });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    mockListReviews.mockResolvedValue({
+      success: true,
+      reviews: [
+        makeReview({
+          generalSelfAssessment: {
+            technique: [
+              { label: 'Qualité du code & revues', score: 5 },
+              { label: 'Autonomie & résolution de bugs', score: 5 },
+              { label: 'Conception & architecture', score: 5 }
+            ],
+            impact: [
+              { label: 'Livraison (delivery)', score: 4 },
+              { label: 'Contribution aux OKR', score: 4 },
+              { label: "Périmètre d'influence", score: 4 }
+            ],
+            collaboration: [],
+            leadership: []
+          }
+        })
+      ]
+    });
+
+    render(<TeamPerformancePage />);
+
+    expect(await screen.findByRole('columnheader', { name: 'Score auto-évaluation' })).toBeInTheDocument();
+    const row = screen.getByText('Alice Martin').closest('tr');
+    expect(row).toHaveTextContent('4.5 / 5');
+  });
+
   it('limite le filtre équipe aux équipes dirigées pour un lead sans accès global', async () => {
     seedUser({ performanceGlobalAccess: false, leadTeamIds: ['team-1'] });
     mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });

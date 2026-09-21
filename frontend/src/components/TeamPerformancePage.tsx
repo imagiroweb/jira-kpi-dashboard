@@ -28,6 +28,7 @@ import {
   OBJECTIVE_ASSESSMENT_STATUSES,
   COMPETENCY_AXES,
   computeReviewScore,
+  computeGeneralAssessmentGlobalScore,
   validateObjectivesDefinition,
   suggestCompetencyAxes,
   OBJECTIVE_STATUS_LABELS,
@@ -54,6 +55,12 @@ function reviewUserLabel(review: PerformanceReview): string {
   const user = review.user as PerformanceReviewUserRef;
   const name = `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim();
   return name || user.email || user._id;
+}
+
+function formatSelfAssessmentScore(axes: PerformanceReview['generalSelfAssessment']): string {
+  const score = computeGeneralAssessmentGlobalScore(axes);
+  if (score <= 0) return '—';
+  return `${score.toFixed(1)} / 5`;
 }
 
 function memberLabel(member: PerformanceTeamMember): string {
@@ -651,6 +658,7 @@ export function TeamPerformancePage() {
                     <th className="p-3 font-medium">Équipe</th>
                     <th className="p-3 font-medium">Statut</th>
                     <th className="p-3 font-medium">Score</th>
+                    <th className="p-3 font-medium">Score auto-évaluation</th>
                     <th className="p-3" />
                   </tr>
                 </thead>
@@ -665,6 +673,9 @@ export function TeamPerformancePage() {
                         </span>
                       </td>
                       <td className="p-3 text-surface-300">{Math.round(computeReviewScore(review.objectives))}%</td>
+                      <td className="p-3 text-surface-300">
+                        {formatSelfAssessmentScore(review.generalSelfAssessment)}
+                      </td>
                       <td className="p-3 text-right">
                         <button
                           type="button"
@@ -685,6 +696,7 @@ export function TeamPerformancePage() {
                           {REVIEW_STATUS_LABELS.dossier_manquant}
                         </span>
                       </td>
+                      <td className="p-3 text-surface-300">—</td>
                       <td className="p-3 text-surface-300">—</td>
                       <td className="p-3 text-right">
                         <button
