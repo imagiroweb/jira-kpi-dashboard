@@ -455,19 +455,37 @@ export interface GeneralAssessmentSubCriterionInput {
  * pas de notion self/manager ici (l'auto-évaluation générale n'a qu'un seul auteur, le
  * collaborateur, même quand c'est un lead/CTO qui saisit ou importe pour son compte).
  */
-export type GeneralSelfAssessmentInput = Partial<Record<CompetencyAxis, GeneralAssessmentSubCriterionInput[]>>;
+export type GeneralAssessmentAxesInput = Partial<Record<CompetencyAxis, GeneralAssessmentSubCriterionInput[]>>;
+/** Alias conservé pour compatibilité : ce type ne porte pas de notion self/manager, voir `GeneralAssessmentAxesInput`. */
+export type GeneralSelfAssessmentInput = GeneralAssessmentAxesInput;
 
-export interface GeneralSelfAssessmentValidation {
+/**
+ * Référentiel des 12 sous-critères (4 axes × 3), identiques quel que soit le rôle du
+ * collaborateur — structure constatée sur les fichiers réels `evaluations-individuelles/*.xlsx`
+ * (contrairement à la grille "Grille évaluation" de `dashboard-all.xlsx`, qui variait la
+ * composante technique par rôle Dev/QA/DBA). Sert de trame fixe au formulaire de notation
+ * manager, pour que chaque sous-critère self soit comparable au même sous-critère manager.
+ */
+export const GENERAL_ASSESSMENT_REFERENTIAL: Record<CompetencyAxis, string[]> = {
+  technique: ['Qualité du code & revues', 'Autonomie & résolution de bugs', 'Conception & architecture'],
+  impact: ['Livraison (delivery)', 'Contribution aux OKR', "Périmètre d'influence"],
+  collaboration: ['Communication & transparence', 'Partage & documentation', "Esprit d'équipe & rituels"],
+  leadership: ['Initiative & autonomie', 'Mentorat & développement des autres', 'Vision & influence']
+};
+
+export interface GeneralAssessmentAxesValidation {
   valid: boolean;
   errors: string[];
 }
+/** Alias conservé pour compatibilité, voir `GeneralAssessmentAxesValidation`. */
+export type GeneralSelfAssessmentValidation = GeneralAssessmentAxesValidation;
 
 /**
  * Valide une (re)définition de l'auto-évaluation générale, axe par axe : uniquement les 4 axes
  * connus (voir `COMPETENCY_AXES`), un libellé non vide et une note 1-5 pour chaque sous-critère.
  * Ne mute rien, ne consulte pas la base — même esprit que `validateObjectivesDefinition`.
  */
-export function validateGeneralSelfAssessment(input: GeneralSelfAssessmentInput): GeneralSelfAssessmentValidation {
+export function validateGeneralAssessmentAxes(input: GeneralAssessmentAxesInput): GeneralAssessmentAxesValidation {
   const errors: string[] = [];
 
   for (const key of Object.keys(input)) {
@@ -503,9 +521,9 @@ export function validateGeneralSelfAssessment(input: GeneralSelfAssessmentInput)
  * axe absent de l'entrée conserve sa valeur actuelle. Ne valide pas — appeler
  * `validateGeneralSelfAssessment` avant.
  */
-export function applyGeneralSelfAssessment(
+export function applyGeneralAssessmentAxes(
   current: IGeneralAssessmentAxes,
-  input: GeneralSelfAssessmentInput
+  input: GeneralAssessmentAxesInput
 ): IGeneralAssessmentAxes {
   const next = { ...current };
   for (const axis of COMPETENCY_AXES) {
@@ -518,11 +536,81 @@ export function applyGeneralSelfAssessment(
 }
 
 /** Le défaut Mongoose couvre déjà les 4 axes, mais on protège l'API de la même façon que `completeQualitative`. */
-export function completeGeneralSelfAssessment(raw?: Partial<IGeneralAssessmentAxes> | null): IGeneralAssessmentAxes {
+export function completeGeneralAssessmentAxes(raw?: Partial<IGeneralAssessmentAxes> | null): IGeneralAssessmentAxes {
   return {
     technique: raw?.technique ?? [],
     impact: raw?.impact ?? [],
     collaboration: raw?.collaboration ?? [],
     leadership: raw?.leadership ?? []
   };
+}
+
+/**
+ * Alias conservés pour compatibilité : ces trois fonctions ne portent aucune notion self/manager
+ * (elles opèrent sur une grille `IGeneralAssessmentAxes` nue) — elles servent aussi bien à
+ * l'auto-évaluation qu'à l'évaluation manager, voir les versions génériques ci-dessus.
+ */
+export const validateGeneralSelfAssessment = validateGeneralAssessmentAxes;
+export const applyGeneralSelfAssessment = applyGeneralAssessmentAxes;
+export const completeGeneralSelfAssessment = completeGeneralAssessmentAxes;
+
+/** Un axe a-t-il au moins un sous-critère noté ? Distingue "pas encore évalué" (null en aval) de "évalué à 0". */
+export function hasAnyGeneralAssessmentScore(axes: IGeneralAssessmentAxes): boolean {
+  return COMPETENCY_AXES.some((axis) => axes[axis].length > 0);
+}
+
+/**
+ * Score global d'une grille, ou `null` si rien n'a encore été noté — reprend le `IF(J="","",...)`
+ * des fichiers Excel (`Collaborateurs!K`, `Tableau de bord ...!G`) plutôt que de renvoyer 0, qui
+ * classerait à tort une fiche non évaluée en "À accompagner".
+ */
+export function computeGeneralAssessmentGlobalScoreOrNull(axes: IGeneralAssessmentAxes): number | null {
+  return hasAnyGeneralAssessmentScore(axes) ? computeGeneralAssessmentGlobalScore(axes) : null;
+}
+
+export const COMPETENCY_STATUSES = ['performant', 'en_progression', 'a_accompagner'] as const;
+export type CompetencyStatus = (typeof COMPETENCY_STATUSES)[number];
+
+/**
+ * Statut dérivé du score global (0-5) d'une grille de compétences — reprend telle quelle la
+ * formule `Collaborateurs!K` de `dashboard-all.xlsx` : `IF(J>=4,"Performant",IF(J>=3,"En
+ * progression","À accompagner"))`. `null` en entrée (rien d'évalué) donne `null` en sortie.
+ */
+export function computeCompetencyStatus(score: number | null): CompetencyStatus | null {
+  if (score == null) return null;
+  if (score >= 4) return 'performant';
+  if (score >= 3) return 'en_progression';
+  return 'a_accompagner';
+}
+
+export const MANAGER_PRIORITIES = ['entretien_urgent', 'plan_de_progression', 'suivi_normal'] as const;
+export type ManagerPriority = (typeof MANAGER_PRIORITIES)[number];
+
+/**
+ * Priorité manager dérivée du score global (0-5) d'une grille de compétences — reprend la
+ * formule de la colonne "Priorité manager" des onglets `Tableau de bord ...` de
+ * `dashboard-all.xlsx` : `IF(J<3,"Entretien urgent",IF(J>=4,"Plan de progression","Suivi
+ * normal"))`. `null` en entrée (rien d'évalué) donne `null` en sortie.
+ */
+export function computeManagerPriority(score: number | null): ManagerPriority | null {
+  if (score == null) return null;
+  if (score < 3) return 'entretien_urgent';
+  if (score >= 4) return 'plan_de_progression';
+  return 'suivi_normal';
+}
+
+export const KEY_RESULT_PROGRESS_STATUSES = ['on_track', 'in_progress', 'at_risk'] as const;
+export type KeyResultProgressStatus = (typeof KEY_RESULT_PROGRESS_STATUSES)[number];
+
+/**
+ * État d'avancement dérivé d'un pourcentage 0-100 — reprend la formule de la colonne "Statut" de
+ * l'onglet `OKR Individuels` de `dashboard-all.xlsx` (`IF(F>=0.8,"On track",IF(F>=0.5,"En
+ * cours","En retard"))`), adaptée à l'échelle 0-100 déjà utilisée par `IKeyResult.progress` et
+ * `computeObjectiveProgress`/`computeReviewScore` (au lieu de la fraction 0-1 du fichier Excel).
+ * Applicable aussi bien à l'avancement d'un KR qu'à celui d'un objectif ou d'une fiche entière.
+ */
+export function computeKeyResultProgressStatus(progress: number): KeyResultProgressStatus {
+  if (progress >= 80) return 'on_track';
+  if (progress >= 50) return 'in_progress';
+  return 'at_risk';
 }

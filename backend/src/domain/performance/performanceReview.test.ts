@@ -7,14 +7,19 @@ import {
   applyManagerAssessment,
   applyObjectivesDefinition,
   applySelfAssessment,
+  computeCompetencyStatus,
   computeGeneralAssessmentAxisScore,
   computeGeneralAssessmentGlobalScore,
+  computeGeneralAssessmentGlobalScoreOrNull,
+  computeKeyResultProgressStatus,
+  computeManagerPriority,
   computeObjectiveProgress,
   computeReviewScore,
   completeCompetencyScores,
   completeGeneralSelfAssessment,
   completeQualitative,
   computeReviewStatus,
+  GENERAL_ASSESSMENT_REFERENTIAL,
   GeneralSelfAssessmentInput,
   isPlausibleEvidenceUrl,
   ObjectiveDefinitionInput,
@@ -288,6 +293,86 @@ describe('validateGeneralSelfAssessment / applyGeneralSelfAssessment / completeG
       const result = completeGeneralSelfAssessment({ technique: [{ label: 'X', score: 3 }] });
       expect(result).toEqual({ ...emptyAxes(), technique: [{ label: 'X', score: 3 }] });
     });
+  });
+});
+
+describe('GENERAL_ASSESSMENT_REFERENTIEL', () => {
+  it('liste 3 sous-critères pour chacun des 4 axes', () => {
+    (['technique', 'impact', 'collaboration', 'leadership'] as const).forEach((axis) => {
+      expect(GENERAL_ASSESSMENT_REFERENTIAL[axis]).toHaveLength(3);
+    });
+  });
+});
+
+describe('computeGeneralAssessmentGlobalScoreOrNull', () => {
+  function emptyAxes(): IGeneralAssessmentAxes {
+    return { technique: [], impact: [], collaboration: [], leadership: [] };
+  }
+
+  it("renvoie null si aucun axe n'a de sous-critère noté (au lieu de 0)", () => {
+    expect(computeGeneralAssessmentGlobalScoreOrNull(emptyAxes())).toBeNull();
+  });
+
+  it('renvoie le score global dès qu’un axe au moins est noté', () => {
+    const axes = { ...emptyAxes(), technique: [{ label: 'X', score: 4 }] };
+    expect(computeGeneralAssessmentGlobalScoreOrNull(axes)).toBe(computeGeneralAssessmentGlobalScore(axes));
+  });
+});
+
+describe('computeCompetencyStatus', () => {
+  it('renvoie null pour un score null (rien d’évalué)', () => {
+    expect(computeCompetencyStatus(null)).toBeNull();
+  });
+
+  it('classe "performant" à partir de 4', () => {
+    expect(computeCompetencyStatus(4)).toBe('performant');
+    expect(computeCompetencyStatus(5)).toBe('performant');
+  });
+
+  it('classe "en_progression" entre 3 (inclus) et 4', () => {
+    expect(computeCompetencyStatus(3)).toBe('en_progression');
+    expect(computeCompetencyStatus(3.9)).toBe('en_progression');
+  });
+
+  it('classe "a_accompagner" en dessous de 3', () => {
+    expect(computeCompetencyStatus(2.99)).toBe('a_accompagner');
+    expect(computeCompetencyStatus(1)).toBe('a_accompagner');
+  });
+});
+
+describe('computeManagerPriority', () => {
+  it('renvoie null pour un score null (rien d’évalué)', () => {
+    expect(computeManagerPriority(null)).toBeNull();
+  });
+
+  it('déclenche "entretien_urgent" en dessous de 3', () => {
+    expect(computeManagerPriority(2.99)).toBe('entretien_urgent');
+  });
+
+  it('déclenche "plan_de_progression" à partir de 4', () => {
+    expect(computeManagerPriority(4)).toBe('plan_de_progression');
+  });
+
+  it('sinon "suivi_normal" (entre 3 inclus et 4 exclus)', () => {
+    expect(computeManagerPriority(3)).toBe('suivi_normal');
+    expect(computeManagerPriority(3.5)).toBe('suivi_normal');
+  });
+});
+
+describe('computeKeyResultProgressStatus', () => {
+  it('"on_track" à partir de 80%', () => {
+    expect(computeKeyResultProgressStatus(80)).toBe('on_track');
+    expect(computeKeyResultProgressStatus(100)).toBe('on_track');
+  });
+
+  it('"in_progress" entre 50% (inclus) et 80%', () => {
+    expect(computeKeyResultProgressStatus(50)).toBe('in_progress');
+    expect(computeKeyResultProgressStatus(79)).toBe('in_progress');
+  });
+
+  it('"at_risk" en dessous de 50%', () => {
+    expect(computeKeyResultProgressStatus(49)).toBe('at_risk');
+    expect(computeKeyResultProgressStatus(0)).toBe('at_risk');
   });
 });
 

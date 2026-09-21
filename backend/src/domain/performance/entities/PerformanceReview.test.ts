@@ -161,6 +161,68 @@ describe('PerformanceReview', () => {
     expect(error).toBeDefined();
   });
 
+  it('déclare le sous-champ generalManagerAssessment (4 axes) sur le schéma', () => {
+    const schema = PerformanceReview.schema;
+    COMPETENCY_AXES.forEach((axis) => {
+      expect(schema.path(`generalManagerAssessment.axes.${axis}`)).toBeDefined();
+    });
+  });
+
+  it('remplit generalManagerAssessment avec les 4 axes vides par défaut', () => {
+    const review = new PerformanceReview(baseReview());
+    const axes = review.toObject().generalManagerAssessment.axes;
+    COMPETENCY_AXES.forEach((axis) => {
+      expect(axes[axis]).toEqual([]);
+    });
+  });
+
+  it('accepte des sous-critères notés (1-5) par axe pour generalManagerAssessment, indépendamment de generalSelfAssessment', () => {
+    const review = new PerformanceReview({
+      ...baseReview(),
+      generalSelfAssessment: {
+        axes: {
+          technique: [{ label: 'Qualité du code & revues', score: 2 }],
+          impact: [],
+          collaboration: [],
+          leadership: []
+        }
+      },
+      generalManagerAssessment: {
+        axes: {
+          technique: [
+            { label: 'Qualité du code & revues', score: 4 },
+            { label: 'Autonomie & résolution de bugs', score: 5 },
+            { label: 'Conception & architecture', score: 4 }
+          ],
+          impact: [],
+          collaboration: [],
+          leadership: []
+        }
+      }
+    });
+    const error = review.validateSync();
+    expect(error).toBeUndefined();
+    const obj = review.toObject();
+    expect(obj.generalManagerAssessment.axes.technique).toHaveLength(3);
+    expect(obj.generalSelfAssessment.axes.technique).toEqual([{ label: 'Qualité du code & revues', score: 2 }]);
+  });
+
+  it('refuse un score de sous-critère hors de la plage 1-5 pour generalManagerAssessment', () => {
+    const review = new PerformanceReview({
+      ...baseReview(),
+      generalManagerAssessment: {
+        axes: {
+          technique: [{ label: 'Qualité du code & revues', score: 0 }],
+          impact: [],
+          collaboration: [],
+          leadership: []
+        }
+      }
+    });
+    const error = review.validateSync();
+    expect(error).toBeDefined();
+  });
+
   it('applique la contrainte d\'unicité (user, cycle) au niveau de l\'index', () => {
     const indexes = PerformanceReview.schema.indexes();
     const uniqueUserCycle = indexes.find(

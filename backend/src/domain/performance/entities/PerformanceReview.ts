@@ -106,9 +106,14 @@ export interface IGeneralAssessmentSubCriterion {
 
 export type IGeneralAssessmentAxes = Record<CompetencyAxis, IGeneralAssessmentSubCriterion[]>;
 
-export interface IGeneralSelfAssessment {
+export interface IGeneralAssessmentGrid {
   axes: IGeneralAssessmentAxes;
 }
+
+/** Alias conservé pour compatibilité : l'auto-évaluation générale du collaborateur, même forme que la grille manager. */
+export type IGeneralSelfAssessment = IGeneralAssessmentGrid;
+/** Évaluation manager sur la même grille (mêmes 4 axes × sous-critères) — voir `GENERAL_ASSESSMENT_REFERENTIAL` dans `performanceReview.ts` pour les libellés de référence. */
+export type IGeneralManagerAssessment = IGeneralAssessmentGrid;
 
 export interface IPerformanceReview extends Document {
   user: mongoose.Types.ObjectId;
@@ -121,6 +126,8 @@ export interface IPerformanceReview extends Document {
   competencyScores: ICompetencyScores;
   /** Auto-évaluation générale (4 axes × 3 sous-critères, score global calculé) — voir `IGeneralSelfAssessment`. */
   generalSelfAssessment: IGeneralSelfAssessment;
+  /** Évaluation manager sur la même grille, pour rapprochement avec l'auto-évaluation (repérer les désaccords sous-critère par sous-critère). */
+  generalManagerAssessment: IGeneralManagerAssessment;
   status: PerformanceReviewStatus;
   /** Qui a défini les objectifs de cette fiche (un lead pour son équipe, ou le CTO). */
   definedBy?: IReviewAuthor;
@@ -227,7 +234,7 @@ const GeneralAssessmentSubCriterionSchema = new Schema<IGeneralAssessmentSubCrit
   { _id: false }
 );
 
-const GeneralSelfAssessmentSchema = new Schema<IGeneralSelfAssessment>(
+const GeneralAssessmentGridSchema = new Schema<IGeneralAssessmentGrid>(
   {
     axes: {
       technique: { type: [GeneralAssessmentSubCriterionSchema], default: [] },
@@ -255,7 +262,11 @@ const PerformanceReviewSchema = new Schema<IPerformanceReview>(
       default: () => ({ technique: {}, impact: {}, collaboration: {}, leadership: {} })
     },
     generalSelfAssessment: {
-      type: GeneralSelfAssessmentSchema,
+      type: GeneralAssessmentGridSchema,
+      default: () => ({ axes: { technique: [], impact: [], collaboration: [], leadership: [] } })
+    },
+    generalManagerAssessment: {
+      type: GeneralAssessmentGridSchema,
       default: () => ({ axes: { technique: [], impact: [], collaboration: [], leadership: [] } })
     },
     status: { type: String, enum: PERFORMANCE_REVIEW_STATUSES, default: 'dossier_manquant' },
