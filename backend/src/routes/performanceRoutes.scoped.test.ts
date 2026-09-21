@@ -1001,10 +1001,24 @@ describe('performanceRoutes — portée équipe/CTO (TI)', () => {
       expect(res.status).toBe(403);
     });
 
-    it('200 applique l\'évaluation manager et passe la fiche à "complete" (tous objectifs évalués)', async () => {
+    const FULL_GENERAL_MANAGER_ASSESSMENT = {
+      axes: {
+        technique: [{ label: 'Qualité du code', score: 4, answer: 'Bon' }],
+        impact: [{ label: 'Delivery', score: 3, answer: 'Correct' }],
+        collaboration: [{ label: 'Entraide', score: 5, answer: 'Excellent' }],
+        leadership: [{ label: 'Mentorat', score: 2, answer: 'Faible' }]
+      }
+    };
+
+    it('200 applique l\'évaluation manager et passe la fiche à "complete" (tous objectifs évalués + grille générale complète)', async () => {
       mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
       mockReviewFindOne.mockResolvedValue(
-        makeReviewDoc({ team: TEAM_A_ID, objectives: [objectiveFixture()], status: 'en_cours' })
+        makeReviewDoc({
+          team: TEAM_A_ID,
+          objectives: [objectiveFixture()],
+          status: 'en_cours',
+          generalManagerAssessment: FULL_GENERAL_MANAGER_ASSESSMENT
+        })
       );
       mockUserFindById.mockReturnValue({
         select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
@@ -1023,6 +1037,29 @@ describe('performanceRoutes — portée équipe/CTO (TI)', () => {
       const [, update] = mockReviewFindOneAndUpdate.mock.calls[0];
       expect(update.$set.status).toBe('complete');
       expect(update.$set.objectives[0].managerAssessment).toEqual({ status: 'atteint', comment: 'Bien joué' });
+    });
+
+    it("200 laisse la fiche \"en_cours\" si tous les objectifs sont évalués mais que la grille générale manager n'est pas encore complète", async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(
+        makeReviewDoc({ team: TEAM_A_ID, objectives: [objectiveFixture()], status: 'en_cours' })
+      );
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      mockReviewFindOneAndUpdate.mockResolvedValue(
+        makeReviewDoc({
+          team: TEAM_A_ID,
+          status: 'en_cours',
+          objectives: [objectiveFixture({ managerAssessment: { status: 'atteint', comment: 'Bien joué' } })]
+        })
+      );
+
+      const res = await request(app).patch(url).send(payload);
+
+      expect(res.status).toBe(200);
+      const [, update] = mockReviewFindOneAndUpdate.mock.calls[0];
+      expect(update.$set.status).toBe('en_cours');
     });
 
     it('409 si la fiche a été modifiée en même temps (verrou optimiste épuisé)', async () => {

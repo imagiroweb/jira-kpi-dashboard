@@ -703,7 +703,11 @@ router.patch('/reviews/:userId/objectives', authenticate, async (req: Request, r
       }
 
       const objectives = applyObjectivesDefinition(current.toObject().objectives, objectivesInput);
-      const status = computeReviewStatus(objectives, current.status);
+      const status = computeReviewStatus(
+        objectives,
+        completeGeneralAssessmentAxes(current.toObject().generalManagerAssessment?.axes),
+        current.status
+      );
 
       const $set: Record<string, unknown> = { objectives, definedBy: who, updatedBy: who, status };
       if (reviewTeamId && !toIdString(current.team)) $set.team = reviewTeamId;
@@ -926,10 +930,14 @@ router.patch('/reviews/:userId/general-manager-assessment', authenticate, async 
         current.toObject().generalManagerAssessment?.axes,
         resolvedAxesInput
       );
+      // La grille générale entre elle aussi dans le calcul du statut "Complète" de la fiche
+      // (voir computeReviewStatus) — cette route ne le mettait pas à jour jusqu'ici.
+      const status = computeReviewStatus(current.toObject().objectives, generalManagerAssessment, current.status);
 
       const $set: Record<string, unknown> = {
         generalManagerAssessment: { axes: generalManagerAssessment },
-        updatedBy: who
+        updatedBy: who,
+        status
       };
       if (reviewTeamId && !toIdString(current.team)) $set.team = reviewTeamId;
       if (roleProfile && roleProfile !== current.generalAssessmentRoleProfile) {
@@ -1001,7 +1009,11 @@ router.patch('/reviews/:userId/manager-assessment', authenticate, async (req: Re
         { objectives: plain.objectives, qualitative: plain.qualitative, competencyScores: plain.competencyScores },
         input
       );
-      const status = computeReviewStatus(result.objectives, current.status);
+      const status = computeReviewStatus(
+        result.objectives,
+        completeGeneralAssessmentAxes(plain.generalManagerAssessment?.axes),
+        current.status
+      );
 
       updated = await PerformanceReview.findOneAndUpdate(
         { _id: current._id, __v: current.__v },
@@ -1069,7 +1081,11 @@ router.patch('/reviews/me/self-assessment', authenticate, async (req: Request, r
         { objectives: plain.objectives, qualitative: plain.qualitative, competencyScores: plain.competencyScores },
         input
       );
-      const status = computeReviewStatus(result.objectives, current.status);
+      const status = computeReviewStatus(
+        result.objectives,
+        completeGeneralAssessmentAxes(plain.generalManagerAssessment?.axes),
+        current.status
+      );
 
       updated = await PerformanceReview.findOneAndUpdate(
         { _id: current._id, __v: current.__v },
@@ -1236,7 +1252,11 @@ async function writeImportedObjectives(
     }
 
     const objectives = applyObjectivesDefinition(current.toObject().objectives, objectivesInput);
-    const status = computeReviewStatus(objectives, current.status);
+    const status = computeReviewStatus(
+      objectives,
+      completeGeneralAssessmentAxes(current.toObject().generalManagerAssessment?.axes),
+      current.status
+    );
 
     const $set: Record<string, unknown> = { objectives, definedBy: who, updatedBy: who, status };
     if (reviewTeamId && !toIdString(current.team)) $set.team = reviewTeamId;

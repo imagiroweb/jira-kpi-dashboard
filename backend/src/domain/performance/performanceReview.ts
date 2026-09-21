@@ -401,21 +401,34 @@ export function applySelfAssessment(target: AssessmentTarget, input: AssessmentI
 }
 
 /**
- * Statut dérivé de la fiche après une action (définition d'objectifs ou
- * évaluation manager) : passe à "complete" dès que tous les objectifs ont
- * reçu un statut d'évaluation manager ; sinon fait avancer
- * "dossier_manquant" vers "en_cours" dès qu'il y a du contenu à évaluer.
- * Ne revient jamais en arrière (un statut "complete" existant est conservé
- * même si, par exemple, un nouvel objectif sans évaluation est ajouté —
- * cette régression éventuelle est un choix produit à trancher séparément).
+ * Une grille générale manager est "complète" au sens du statut de fiche (voir
+ * `computeReviewStatus`) quand les 4 axes de compétence ont chacun au moins un sous-critère noté
+ * — un critère de présence, comme pour les objectifs ("a une évaluation", pas "correspond
+ * exactement au référentiel") : cette fonction reste pure et ne dépend ni du référentiel de
+ * notation (chargé en base, asynchrone) ni du profil de poste choisi.
+ */
+export function isGeneralManagerAssessmentComplete(axes: IGeneralAssessmentAxes): boolean {
+  return COMPETENCY_AXES.every((axis) => (axes[axis]?.length ?? 0) > 0);
+}
+
+/**
+ * Statut dérivé de la fiche après une action (définition d'objectifs, évaluation manager par
+ * objectif, ou grille générale manager) : passe à "complete" dès que tous les objectifs ont reçu
+ * un statut d'évaluation manager ET que la grille générale manager est elle-même complète (voir
+ * `isGeneralManagerAssessmentComplete`) ; sinon fait avancer "dossier_manquant" vers "en_cours"
+ * dès qu'il y a du contenu à évaluer (un objectif défini). Ne revient jamais en arrière (un statut
+ * "complete" existant est conservé même si, par exemple, un nouvel objectif sans évaluation est
+ * ajouté — cette régression éventuelle est un choix produit à trancher séparément).
  */
 export function computeReviewStatus(
   objectives: Pick<IObjective, 'managerAssessment'>[],
+  generalManagerAssessment: IGeneralAssessmentAxes,
   currentStatus: PerformanceReviewStatus
 ): PerformanceReviewStatus {
   if (currentStatus === 'complete') return currentStatus;
   if (objectives.length === 0) return currentStatus;
-  if (objectives.every((o) => !!o.managerAssessment?.status)) {
+  const objectivesComplete = objectives.every((o) => !!o.managerAssessment?.status);
+  if (objectivesComplete && isGeneralManagerAssessmentComplete(generalManagerAssessment)) {
     return 'complete';
   }
   if (currentStatus === 'dossier_manquant') {

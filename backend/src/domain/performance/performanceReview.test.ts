@@ -19,6 +19,7 @@ import {
   completeGeneralSelfAssessment,
   completeQualitative,
   computeReviewStatus,
+  isGeneralManagerAssessmentComplete,
   GENERAL_ASSESSMENT_REFERENTIAL,
   GeneralSelfAssessmentInput,
   isPlausibleEvidenceUrl,
@@ -737,32 +738,93 @@ describe('applyManagerAssessment', () => {
   });
 });
 
+describe('isGeneralManagerAssessmentComplete', () => {
+  function emptyAxes(): IGeneralAssessmentAxes {
+    return { technique: [], impact: [], collaboration: [], leadership: [] };
+  }
+
+  it('est fausse quand les 4 axes sont vides', () => {
+    expect(isGeneralManagerAssessmentComplete(emptyAxes())).toBe(false);
+  });
+
+  it("est fausse quand il manque un seul axe (les 3 autres ont un sous-critère)", () => {
+    const axes: IGeneralAssessmentAxes = {
+      ...emptyAxes(),
+      technique: [{ label: 'Qualité du code', score: 4, answer: 'Bon' }],
+      impact: [{ label: 'Delivery', score: 3, answer: 'Correct' }],
+      collaboration: [{ label: 'Entraide', score: 5, answer: 'Excellent' }]
+      // leadership reste vide
+    };
+    expect(isGeneralManagerAssessmentComplete(axes)).toBe(false);
+  });
+
+  it('est vraie dès que les 4 axes ont chacun au moins un sous-critère noté', () => {
+    const axes: IGeneralAssessmentAxes = {
+      technique: [{ label: 'Qualité du code', score: 4, answer: 'Bon' }],
+      impact: [{ label: 'Delivery', score: 3, answer: 'Correct' }],
+      collaboration: [{ label: 'Entraide', score: 5, answer: 'Excellent' }],
+      leadership: [{ label: 'Mentorat', score: 2, answer: 'Faible' }]
+    };
+    expect(isGeneralManagerAssessmentComplete(axes)).toBe(true);
+  });
+});
+
 describe('computeReviewStatus', () => {
+  function emptyAxes(): IGeneralAssessmentAxes {
+    return { technique: [], impact: [], collaboration: [], leadership: [] };
+  }
+
+  function fullAxes(): IGeneralAssessmentAxes {
+    return {
+      technique: [{ label: 'Qualité du code', score: 4, answer: 'Bon' }],
+      impact: [{ label: 'Delivery', score: 3, answer: 'Correct' }],
+      collaboration: [{ label: 'Entraide', score: 5, answer: 'Excellent' }],
+      leadership: [{ label: 'Mentorat', score: 2, answer: 'Faible' }]
+    };
+  }
+
   it('reste "dossier_manquant" sans objectif', () => {
-    expect(computeReviewStatus([], 'dossier_manquant')).toBe('dossier_manquant');
+    expect(computeReviewStatus([], emptyAxes(), 'dossier_manquant')).toBe('dossier_manquant');
   });
 
   it('passe à "en_cours" dès qu\'un objectif existe sans évaluation manager', () => {
-    expect(computeReviewStatus([{ managerAssessment: {} }], 'dossier_manquant')).toBe('en_cours');
+    expect(computeReviewStatus([{ managerAssessment: {} }], emptyAxes(), 'dossier_manquant')).toBe('en_cours');
   });
 
-  it('passe à "complete" quand tous les objectifs ont une évaluation manager', () => {
+  it('passe à "complete" quand tous les objectifs ont une évaluation manager ET la grille générale est complète', () => {
     expect(
       computeReviewStatus(
         [{ managerAssessment: { status: 'atteint' } }, { managerAssessment: { status: 'depasse' } }],
+        fullAxes(),
         'en_cours'
       )
     ).toBe('complete');
   });
 
+  it("reste \"en_cours\" si tous les objectifs sont évalués mais que la grille générale manager n'est pas complète", () => {
+    expect(
+      computeReviewStatus(
+        [{ managerAssessment: { status: 'atteint' } }, { managerAssessment: { status: 'depasse' } }],
+        emptyAxes(),
+        'en_cours'
+      )
+    ).toBe('en_cours');
+  });
+
+  it("reste \"en_cours\" si la grille générale manager est complète mais qu'un objectif n'a pas d'évaluation manager", () => {
+    expect(
+      computeReviewStatus([{ managerAssessment: { status: 'atteint' } }, { managerAssessment: {} }], fullAxes(), 'en_cours')
+    ).toBe('en_cours');
+  });
+
   it('reste "en_cours" si au moins un objectif n\'a pas d\'évaluation manager', () => {
     expect(
-      computeReviewStatus([{ managerAssessment: { status: 'atteint' } }, { managerAssessment: {} }], 'en_cours')
+      computeReviewStatus([{ managerAssessment: { status: 'atteint' } }, { managerAssessment: {} }], emptyAxes(), 'en_cours')
     ).toBe('en_cours');
   });
 
   it('ne revient jamais en arrière depuis "complete"', () => {
-    expect(computeReviewStatus([{ managerAssessment: {} }], 'complete')).toBe('complete');
+    expect(computeReviewStatus([{ managerAssessment: {} }], emptyAxes(), 'complete')).toBe('complete');
   });
 });
 

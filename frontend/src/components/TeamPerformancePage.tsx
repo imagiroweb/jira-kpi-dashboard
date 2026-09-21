@@ -61,7 +61,8 @@ function reviewUserLabel(review: PerformanceReview): string {
   return name || user.email || user._id;
 }
 
-function formatSelfAssessmentScore(axes: PerformanceReview['generalSelfAssessment']): string {
+/** Score global (0-5) de la grille générale, formaté pour l'affichage — utilisé pour la colonne self ET manager (même forme `GeneralAssessmentAxes` des deux côtés). */
+function formatGeneralAssessmentScore(axes: PerformanceReview['generalSelfAssessment']): string {
   const score = computeGeneralAssessmentGlobalScore(axes);
   if (score <= 0) return '—';
   return `${score.toFixed(1)} / 5`;
@@ -727,6 +728,7 @@ export function TeamPerformancePage() {
                     <th className="p-3 font-medium">Statut</th>
                     <th className="p-3 font-medium">Score</th>
                     <th className="p-3 font-medium">Score auto-évaluation</th>
+                    <th className="p-3 font-medium">Score évaluation manager</th>
                     <th className="p-3 font-medium">Objectifs</th>
                     <th className="p-3" />
                   </tr>
@@ -743,7 +745,10 @@ export function TeamPerformancePage() {
                       </td>
                       <td className="p-3 text-surface-300">{Math.round(computeReviewScore(review.objectives))}%</td>
                       <td className="p-3 text-surface-300">
-                        {formatSelfAssessmentScore(review.generalSelfAssessment)}
+                        {formatGeneralAssessmentScore(review.generalSelfAssessment)}
+                      </td>
+                      <td className="p-3 text-surface-300">
+                        {formatGeneralAssessmentScore(review.generalManagerAssessment)}
                       </td>
                       <td className="p-3">
                         <ObjectiveStatusBadges objectives={review.objectives} />
@@ -768,6 +773,7 @@ export function TeamPerformancePage() {
                           {REVIEW_STATUS_LABELS.dossier_manquant}
                         </span>
                       </td>
+                      <td className="p-3 text-surface-300">—</td>
                       <td className="p-3 text-surface-300">—</td>
                       <td className="p-3 text-surface-300">—</td>
                       <td className="p-3 text-surface-500">—</td>

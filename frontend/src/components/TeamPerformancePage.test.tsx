@@ -636,6 +636,34 @@ describe('TeamPerformancePage', () => {
     expect(within(row).getByText('1 Dépassé')).toBeInTheDocument();
   });
 
+  it("affiche le score de la grille générale manager dans sa propre colonne, distincte du score auto-évaluation", async () => {
+    seedUser({ performanceGlobalAccess: true });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    const reviewWithGeneralAssessments = makeReview({
+      generalSelfAssessment: {
+        technique: [{ label: 'Qualité du code & revues', score: 3 }],
+        impact: [],
+        collaboration: [],
+        leadership: []
+      },
+      generalManagerAssessment: {
+        technique: [{ label: 'Qualité du code & revues', score: 5, answer: 'Excellent' }],
+        impact: [],
+        collaboration: [],
+        leadership: []
+      }
+    });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [reviewWithGeneralAssessments] });
+
+    render(<TeamPerformancePage />);
+
+    await screen.findByText('Alice Martin');
+    const row = screen.getByText('Alice Martin').closest('tr') as HTMLElement;
+    expect(within(row).getByText('3.0 / 5')).toBeInTheDocument();
+    expect(within(row).getByText('5.0 / 5')).toBeInTheDocument();
+  });
+
   it("affiche un tiret dans la colonne Objectifs quand aucun objectif n'est encore statué", async () => {
     seedUser({ performanceGlobalAccess: true });
     mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
