@@ -34,6 +34,8 @@ export interface VisiblePages {
   produit: boolean;
   pointHebdo: boolean;
   gestionUtilisateurs: boolean;
+  performance: boolean;
+  performanceDashboard: boolean;
 }
 
 /** Filtres par défaut Roadmap Adoria 2026 (préférences utilisateur) */
@@ -54,6 +56,10 @@ export interface User {
   role?: 'super_admin' | string | null;
   roleName?: string;
   visiblePages?: VisiblePages;
+  teamId?: string | null;
+  leadTeamIds?: string[];
+  performanceGlobalAccess?: boolean;
+  canManageTeamAssignment?: boolean;
 }
 
 export interface RoleDto {

@@ -9,6 +9,8 @@ import {
   ProduitDashboard,
   PointHebdoPage,
   UserManagementPage,
+  MyPerformancePage,
+  TeamPerformancePage,
   LoginPage, 
   MicrosoftCallback,
   RoleSelectionScreen,
@@ -121,6 +123,10 @@ function AuthenticatedApp({
         return <PointHebdoPage />;
       case 'gestionUtilisateurs':
         return <UserManagementPage />;
+      case 'performance':
+        return <MyPerformancePage />;
+      case 'performanceDashboard':
+        return <TeamPerformancePage />;
       default:
         return <SprintDashboard />;
     }

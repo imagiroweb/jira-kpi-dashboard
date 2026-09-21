@@ -19,6 +19,8 @@ describe('getFirstVisiblePage', () => {
       produit: false,
       pointHebdo: false,
       gestionUtilisateurs: false,
+      performance: false,
+      performanceDashboard: false,
     };
     expect(getFirstVisiblePage(visible)).toBe('dashboard');
   });
@@ -33,6 +35,8 @@ describe('getFirstVisiblePage', () => {
       produit: false,
       pointHebdo: false,
       gestionUtilisateurs: false,
+      performance: false,
+      performanceDashboard: false,
     };
     expect(getFirstVisiblePage(visible)).toBe('users');
   });
@@ -47,6 +51,8 @@ describe('getFirstVisiblePage', () => {
       produit: false,
       pointHebdo: false,
       gestionUtilisateurs: false,
+      performance: false,
+      performanceDashboard: false,
     };
     expect(getFirstVisiblePage(visible)).toBeNull();
   });
@@ -61,6 +67,8 @@ describe('getFirstVisiblePage', () => {
       produit: false,
       pointHebdo: false,
       gestionUtilisateurs: false,
+      performance: false,
+      performanceDashboard: false,
     };
     expect(getFirstVisiblePage(visible)).toBe('support');
   });
@@ -181,6 +189,8 @@ describe('useStore (auth)', () => {
         produit: false,
         pointHebdo: false,
         gestionUtilisateurs: false,
+        performance: false,
+        performanceDashboard: false,
       },
     });
     useStore.getState().setCurrentPage('support');
@@ -196,6 +206,8 @@ describe('useStore (auth)', () => {
         produit: false,
         pointHebdo: false,
         gestionUtilisateurs: false,
+        performance: false,
+        performanceDashboard: false,
       },
     });
 

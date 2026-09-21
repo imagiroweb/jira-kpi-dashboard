@@ -11,7 +11,9 @@
     "lint": "eslint src --ext .ts",
     "test": "jest",
     "test:routes": "jest --testPathPattern=routes/",
-    "test:coverage": "jest --coverage"
+    "test:coverage": "jest --coverage",
+    "import:okr:dry-run": "ts-node src/scripts/import-okr/dryRun.ts",
+    "import:okr:run": "ts-node src/scripts/import-okr/runImport.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",

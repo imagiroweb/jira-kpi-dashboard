@@ -16,6 +16,8 @@ export { MarketingDashboard } from './MarketingDashboard';
 export { ProduitDashboard } from './ProduitDashboard';
 export { PointHebdoPage } from './PointHebdoPage';
 export { UserManagementPage } from './UserManagementPage';
+export { MyPerformancePage } from './MyPerformancePage';
+export { TeamPerformancePage } from './TeamPerformancePage';
 export { RoleSelectionScreen } from './RoleSelectionScreen';
 
 // Authentication components

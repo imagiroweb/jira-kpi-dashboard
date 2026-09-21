@@ -8,6 +8,19 @@ import type {
   WeeklyMeetingPatch,
   WeeklyMeetingSummary,
 } from '../domain/pointHebdoSprint';
+import {
+  normalizePerformanceReview,
+  type PerformanceCycle,
+  type PerformanceReview,
+  type PerformanceTeamMember,
+  type CreatePerformanceCycleInput,
+  type UpdatePerformanceCycleInput,
+  type ObjectiveDefinitionInput,
+  type AssessmentInput,
+  type ProgressUpdateInput,
+  type OkrImportResult
+} from '../domain/performance';
+import type { Team, CreateTeamInput, UpdateTeamInput, RosterUser } from '../domain/team';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -659,6 +672,149 @@ export const meetingApi = {
     const { data } = await api.delete(`/meetings/${id}`);
     return data;
   },
+};
+
+export const performanceApi = {
+  getCycles: async (): Promise<{ success: boolean; cycles: PerformanceCycle[] }> => {
+    const { data } = await api.get('/performance/cycles');
+    return data;
+  },
+  createCycle: async (
+    input: CreatePerformanceCycleInput
+  ): Promise<{ success: boolean; cycle: PerformanceCycle }> => {
+    const { data } = await api.post('/performance/cycles', input);
+    return data;
+  },
+  updateCycle: async (
+    id: string,
+    patch: UpdatePerformanceCycleInput
+  ): Promise<{ success: boolean; cycle: PerformanceCycle }> => {
+    const { data } = await api.patch(`/performance/cycles/${id}`, patch);
+    return data;
+  },
+  /** Ma fiche de performance pour un cycle (le cycle actif par défaut, créée à la volée si besoin). */
+  getMyReview: async (cycleId?: string): Promise<{ success: boolean; review: PerformanceReview }> => {
+    const { data } = await api.get('/performance/reviews/me', { params: cycleId ? { cycleId } : undefined });
+    return { ...data, review: normalizePerformanceReview(data.review) };
+  },
+  /** Ajoute une mise à jour d'avancement à un KR de ma fiche (verrou optimiste géré côté serveur, 409 si conflit). */
+  updateKeyResultProgress: async (
+    objectiveId: string,
+    krId: string,
+    input: ProgressUpdateInput & { cycleId?: string }
+  ): Promise<{ success: boolean; review: PerformanceReview }> => {
+    const { data } = await api.post(
+      `/performance/reviews/me/objectives/${objectiveId}/krs/${krId}/progress`,
+      input
+    );
+    return { ...data, review: normalizePerformanceReview(data.review) };
+  },
+  /** Auto-évaluation sur ma propre fiche (jamais sur celle d'un autre collaborateur). */
+  updateSelfAssessment: async (
+    input: AssessmentInput & { cycleId?: string }
+  ): Promise<{ success: boolean; review: PerformanceReview }> => {
+    const { data } = await api.patch('/performance/reviews/me/self-assessment', input);
+    return { ...data, review: normalizePerformanceReview(data.review) };
+  },
+  /** Fiches dans la portée de l'acteur (CTO : toutes, filtrables par équipe ; lead : ses équipes). */
+  listReviews: async (params?: {
+    cycleId?: string;
+    teamId?: string;
+    status?: string;
+  }): Promise<{ success: boolean; reviews: PerformanceReview[] }> => {
+    const { data } = await api.get('/performance/reviews', { params });
+    return { ...data, reviews: (data.reviews ?? []).map(normalizePerformanceReview) };
+  },
+  getReview: async (
+    userId: string,
+    cycleId?: string
+  ): Promise<{ success: boolean; review: PerformanceReview }> => {
+    const { data } = await api.get(`/performance/reviews/${userId}`, {
+      params: cycleId ? { cycleId } : undefined
+    });
+    return { ...data, review: normalizePerformanceReview(data.review) };
+  },
+  /** (Re)définit les objectifs d'un collaborateur — fusion par id côté serveur, préserve l'avancement déjà saisi. */
+  defineObjectives: async (
+    userId: string,
+    objectives: ObjectiveDefinitionInput[],
+    cycleId?: string
+  ): Promise<{ success: boolean; review: PerformanceReview }> => {
+    const { data } = await api.patch(`/performance/reviews/${userId}/objectives`, { objectives, cycleId });
+    return { ...data, review: normalizePerformanceReview(data.review) };
+  },
+  updateManagerAssessment: async (
+    userId: string,
+    input: AssessmentInput & { cycleId?: string }
+  ): Promise<{ success: boolean; review: PerformanceReview }> => {
+    const { data } = await api.patch(`/performance/reviews/${userId}/manager-assessment`, input);
+    return { ...data, review: normalizePerformanceReview(data.review) };
+  },
+  /** Membres d'équipe dans la portée de l'acteur, avec ou sans fiche de performance ouverte. */
+  getTeamMembers: async (params?: {
+    teamId?: string;
+  }): Promise<{ success: boolean; members: PerformanceTeamMember[] }> => {
+    const { data } = await api.get('/performance/team-members', { params });
+    return data;
+  },
+  /** Import fichiers d'entretien (session courante, rien n'est persisté hors objectifs). */
+  importOkr: async (input: {
+    files: File[];
+    cycleId: string;
+    dryRun: boolean;
+  }): Promise<OkrImportResult> => {
+    const form = new FormData();
+    form.append('cycleId', input.cycleId);
+    form.append('dryRun', String(input.dryRun));
+    input.files.forEach((file) => form.append('files', file));
+    const { data } = await api.post('/performance/import-okr', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      transformRequest: [
+        (body, headers) => {
+          if (body instanceof FormData) {
+            delete headers['Content-Type'];
+          }
+          return body;
+        }
+      ]
+    });
+    return data;
+  }
+};
+
+export const teamApi = {
+  list: async (): Promise<{ success: boolean; teams: Team[] }> => {
+    const { data } = await api.get('/teams');
+    return data;
+  },
+  /** Tous les collaborateurs actifs (avec ou sans équipe) — réservé à la gestion d'équipes (CTO/admin). */
+  getRoster: async (): Promise<{ success: boolean; users: RosterUser[] }> => {
+    const { data } = await api.get('/teams/roster');
+    return data;
+  },
+  create: async (input: CreateTeamInput): Promise<{ success: boolean; team: Team }> => {
+    const { data } = await api.post('/teams', input);
+    return data;
+  },
+  update: async (id: string, patch: UpdateTeamInput): Promise<{ success: boolean; team: Team }> => {
+    const { data } = await api.patch(`/teams/${id}`, patch);
+    return data;
+  },
+  /** Rattache (`teamId`) ou détache (`teamId: null`) un collaborateur à une équipe. */
+  assignMember: async (
+    userId: string,
+    teamId: string | null
+  ): Promise<{ success: boolean; user: { id: string; teamId: string | null } }> => {
+    const { data } = await api.patch(`/teams/members/${userId}`, { teamId });
+    return data;
+  },
+  setDelegation: async (
+    userId: string,
+    canManageTeamAssignment: boolean
+  ): Promise<{ success: boolean; user: { id: string; canManageTeamAssignment: boolean } }> => {
+    const { data } = await api.patch(`/teams/members/${userId}/delegation`, { canManageTeamAssignment });
+    return data;
+  }
 };
 
 export default api;

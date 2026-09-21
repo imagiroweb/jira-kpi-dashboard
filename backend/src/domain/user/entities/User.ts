@@ -26,6 +26,12 @@ export interface IUser extends Document {
   /** 'super_admin' = full access + gestion utilisateurs; otherwise use roleId */
   role?: 'super_admin';
   roleId?: mongoose.Types.ObjectId;
+  /** Équipe actuelle du collaborateur — modifiable (changement d'équipe) ; voir domain/team/entities/Team */
+  teamId?: mongoose.Types.ObjectId;
+  /** Droit délégué par le CTO/super_admin : permet à ce lead de rattacher un collaborateur à SA PROPRE
+   * équipe (jamais d'en faire sortir un lead, ni de toucher aux autres équipes). Sans effet si
+   * l'utilisateur n'est lead d'aucune équipe. */
+  canManageTeamAssignment?: boolean;
   lastLogin?: Date;
   /** Préférences UI personnelles (filtres par défaut, etc.) */
   preferences?: IUserPreferences;
@@ -103,6 +109,15 @@ const UserSchema = new Schema<IUser>(
       ref: 'Role',
       default: null
     },
+    teamId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Team',
+      default: null
+    },
+    canManageTeamAssignment: {
+      type: Boolean,
+      default: false
+    },
     lastLogin: {
       type: Date
     },
@@ -140,6 +155,7 @@ const UserSchema = new Schema<IUser>(
 // Index pour améliorer les performances de recherche
 UserSchema.index({ email: 1 });
 UserSchema.index({ microsoftId: 1 });
+UserSchema.index({ teamId: 1 });
 
 export const User = mongoose.model<IUser>('User', UserSchema);
 

@@ -20,7 +20,9 @@ const PAGE_LABELS: Record<keyof VisiblePages, string> = {
   marketing: 'Marketing',
   produit: 'Produit',
   pointHebdo: 'Point hebdo',
-  gestionUtilisateurs: 'Gestion des utilisateurs'
+  gestionUtilisateurs: 'Gestion des utilisateurs',
+  performance: 'Ma performance',
+  performanceDashboard: 'Performance équipe'
 };
 
 export function UserManagementPage() {
@@ -167,7 +169,9 @@ export function UserManagementPage() {
         marketing: true,
         produit: true,
         pointHebdo: true,
-        gestionUtilisateurs: false
+        gestionUtilisateurs: false,
+        performance: true,
+        performanceDashboard: false
       };
       const created = await authApi.createRole(newRoleName.trim(), defaultPages);
       setRoles((prev) => [...prev, created]);

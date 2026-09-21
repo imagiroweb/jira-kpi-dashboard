@@ -8,7 +8,9 @@ export const PAGE_IDS = [
   'marketing',
   'produit',
   'pointHebdo',
-  'gestionUtilisateurs'
+  'gestionUtilisateurs',
+  'performance',
+  'performanceDashboard'
 ] as const;
 
 export type PageId = (typeof PAGE_IDS)[number];
@@ -22,11 +24,22 @@ export interface IPageVisibilities {
   produit: boolean;
   pointHebdo: boolean;
   gestionUtilisateurs: boolean;
+  /** "Ma performance" (auto-évaluation, avancement des KR) — pertinent pour tout le monde. */
+  performance: boolean;
+  /** "Performance équipe" — vue lead/CTO, voir aussi `performanceGlobalAccess` pour la portée. */
+  performanceDashboard: boolean;
 }
 
 export interface IRole extends Document {
   name: string;
   pageVisibilities: IPageVisibilities;
+  /**
+   * Portée globale sur la section Performance (CTO) : voit et peut définir les objectifs de
+   * n'importe quel collaborateur, pas seulement d'une équipe où il est lead (`Team.leadIds`).
+   * Indépendant de `pageVisibilities.performanceDashboard`, qui contrôle seulement si la page
+   * est visible, pas sa portée.
+   */
+  performanceGlobalAccess: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -39,7 +52,9 @@ const defaultPageVisibilities: IPageVisibilities = {
   marketing: true,
   produit: true,
   pointHebdo: true,
-  gestionUtilisateurs: false
+  gestionUtilisateurs: false,
+  performance: true,
+  performanceDashboard: false
 };
 
 const PageVisibilitiesSchema = new Schema<IPageVisibilities>(
@@ -51,7 +66,9 @@ const PageVisibilitiesSchema = new Schema<IPageVisibilities>(
     marketing: { type: Boolean, default: true },
     produit: { type: Boolean, default: true },
     pointHebdo: { type: Boolean, default: true },
-    gestionUtilisateurs: { type: Boolean, default: false }
+    gestionUtilisateurs: { type: Boolean, default: false },
+    performance: { type: Boolean, default: true },
+    performanceDashboard: { type: Boolean, default: false }
   },
   { _id: false }
 );
@@ -62,6 +79,10 @@ const RoleSchema = new Schema<IRole>(
     pageVisibilities: {
       type: PageVisibilitiesSchema,
       default: defaultPageVisibilities
+    },
+    performanceGlobalAccess: {
+      type: Boolean,
+      default: false
     }
   },
   { timestamps: true }

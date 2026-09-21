@@ -1,11 +1,11 @@
-import { LayoutDashboard, Users, Headphones, ChevronLeft, ChevronRight, LogOut, User, Wifi, WifiOff, RefreshCw, Flag, Megaphone, Package, ShieldCheck, CalendarClock } from 'lucide-react';
+import { LayoutDashboard, Users, Headphones, ChevronLeft, ChevronRight, LogOut, User, Wifi, WifiOff, RefreshCw, Flag, Megaphone, Package, ShieldCheck, CalendarClock, Target, Users2 } from 'lucide-react';
 import { useState } from 'react';
 import { useStore } from '../store/useStore';
 import { useSocketOptional } from '../hooks/useSocketContext';
 import { syncApi } from '../services/api';
 
 // PageType is defined in the store, we just use the same type here
-export type PageType = 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'pointHebdo' | 'gestionUtilisateurs';
+export type PageType = 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'pointHebdo' | 'gestionUtilisateurs' | 'performance' | 'performanceDashboard';
 
 interface SidebarProps {
   currentPage: PageType;
@@ -67,6 +67,18 @@ const navItems: NavItem[] = [
     label: 'Gestion des utilisateurs',
     icon: <ShieldCheck className="w-5 h-5" />,
     description: 'Droits et rôles (super admin)'
+  },
+  {
+    id: 'performance',
+    label: 'Ma performance',
+    icon: <Target className="w-5 h-5" />,
+    description: 'Objectifs OKR & auto-évaluation'
+  },
+  {
+    id: 'performanceDashboard',
+    label: 'Performance équipe',
+    icon: <Users2 className="w-5 h-5" />,
+    description: 'Suivi lead/CTO par équipe'
   }
 ];
 
@@ -79,7 +91,7 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
 
   const visiblePages = user?.visiblePages;
   const canSee = (pageId: PageType) => {
-    if (!visiblePages) return pageId !== 'gestionUtilisateurs';
+    if (!visiblePages) return pageId !== 'gestionUtilisateurs' && pageId !== 'performanceDashboard';
     return visiblePages[pageId] === true;
   };
   const filteredNavItems = navItems.filter((item) => canSee(item.id));

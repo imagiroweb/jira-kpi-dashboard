@@ -3,6 +3,7 @@ import crypto from 'crypto';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { User, IUser } from '../../domain/user/entities/User';
 import { Role, IPageVisibilities, PAGE_IDS } from '../../domain/user/entities/Role';
+import { Team } from '../../domain/team/entities/Team';
 import { UserActivityLog } from '../../domain/user/entities/UserActivityLog';
 import { emailService } from '../../infrastructure/email/NodemailerEmailService';
 import { logger } from '../../utils/logger';
@@ -46,6 +47,14 @@ export interface LoginResult {
     role?: 'super_admin' | string;
     roleName?: string;
     visiblePages?: IPageVisibilities;
+    /** Portée CTO sur la section Performance — voir `Role.performanceGlobalAccess`. */
+    performanceGlobalAccess?: boolean;
+    /** Équipe actuelle du collaborateur — voir `User.teamId`. */
+    teamId?: string | null;
+    /** Ids des équipes où ce collaborateur figure dans `Team.leadIds`. */
+    leadTeamIds?: string[];
+    /** Droit délégué de rattacher un collaborateur à sa propre équipe — voir `User.canManageTeamAssignment`. */
+    canManageTeamAssignment?: boolean;
   };
   /** True when user was just created (e.g. first Microsoft login) and must choose a role */
   firstLogin?: boolean;
@@ -244,7 +253,11 @@ export class AuthService {
           provider: userWithPerms.provider,
           role: userWithPerms.role ?? undefined,
           roleName: userWithPerms.roleName,
-          visiblePages: userWithPerms.visiblePages
+          visiblePages: userWithPerms.visiblePages,
+          performanceGlobalAccess: userWithPerms.performanceGlobalAccess,
+          teamId: userWithPerms.teamId,
+          leadTeamIds: userWithPerms.leadTeamIds,
+          canManageTeamAssignment: userWithPerms.canManageTeamAssignment
         }
       };
     } catch (error) {
@@ -323,7 +336,11 @@ export class AuthService {
           provider: userWithPerms.provider,
           role: userWithPerms.role ?? undefined,
           roleName: userWithPerms.roleName,
-          visiblePages: userWithPerms.visiblePages
+          visiblePages: userWithPerms.visiblePages,
+          performanceGlobalAccess: userWithPerms.performanceGlobalAccess,
+          teamId: userWithPerms.teamId,
+          leadTeamIds: userWithPerms.leadTeamIds,
+          canManageTeamAssignment: userWithPerms.canManageTeamAssignment
         }
       };
     } catch (error) {
@@ -419,7 +436,11 @@ export class AuthService {
           provider: userWithPerms.provider,
           role: userWithPerms.role ?? undefined,
           roleName: userWithPerms.roleName,
-          visiblePages: userWithPerms.visiblePages
+          visiblePages: userWithPerms.visiblePages,
+          performanceGlobalAccess: userWithPerms.performanceGlobalAccess,
+          teamId: userWithPerms.teamId,
+          leadTeamIds: userWithPerms.leadTeamIds,
+          canManageTeamAssignment: userWithPerms.canManageTeamAssignment
         }
       };
     } catch (error) {
@@ -502,19 +523,42 @@ export class AuthService {
       marketing: true,
       produit: true,
       pointHebdo: true,
-      gestionUtilisateurs: false
+      gestionUtilisateurs: false,
+      performance: true,
+      performanceDashboard: false
     };
   }
 
-  async buildUserWithPermissions(user: IUser): Promise<{ id: string; email: string; firstName?: string; lastName?: string; provider: string; role: 'super_admin' | string | null; roleName: string; visiblePages: IPageVisibilities }> {
+  async buildUserWithPermissions(user: IUser): Promise<{
+    id: string;
+    email: string;
+    firstName?: string;
+    lastName?: string;
+    provider: string;
+    role: 'super_admin' | string | null;
+    roleName: string;
+    visiblePages: IPageVisibilities;
+    performanceGlobalAccess: boolean;
+    teamId: string | null;
+    leadTeamIds: string[];
+    canManageTeamAssignment: boolean;
+  }> {
     const visiblePages = await this.getVisiblePages(user);
     let roleName = 'Utilisateur';
+    let performanceGlobalAccess = user.role === 'super_admin';
     const role: 'super_admin' | string | null = user.role ?? (user.roleId ? user.roleId.toString() : null);
-    if (user.role === 'super_admin') roleName = 'Super admin';
-    else if (user.roleId) {
+    if (user.role === 'super_admin') {
+      roleName = 'Super admin';
+    } else if (user.roleId) {
       const r = await Role.findById(user.roleId);
-      if (r) roleName = r.name;
+      if (r) {
+        roleName = r.name;
+        performanceGlobalAccess = r.performanceGlobalAccess ?? false;
+      }
     }
+
+    const ledTeams = await Team.find({ leadIds: user._id }).select('_id').lean();
+
     return {
       id: user._id.toString(),
       email: user.email,
@@ -523,7 +567,11 @@ export class AuthService {
       provider: user.provider,
       role: role ?? null,
       roleName,
-      visiblePages
+      visiblePages,
+      performanceGlobalAccess,
+      teamId: user.teamId ? user.teamId.toString() : null,
+      leadTeamIds: ledTeams.map((t) => String(t._id)),
+      canManageTeamAssignment: user.canManageTeamAssignment ?? false
     };
   }
 
@@ -551,7 +599,11 @@ export class AuthService {
           provider: withPerms.provider,
           role: withPerms.role ?? undefined,
           roleName: withPerms.roleName,
-          visiblePages: withPerms.visiblePages
+          visiblePages: withPerms.visiblePages,
+          performanceGlobalAccess: withPerms.performanceGlobalAccess,
+          teamId: withPerms.teamId,
+          leadTeamIds: withPerms.leadTeamIds,
+          canManageTeamAssignment: withPerms.canManageTeamAssignment
         }
       };
     } catch (error) {
