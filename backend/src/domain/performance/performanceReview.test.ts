@@ -12,9 +12,14 @@ import {
   computeGeneralAssessmentGlobalScoreOrNull,
   computeKeyResultProgressStatus,
   computeObjectiveProgress,
+  computeObjectiveWeightedScore,
+  computeCoachingStatus,
+  computeCyclePace,
+  computeReviewCoaching,
   computeReviewScore,
   completeGeneralSelfAssessment,
   completeQualitative,
+  canCompleteReview,
   computeReviewStatus,
   isGeneralManagerAssessmentComplete,
   GENERAL_ASSESSMENT_REFERENTIAL,
@@ -102,6 +107,54 @@ describe('computeObjectiveProgress', () => {
       ]
     });
     expect(computeObjectiveProgress(objective)).toBe(80);
+  });
+});
+
+describe('computeObjectiveWeightedScore', () => {
+  it('multiplie l’avancement par le poids de l’objectif', () => {
+    const objective = makeObjective({
+      weight: 0.3,
+      krs: [makeKr({ weight: 1, progress: 50 })]
+    });
+    expect(computeObjectiveWeightedScore(objective)).toBeCloseTo(15);
+  });
+});
+
+describe('computeCyclePace / computeCoachingStatus', () => {
+  const start = '2026-07-01';
+  const end = '2026-12-31';
+
+  it('attend 50 % à mi-semestre', () => {
+    const pace = computeCyclePace(start, end, new Date('2026-10-01T00:00:00.000Z'));
+    expect(pace.expectedProgress).toBeCloseTo(50.27, 0);
+    expect(pace.monthIndex).toBe(4);
+  });
+
+  it('classe performant / en progression / action à mener autour de la bande de 8 pts', () => {
+    expect(computeCoachingStatus(60, 50)).toBe('performant');
+    expect(computeCoachingStatus(50, 50)).toBe('en_progression');
+    expect(computeCoachingStatus(40, 50)).toBe('action_a_mener');
+  });
+
+  it('agrège le score pondéré de la fiche pour le statut d’accompagnement total', () => {
+    const coaching = computeReviewCoaching(
+      [
+        makeObjective({
+          id: 'o1',
+          weight: 0.4,
+          krs: [makeKr({ weight: 1, progress: 20 })]
+        }),
+        makeObjective({
+          id: 'o2',
+          weight: 0.6,
+          krs: [makeKr({ id: 'kr2', weight: 1, progress: 20 })]
+        })
+      ],
+      { startDate: start, endDate: end },
+      new Date('2026-10-01T00:00:00.000Z')
+    );
+    expect(coaching.weightedScore).toBeCloseTo(20);
+    expect(coaching.status).toBe('action_a_mener');
   });
 });
 
@@ -625,6 +678,49 @@ describe('applyManagerAssessment', () => {
     expect(result.objectives[0].selfAssessment).toEqual({ status: 'atteint', comment: 'Auto-évaluation' });
   });
 
+  it("persiste l'action d'accompagnement saisie par le manager", () => {
+    const objectives: IObjective[] = [
+      {
+        id: 'obj-1',
+        title: 'X',
+        weight: 1,
+        krs: [],
+        selfAssessment: {},
+        managerAssessment: { status: 'partiellement_atteint' }
+      }
+    ];
+
+    const result = applyManagerAssessment(
+      { objectives, qualitative: baseQualitative() },
+      { objectives: [{ id: 'obj-1', coachingAction: 'Prioriser le KR incidents cette semaine' }] }
+    );
+
+    expect(result.objectives[0].managerAssessment).toEqual({
+      status: 'partiellement_atteint',
+      coachingAction: 'Prioriser le KR incidents cette semaine'
+    });
+  });
+
+  it("efface l'action d'accompagnement quand le manager envoie une chaîne vide", () => {
+    const objectives: IObjective[] = [
+      {
+        id: 'obj-1',
+        title: 'X',
+        weight: 1,
+        krs: [],
+        selfAssessment: {},
+        managerAssessment: { coachingAction: 'Ancienne action' }
+      }
+    ];
+
+    const result = applyManagerAssessment(
+      { objectives, qualitative: baseQualitative() },
+      { objectives: [{ id: 'obj-1', coachingAction: '   ' }] }
+    );
+
+    expect(result.objectives[0].managerAssessment.coachingAction).toBeUndefined();
+  });
+
   it('ignore une évaluation dont l\'id ne correspond à aucun objectif', () => {
     const objectives: IObjective[] = [
       { id: 'obj-1', title: 'X', weight: 1, krs: [], selfAssessment: {}, managerAssessment: {} }
@@ -660,6 +756,15 @@ describe('applyManagerAssessment', () => {
     const qualitative = baseQualitative();
     applyManagerAssessment({ objectives: [], qualitative }, { qualitative: { successes: 'X' } });
     expect(qualitative.successes).toEqual({});
+  });
+
+  it('tolère une fiche dont qualitative est absente (défaut Mongoose {})', () => {
+    const result = applyManagerAssessment(
+      { objectives: [], qualitative: undefined as unknown as IQualitative },
+      { qualitative: { successes: 'Manager : ok' } }
+    );
+    expect(result.qualitative.successes).toEqual({ manager: 'Manager : ok' });
+    expect(result.qualitative.challenges).toEqual({});
   });
 });
 
@@ -716,14 +821,25 @@ describe('computeReviewStatus', () => {
     expect(computeReviewStatus([{ managerAssessment: {} }], emptyAxes(), 'dossier_manquant')).toBe('en_cours');
   });
 
-  it('passe à "complete" quand tous les objectifs ont une évaluation manager ET la grille générale est complète', () => {
+  it('reste "en_cours" même si tous les objectifs et la grille manager sont complets (la clôture est un CTA dédié)', () => {
     expect(
       computeReviewStatus(
         [{ managerAssessment: { status: 'atteint' } }, { managerAssessment: { status: 'depasse' } }],
         fullAxes(),
         'en_cours'
       )
-    ).toBe('complete');
+    ).toBe('en_cours');
+  });
+
+  it('autorise la validation du semestre seulement quand objectifs et grille manager sont complets', () => {
+    expect(
+      canCompleteReview(
+        [{ managerAssessment: { status: 'atteint' } }, { managerAssessment: { status: 'depasse' } }],
+        fullAxes()
+      )
+    ).toEqual({ valid: true, errors: [] });
+    expect(canCompleteReview([{ managerAssessment: { status: 'atteint' } }], emptyAxes()).valid).toBe(false);
+    expect(canCompleteReview([], fullAxes()).valid).toBe(false);
   });
 
   it("reste \"en_cours\" si tous les objectifs sont évalués mais que la grille générale manager n'est pas complète", () => {
@@ -773,6 +889,27 @@ describe('applySelfAssessment', () => {
 
     expect(result.objectives[0].selfAssessment).toEqual({ status: 'depasse', comment: 'Je suis fier du résultat' });
     expect(result.objectives[0].managerAssessment).toEqual({ status: 'atteint', comment: 'Évaluation manager' });
+  });
+
+  it("n'écrit pas l'action d'accompagnement envoyée côté self et ne touche pas à celle du manager", () => {
+    const objectives: IObjective[] = [
+      {
+        id: 'obj-1',
+        title: 'X',
+        weight: 1,
+        krs: [],
+        selfAssessment: {},
+        managerAssessment: { coachingAction: 'Prioriser le KR incidents' }
+      }
+    ];
+
+    const result = applySelfAssessment(
+      { objectives, qualitative: baseQualitative() },
+      { objectives: [{ id: 'obj-1', status: 'atteint', coachingAction: 'Je m’assigne une autre action' }] }
+    );
+
+    expect(result.objectives[0].selfAssessment).toEqual({ status: 'atteint' });
+    expect(result.objectives[0].managerAssessment).toEqual({ coachingAction: 'Prioriser le KR incidents' });
   });
 
   it('fusionne le bilan qualitatif côté self sans écraser le manager', () => {

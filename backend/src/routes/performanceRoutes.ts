@@ -48,6 +48,7 @@ import {
   completeGeneralAssessmentAxes,
   completeGeneralSelfAssessment,
   completeQualitative,
+  canCompleteReview,
   computeReviewStatus,
   GeneralAssessmentAxesInput,
   GeneralSelfAssessmentInput,
@@ -932,8 +933,6 @@ router.patch('/reviews/:userId/general-manager-assessment', authenticate, async 
         current.toObject().generalManagerAssessment?.axes,
         resolvedAxesInput
       );
-      // La grille générale entre elle aussi dans le calcul du statut "Complète" de la fiche
-      // (voir computeReviewStatus) — cette route ne le mettait pas à jour jusqu'ici.
       const status = computeReviewStatus(current.toObject().objectives, generalManagerAssessment, current.status);
 
       const $set: Record<string, unknown> = {
@@ -1041,6 +1040,72 @@ router.patch('/reviews/:userId/manager-assessment', authenticate, async (req: Re
   }
 });
 
+/**
+ * Clôture explicite du semestre (passe la fiche à "complete"). L'enregistrement de l'évaluation
+ * manager ne le fait plus tout seul : on reste "en_cours" jusqu'à ce CTA. Exige que tous les
+ * objectifs aient un statut manager et que la grille générale manager soit complète.
+ * PATCH /api/performance/reviews/:userId/complete
+ */
+router.patch('/reviews/:userId/complete', authenticate, async (req: Request, res: Response) => {
+  try {
+    const { userId } = req.params;
+
+    const cycle = await resolveCycle(req.body?.cycleId);
+    if (cycle === undefined) return fail(res, 400, 'Identifiant de cycle invalide');
+    if (!cycle) return fail(res, 404, req.body?.cycleId ? 'Cycle introuvable' : 'Aucun cycle de performance actif');
+    if (cycle.status !== 'active') {
+      return fail(res, 403, 'Ce cycle est clos, le semestre ne peut plus être validé');
+    }
+
+    const actor = await loadPerformanceActorContext(req.user!.userId);
+    if (!actor) return fail(res, 404, 'Utilisateur authentifié introuvable');
+
+    let updated: IPerformanceReview | null = null;
+
+    for (let attempt = 0; attempt < REVIEW_UPDATE_RETRIES; attempt += 1) {
+      const current = await PerformanceReview.findOne({ user: userId, cycle: cycle._id });
+      if (!current) {
+        return fail(res, 404, "Aucune fiche de performance pour ce cycle — définissez d'abord ses objectifs");
+      }
+
+      const reviewTeamId = current.team?.toString();
+      if (!canAccessReviewForTeam(actor, reviewTeamId)) {
+        return fail(res, 403, "Vous n'avez pas accès à la fiche de ce collaborateur");
+      }
+
+      if (current.status === 'complete') {
+        return res.json({ success: true, review: serialize(current) });
+      }
+
+      const plain = current.toObject();
+      const readiness = canCompleteReview(
+        plain.objectives,
+        completeGeneralAssessmentAxes(plain.generalManagerAssessment?.axes)
+      );
+      if (!readiness.valid) {
+        return fail(res, 400, readiness.errors.join(', '));
+      }
+
+      const who = { ...author(req), role: resolveAuthorRole(actor, reviewTeamId) };
+
+      updated = await PerformanceReview.findOneAndUpdate(
+        { _id: current._id, __v: current.__v },
+        { $set: { status: 'complete', updatedBy: who } },
+        { new: true, runValidators: true }
+      );
+      if (updated) break;
+    }
+
+    if (!updated) {
+      return fail(res, 409, 'La fiche a été modifiée en même temps, réessayez');
+    }
+
+    res.json({ success: true, review: serialize(updated) });
+  } catch (error) {
+    logger.error('Error completing performance review:', error);
+    fail(res, 500, 'Erreur lors de la validation du semestre', error);
+  }
+});
 
 /**
  * Auto-évaluation du collaborateur sur sa propre fiche (par objectif, bilan qualitatif "self") —

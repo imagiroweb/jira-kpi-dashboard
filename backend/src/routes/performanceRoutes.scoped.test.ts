@@ -1010,7 +1010,7 @@ describe('performanceRoutes — portée équipe/CTO (TI)', () => {
       }
     };
 
-    it('200 applique l\'évaluation manager et passe la fiche à "complete" (tous objectifs évalués + grille générale complète)', async () => {
+    it('200 applique l\'évaluation manager sans passer la fiche à "complete" (clôture réservée au CTA semestre)', async () => {
       mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
       mockReviewFindOne.mockResolvedValue(
         makeReviewDoc({
@@ -1026,7 +1026,7 @@ describe('performanceRoutes — portée équipe/CTO (TI)', () => {
       mockReviewFindOneAndUpdate.mockResolvedValue(
         makeReviewDoc({
           team: TEAM_A_ID,
-          status: 'complete',
+          status: 'en_cours',
           objectives: [objectiveFixture({ managerAssessment: { status: 'atteint', comment: 'Bien joué' } })]
         })
       );
@@ -1035,7 +1035,7 @@ describe('performanceRoutes — portée équipe/CTO (TI)', () => {
 
       expect(res.status).toBe(200);
       const [, update] = mockReviewFindOneAndUpdate.mock.calls[0];
-      expect(update.$set.status).toBe('complete');
+      expect(update.$set.status).toBe('en_cours');
       expect(update.$set.objectives[0].managerAssessment).toEqual({ status: 'atteint', comment: 'Bien joué' });
     });
 
@@ -1074,6 +1074,60 @@ describe('performanceRoutes — portée équipe/CTO (TI)', () => {
 
       expect(res.status).toBe(409);
       expect(mockReviewFindOneAndUpdate).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  describe('PATCH /reviews/:userId/complete', () => {
+    const url = `/api/performance/reviews/${TARGET_USER_ID}/complete`;
+
+    it('400 si les pré-conditions de clôture ne sont pas réunies', async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(
+        makeReviewDoc({ team: TEAM_A_ID, objectives: [objectiveFixture()], status: 'en_cours' })
+      );
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+
+      const res = await request(app).patch(url).send({});
+
+      expect(res.status).toBe(400);
+      expect(mockReviewFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('200 passe la fiche à "complete" quand objectifs et grille manager sont complets', async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(
+        makeReviewDoc({
+          team: TEAM_A_ID,
+          status: 'en_cours',
+          objectives: [objectiveFixture({ managerAssessment: { status: 'atteint', comment: 'Bien joué' } })],
+          generalManagerAssessment: {
+            axes: {
+              technique: [{ label: 'Qualité du code', score: 4, answer: 'Bon' }],
+              impact: [{ label: 'Delivery', score: 3, answer: 'Correct' }],
+              collaboration: [{ label: 'Entraide', score: 5, answer: 'Excellent' }],
+              leadership: [{ label: 'Mentorat', score: 2, answer: 'Faible' }]
+            }
+          }
+        })
+      );
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      mockReviewFindOneAndUpdate.mockResolvedValue(
+        makeReviewDoc({
+          team: TEAM_A_ID,
+          status: 'complete',
+          objectives: [objectiveFixture({ managerAssessment: { status: 'atteint', comment: 'Bien joué' } })]
+        })
+      );
+
+      const res = await request(app).patch(url).send({});
+
+      expect(res.status).toBe(200);
+      const [, update] = mockReviewFindOneAndUpdate.mock.calls[0];
+      expect(update.$set.status).toBe('complete');
     });
   });
 });

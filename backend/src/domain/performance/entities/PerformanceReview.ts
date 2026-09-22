@@ -69,6 +69,11 @@ export interface IKeyResult {
 export interface IObjectiveAssessment {
   status?: ObjectiveAssessmentStatus;
   comment?: string;
+  /**
+   * Action d'accompagnement saisie par le manager — le collaborateur doit la suivre
+   * (affichée sur "Ma performance" quand le statut est en retard).
+   */
+  coachingAction?: string;
 }
 
 export interface IObjective {
@@ -190,7 +195,8 @@ const KeyResultSchema = new Schema<IKeyResult>(
 const ObjectiveAssessmentSchema = new Schema<IObjectiveAssessment>(
   {
     status: { type: String, enum: OBJECTIVE_ASSESSMENT_STATUSES },
-    comment: { type: String, trim: true }
+    comment: { type: String, trim: true },
+    coachingAction: { type: String, trim: true }
   },
   { _id: false }
 );

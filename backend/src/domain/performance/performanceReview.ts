@@ -67,6 +67,150 @@ export function computeReviewScore(objectives: Pick<IObjective, 'weight' | 'krs'
 }
 
 /**
+ * Score pondéré d'un objectif (0-100 de la fiche) : avancement × poids. Un objectif à 30 %
+ * réalisé à 50 % contribue 15 points au score global.
+ */
+export function computeObjectiveWeightedScore(objective: Pick<IObjective, 'weight' | 'krs'>): number {
+  return (objective.weight || 0) * computeObjectiveProgress(objective);
+}
+
+/** Un semestre de performance est réparti en 6 mois, courbe d'avancement linéaire. */
+export const PERFORMANCE_CYCLE_MONTHS = 6;
+
+/**
+ * Bande (points de %) autour de la courbe attendue pour rester "en progression" :
+ * un écart de moins d'un demi-mois (~8 pts sur 6 mois) est encore dans les délais.
+ */
+export const COACHING_ON_TRACK_TOLERANCE = 8;
+
+export const COACHING_STATUSES = ['performant', 'en_progression', 'action_a_mener'] as const;
+export type CoachingStatus = (typeof COACHING_STATUSES)[number];
+
+export interface CyclePace {
+  elapsedRatio: number;
+  expectedProgress: number;
+  elapsedMonths: number;
+  remainingMonths: number;
+  monthIndex: number;
+}
+
+/**
+ * Position dans le semestre : le temps écoulé entre `startDate` et `endDate` est découpé
+ * en 6 parts égales. Avant le début → 0 ; après la fin → 1. `now` est injectable pour
+ * les tests (sinon la date du jour).
+ */
+export function computeCyclePace(
+  startDate: string,
+  endDate: string,
+  now: Date = new Date()
+): CyclePace {
+  const start = new Date(startDate).getTime();
+  const end = new Date(endDate).getTime();
+  const t = now.getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return {
+      elapsedRatio: 0,
+      expectedProgress: 0,
+      elapsedMonths: 0,
+      remainingMonths: PERFORMANCE_CYCLE_MONTHS,
+      monthIndex: 1
+    };
+  }
+
+  const elapsedRatio = Math.min(1, Math.max(0, (t - start) / (end - start)));
+  const elapsedMonths = elapsedRatio * PERFORMANCE_CYCLE_MONTHS;
+  const remainingMonths = PERFORMANCE_CYCLE_MONTHS - elapsedMonths;
+  const monthIndex = Math.min(
+    PERFORMANCE_CYCLE_MONTHS,
+    Math.max(1, elapsedRatio <= 0 ? 1 : Math.ceil(elapsedMonths))
+  );
+
+  return {
+    elapsedRatio,
+    expectedProgress: elapsedRatio * 100,
+    elapsedMonths,
+    remainingMonths,
+    monthIndex
+  };
+}
+
+/**
+ * Statut d'accompagnement : en avance → performant, dans la bande des délais →
+ * en progression, en retard → action à mener.
+ */
+export function computeCoachingStatus(actualProgress: number, expectedProgress: number): CoachingStatus {
+  if (actualProgress > expectedProgress + COACHING_ON_TRACK_TOLERANCE) return 'performant';
+  if (actualProgress < expectedProgress - COACHING_ON_TRACK_TOLERANCE) return 'action_a_mener';
+  return 'en_progression';
+}
+
+export interface ObjectiveCoachingSnapshot {
+  progress: number;
+  weight: number;
+  weightedScore: number;
+  expectedProgress: number;
+  expectedWeightedScore: number;
+  remainingMonths: number;
+  elapsedMonths: number;
+  monthIndex: number;
+  status: CoachingStatus;
+}
+
+export function computeObjectiveCoaching(
+  objective: Pick<IObjective, 'weight' | 'krs'>,
+  cycle: { startDate: string; endDate: string },
+  now: Date = new Date()
+): ObjectiveCoachingSnapshot {
+  const pace = computeCyclePace(cycle.startDate, cycle.endDate, now);
+  const progress = computeObjectiveProgress(objective);
+  const weight = objective.weight || 0;
+  return {
+    progress,
+    weight,
+    weightedScore: weight * progress,
+    expectedProgress: pace.expectedProgress,
+    expectedWeightedScore: weight * pace.expectedProgress,
+    remainingMonths: pace.remainingMonths,
+    elapsedMonths: pace.elapsedMonths,
+    monthIndex: pace.monthIndex,
+    status: computeCoachingStatus(progress, pace.expectedProgress)
+  };
+}
+
+export function computeReviewCoaching(
+  objectives: Pick<IObjective, 'weight' | 'krs'>[],
+  cycle: { startDate: string; endDate: string },
+  now: Date = new Date()
+): ObjectiveCoachingSnapshot {
+  const pace = computeCyclePace(cycle.startDate, cycle.endDate, now);
+  const progress = computeReviewScore(objectives);
+  return {
+    progress,
+    weight: 1,
+    weightedScore: progress,
+    expectedProgress: pace.expectedProgress,
+    expectedWeightedScore: pace.expectedProgress,
+    remainingMonths: pace.remainingMonths,
+    elapsedMonths: pace.elapsedMonths,
+    monthIndex: pace.monthIndex,
+    status: computeCoachingStatus(progress, pace.expectedProgress)
+  };
+}
+
+export function cycleMonthCheckpoints(): number[] {
+  return Array.from(
+    { length: PERFORMANCE_CYCLE_MONTHS },
+    (_, index) => ((index + 1) / PERFORMANCE_CYCLE_MONTHS) * 100
+  );
+}
+
+export function formatWeightedScore(weightedScore: number, weight: number): string {
+  const maxPoints = Math.round(weight * 100);
+  const points = Math.round(weightedScore);
+  return `${points} / ${maxPoints} pts`;
+}
+
+/**
  * Score d'un axe de l'auto-évaluation générale (0-5) : moyenne des scores de ses sous-critères,
  * 0 si l'axe n'en a aucun — même logique que `computeObjectiveProgress`. Reprend la formule
  * `AVERAGE(...)` déjà présente dans les fichiers `evaluations-individuelles/*.xlsx` (une par
@@ -304,6 +448,8 @@ export interface ObjectiveAssessmentInput {
   id: string;
   status?: ObjectiveAssessmentStatus;
   comment?: string;
+  /** Action d'accompagnement — uniquement persistée côté manager (ignorée en auto-évaluation). */
+  coachingAction?: string;
 }
 
 /** Champs qualitatifs remplis d'un côté (self ou manager) — undefined = ne pas toucher au champ. */
@@ -348,22 +494,30 @@ function applyAssessment(
     const assessment = assessmentsByObjectiveId.get(objective.id);
     if (!assessment) return objective;
     const currentAssessment = objective[assessmentField];
+    const nextCoachingAction =
+      side === 'manager'
+        ? assessment.coachingAction !== undefined
+          ? assessment.coachingAction.trim() || undefined
+          : currentAssessment?.coachingAction
+        : currentAssessment?.coachingAction;
     const nextAssessment: IObjectiveAssessment = {
       status: assessment.status ?? currentAssessment?.status,
-      comment: assessment.comment ?? currentAssessment?.comment
+      comment: assessment.comment ?? currentAssessment?.comment,
+      ...(nextCoachingAction ? { coachingAction: nextCoachingAction } : {})
     };
     return { ...objective, [assessmentField]: nextAssessment };
   });
 
   const qualitativeInput = input.qualitative ?? {};
+  const currentQualitative = completeQualitative(target.qualitative);
   const mergeQualitativeEntry = (entry: IQualitative[keyof IQualitative], value: string | undefined) =>
     value !== undefined ? { ...entry, [side]: value } : entry;
 
   const qualitative: IQualitative = {
-    successes: mergeQualitativeEntry(target.qualitative.successes, qualitativeInput.successes),
-    challenges: mergeQualitativeEntry(target.qualitative.challenges, qualitativeInput.challenges),
-    growthAreas: mergeQualitativeEntry(target.qualitative.growthAreas, qualitativeInput.growthAreas),
-    overallReview: mergeQualitativeEntry(target.qualitative.overallReview, qualitativeInput.overallReview)
+    successes: mergeQualitativeEntry(currentQualitative.successes, qualitativeInput.successes),
+    challenges: mergeQualitativeEntry(currentQualitative.challenges, qualitativeInput.challenges),
+    growthAreas: mergeQualitativeEntry(currentQualitative.growthAreas, qualitativeInput.growthAreas),
+    overallReview: mergeQualitativeEntry(currentQualitative.overallReview, qualitativeInput.overallReview)
   };
 
   return { objectives, qualitative };
@@ -397,29 +551,46 @@ export function isGeneralManagerAssessmentComplete(axes: IGeneralAssessmentAxes)
 }
 
 /**
- * Statut dérivé de la fiche après une action (définition d'objectifs, évaluation manager par
- * objectif, ou grille générale manager) : passe à "complete" dès que tous les objectifs ont reçu
- * un statut d'évaluation manager ET que la grille générale manager est elle-même complète (voir
- * `isGeneralManagerAssessmentComplete`) ; sinon fait avancer "dossier_manquant" vers "en_cours"
- * dès qu'il y a du contenu à évaluer (un objectif défini). Ne revient jamais en arrière (un statut
- * "complete" existant est conservé même si, par exemple, un nouvel objectif sans évaluation est
- * ajouté — cette régression éventuelle est un choix produit à trancher séparément).
+ * Statut dérivé de la fiche après une action courante (définition d'objectifs, enregistrement
+ * d'une évaluation) : fait avancer "dossier_manquant" vers "en_cours" dès qu'un objectif existe.
+ * Ne passe jamais à "complete" tout seul — ce passage n'est autorisé que via
+ * `canCompleteReview` + le CTA "Valider le semestre". Un statut "complete" déjà posé est
+ * conservé. `generalManagerAssessment` est accepté pour ne pas casser les appels existants ;
+ * il n'entre plus dans ce calcul.
  */
 export function computeReviewStatus(
   objectives: Pick<IObjective, 'managerAssessment'>[],
-  generalManagerAssessment: IGeneralAssessmentAxes,
+  _generalManagerAssessment: IGeneralAssessmentAxes,
   currentStatus: PerformanceReviewStatus
 ): PerformanceReviewStatus {
   if (currentStatus === 'complete') return currentStatus;
   if (objectives.length === 0) return currentStatus;
-  const objectivesComplete = objectives.every((o) => !!o.managerAssessment?.status);
-  if (objectivesComplete && isGeneralManagerAssessmentComplete(generalManagerAssessment)) {
-    return 'complete';
-  }
   if (currentStatus === 'dossier_manquant') {
     return 'en_cours';
   }
   return currentStatus;
+}
+
+/**
+ * Pré-conditions pour clôturer le semestre (CTA "Valider le semestre") : tous les objectifs ont
+ * un statut manager, et la grille générale manager est complète. Distinct de
+ * `computeReviewStatus`, qui ne fait plus ce passage automatiquement à l'enregistrement.
+ */
+export function canCompleteReview(
+  objectives: Pick<IObjective, 'managerAssessment'>[],
+  generalManagerAssessment: IGeneralAssessmentAxes
+): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  if (objectives.length === 0) {
+    errors.push('Au moins un objectif est requis pour valider le semestre');
+  }
+  if (objectives.some((objective) => !objective.managerAssessment?.status)) {
+    errors.push("Chaque objectif doit avoir un statut d'évaluation manager");
+  }
+  if (!isGeneralManagerAssessmentComplete(generalManagerAssessment)) {
+    errors.push("La grille d'évaluation manager doit être complète");
+  }
+  return { valid: errors.length === 0, errors };
 }
 
 /** Mongoose `default: () => ({})` omet les sous-clés : l'API doit toujours les exposer. */
