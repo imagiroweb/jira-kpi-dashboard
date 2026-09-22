@@ -19,6 +19,9 @@ const mockUserFindById = jest.fn();
 const mockUserFind = jest.fn();
 const mockRoleFindById = jest.fn();
 const mockTeamFind = jest.fn();
+const mockProfileFind = jest.fn();
+const mockProfileFindOne = jest.fn();
+const mockProfileFindOneAndUpdate = jest.fn();
 
 jest.mock('../domain/performance/entities/PerformanceCycle', () => {
   const actual = jest.requireActual('../domain/performance/entities/PerformanceCycle');
@@ -66,6 +69,18 @@ jest.mock('../domain/team/entities/Team', () => ({
   }
 }));
 
+jest.mock('../domain/performance/entities/GeneralAssessmentReferentialProfile', () => {
+  const actual = jest.requireActual('../domain/performance/entities/GeneralAssessmentReferentialProfile');
+  return {
+    ...actual,
+    GeneralAssessmentReferentialProfile: {
+      find: (...args: unknown[]) => mockProfileFind(...args),
+      findOne: (...args: unknown[]) => mockProfileFindOne(...args),
+      findOneAndUpdate: (...args: unknown[]) => mockProfileFindOneAndUpdate(...args)
+    }
+  };
+});
+
 jest.mock('../middleware/authMiddleware', () => {
   const auth = jest.requireActual<typeof import('../test/mocks/authMiddleware')>('../test/mocks/authMiddleware');
   return { authenticate: auth.mockAuthenticate() };
@@ -110,6 +125,8 @@ function makeReviewDoc(overrides: Record<string, unknown> = {}) {
     objectives: [] as unknown[],
     qualitative: {},
     competencyScores: {},
+    generalSelfAssessment: { axes: { technique: [], impact: [], collaboration: [], leadership: [] } },
+    generalManagerAssessment: { axes: { technique: [], impact: [], collaboration: [], leadership: [] } },
     status: 'dossier_manquant',
     createdBy: { id: TEST_USER_ID, name: 'admin', role: 'collaborateur' },
     createdAt: new Date('2026-09-01'),
@@ -118,7 +135,14 @@ function makeReviewDoc(overrides: Record<string, unknown> = {}) {
   };
   return {
     ...base,
-    toObject: () => structuredClone({ objectives: base.objectives, qualitative: base.qualitative, competencyScores: base.competencyScores }),
+    toObject: () =>
+      structuredClone({
+        objectives: base.objectives,
+        qualitative: base.qualitative,
+        competencyScores: base.competencyScores,
+        generalSelfAssessment: base.generalSelfAssessment,
+        generalManagerAssessment: base.generalManagerAssessment
+      }),
     populate: () => Promise.resolve(base)
   };
 }
@@ -454,6 +478,496 @@ describe('performanceRoutes — portée équipe/CTO (TI)', () => {
     });
   });
 
+  describe('PATCH /reviews/:userId/general-self-assessment', () => {
+    const url = `/api/performance/reviews/${TARGET_USER_ID}/general-self-assessment`;
+    const validPayload = { axes: { technique: [{ label: 'Qualité du code & revues', score: 5 }] } };
+
+    it("400 si axes n'est pas un objet", async () => {
+      const res = await request(app).patch(url).send({ axes: 'nope' });
+      expect(res.status).toBe(400);
+    });
+
+    it('400 si la définition est invalide (note hors 1-5)', async () => {
+      const res = await request(app)
+        .patch(url)
+        .send({ axes: { technique: [{ label: 'X', score: 7 }] } });
+      expect(res.status).toBe(400);
+    });
+
+    it('404 si aucun cycle actif', async () => {
+      mockCycleFindOne.mockResolvedValue(null);
+      const res = await request(app).patch(url).send(validPayload);
+      expect(res.status).toBe(404);
+    });
+
+    it('403 si le cycle ciblé est clos', async () => {
+      mockCycleFindById.mockResolvedValue(CLOSED_CYCLE);
+      const res = await request(app).patch(url).send({ ...validPayload, cycleId: VALID_CYCLE_OBJECT_ID });
+      expect(res.status).toBe(403);
+    });
+
+    it("403 si l'acteur n'a pas accès à l'équipe du collaborateur", async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(null);
+      mockUserFindById.mockImplementation((id: string) => {
+        if (id === TEST_USER_ID) return { select: () => ({ lean: () => Promise.resolve(actorLean()) }) };
+        return { select: () => ({ lean: () => Promise.resolve({ teamId: TEAM_A_ID }) }) };
+      });
+
+      const res = await request(app).patch(url).send(validPayload);
+      expect(res.status).toBe(403);
+    });
+
+    it("200 un lead définit l'auto-évaluation générale et crée la fiche à la volée pour un membre de son équipe", async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(null);
+      mockUserFindById.mockImplementation((id: string) => {
+        if (id === TEST_USER_ID) return { select: () => ({ lean: () => Promise.resolve(actorLean()) }) };
+        return { select: () => ({ lean: () => Promise.resolve({ teamId: TEAM_A_ID }) }) };
+      });
+      mockTeamFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([{ _id: TEAM_A_ID }]) }) });
+      mockReviewCreate.mockResolvedValue(makeReviewDoc({ team: TEAM_A_ID }));
+      mockReviewFindOneAndUpdate.mockResolvedValue(
+        makeReviewDoc({ team: TEAM_A_ID, generalSelfAssessment: { axes: { technique: [{ label: 'Qualité du code & revues', score: 5 }], impact: [], collaboration: [], leadership: [] } } })
+      );
+
+      const res = await request(app).patch(url).send(validPayload);
+
+      expect(res.status).toBe(200);
+      expect(mockReviewCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ user: TARGET_USER_ID, team: TEAM_A_ID })
+      );
+      expect(res.body.review.generalSelfAssessment.technique).toEqual([
+        { label: 'Qualité du code & revues', score: 5 }
+      ]);
+    });
+
+    it("200 remplace les sous-critères de l'axe fourni sans toucher aux autres axes déjà renseignés", async () => {
+      const existing = makeReviewDoc({
+        team: TEAM_A_ID,
+        generalSelfAssessment: {
+          axes: {
+            technique: [{ label: 'Ancien critère', score: 2 }],
+            impact: [{ label: 'Livraison (delivery)', score: 4 }],
+            collaboration: [],
+            leadership: []
+          }
+        }
+      });
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(existing);
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      mockReviewFindOneAndUpdate.mockResolvedValue(makeReviewDoc({ team: TEAM_A_ID }));
+
+      const res = await request(app).patch(url).send(validPayload);
+
+      expect(res.status).toBe(200);
+      const [, update] = mockReviewFindOneAndUpdate.mock.calls[0];
+      expect(update.$set.generalSelfAssessment.axes.technique).toEqual([
+        { label: 'Qualité du code & revues', score: 5 }
+      ]);
+      expect(update.$set.generalSelfAssessment.axes.impact).toEqual([
+        { label: 'Livraison (delivery)', score: 4 }
+      ]);
+    });
+
+    it('409 si la fiche a été modifiée en même temps (verrou optimiste épuisé)', async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(makeReviewDoc({ team: TEAM_A_ID }));
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      mockReviewFindOneAndUpdate.mockResolvedValue(null);
+
+      const res = await request(app).patch(url).send(validPayload);
+
+      expect(res.status).toBe(409);
+      expect(mockReviewFindOneAndUpdate).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  describe('PATCH /reviews/:userId/general-manager-assessment', () => {
+    const url = `/api/performance/reviews/${TARGET_USER_ID}/general-manager-assessment`;
+
+    /** Référentiel minimal utilisé par ces tests : un sous-critère par axe technique/impact, chacun avec ses 5 réponses. */
+    function referentialProfileFixture(overrides: Record<string, unknown> = {}) {
+      return {
+        roleProfile: 'dev_back',
+        label: 'Développeur Back',
+        axes: {
+          technique: [
+            {
+              label: 'Qualité du code & revues',
+              answers: [
+                { text: 'Réponse 1 (faible)', points: 1 },
+                { text: 'Réponse 2', points: 2 },
+                { text: 'Réponse 3', points: 3 },
+                { text: 'Réponse correcte', points: 4 },
+                { text: 'Réponse excellente', points: 5 }
+              ]
+            }
+          ],
+          impact: [
+            {
+              label: 'Livraison (delivery)',
+              answers: [
+                { text: 'R1', points: 1 },
+                { text: 'R2', points: 2 },
+                { text: 'R3', points: 3 },
+                { text: 'R4 bonne', points: 4 },
+                { text: 'R5', points: 5 }
+              ]
+            }
+          ],
+          collaboration: [],
+          leadership: []
+        },
+        ...overrides
+      };
+    }
+
+    const validPayload = {
+      roleProfile: 'dev_back',
+      axes: { technique: [{ label: 'Qualité du code & revues', answer: 'Réponse correcte' }] }
+    };
+
+    it("400 si axes n'est pas un objet", async () => {
+      const res = await request(app).patch(url).send({ axes: 'nope' });
+      expect(res.status).toBe(400);
+    });
+
+    it('400 si un sous-critère est incomplet (réponse manquante)', async () => {
+      const res = await request(app)
+        .patch(url)
+        .send({ roleProfile: 'dev_back', axes: { technique: [{ label: 'X' }] } });
+      expect(res.status).toBe(400);
+      expect(mockProfileFindOne).not.toHaveBeenCalled();
+    });
+
+    it('400 si roleProfile est inconnu', async () => {
+      const res = await request(app)
+        .patch(url)
+        .send({ roleProfile: 'product_owner', axes: { technique: [{ label: 'X', answer: 'Y' }] } });
+      expect(res.status).toBe(400);
+    });
+
+    it('404 si aucun cycle actif', async () => {
+      mockCycleFindOne.mockResolvedValue(null);
+      const res = await request(app).patch(url).send(validPayload);
+      expect(res.status).toBe(404);
+    });
+
+    it('403 si le cycle ciblé est clos', async () => {
+      mockCycleFindById.mockResolvedValue(CLOSED_CYCLE);
+      const res = await request(app).patch(url).send({ ...validPayload, cycleId: VALID_CYCLE_OBJECT_ID });
+      expect(res.status).toBe(403);
+    });
+
+    it("403 si l'acteur n'a pas accès à l'équipe du collaborateur", async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(null);
+      mockUserFindById.mockImplementation((id: string) => {
+        if (id === TEST_USER_ID) return { select: () => ({ lean: () => Promise.resolve(actorLean()) }) };
+        return { select: () => ({ lean: () => Promise.resolve({ teamId: TEAM_A_ID }) }) };
+      });
+
+      const res = await request(app).patch(url).send(validPayload);
+      expect(res.status).toBe(403);
+    });
+
+    it("400 si aucun profil de poste n'est connu (ni fourni, ni déjà mémorisé sur la fiche) alors qu'un sous-critère est noté", async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(makeReviewDoc({ team: TEAM_A_ID }));
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+
+      const res = await request(app)
+        .patch(url)
+        .send({ axes: { technique: [{ label: 'Qualité du code & revues', answer: 'Réponse correcte' }] } });
+
+      expect(res.status).toBe(400);
+      expect(mockProfileFindOne).not.toHaveBeenCalled();
+    });
+
+    it("400 si aucun référentiel n'est encore configuré pour le profil de poste ciblé", async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(makeReviewDoc({ team: TEAM_A_ID }));
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      mockProfileFindOne.mockResolvedValue(null);
+
+      const res = await request(app).patch(url).send(validPayload);
+
+      expect(res.status).toBe(400);
+    });
+
+    it("400 si la réponse choisie n'existe pas (ou plus) dans le référentiel", async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(makeReviewDoc({ team: TEAM_A_ID }));
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      mockProfileFindOne.mockResolvedValue(referentialProfileFixture());
+
+      const res = await request(app)
+        .patch(url)
+        .send({
+          roleProfile: 'dev_back',
+          axes: { technique: [{ label: 'Qualité du code & revues', answer: 'Réponse qui n\'existe pas' }] }
+        });
+
+      expect(res.status).toBe(400);
+      expect(mockReviewFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it("200 un lead note la grille manager (résolution du score depuis le référentiel) et crée la fiche à la volée", async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(null);
+      mockUserFindById.mockImplementation((id: string) => {
+        if (id === TEST_USER_ID) return { select: () => ({ lean: () => Promise.resolve(actorLean()) }) };
+        return { select: () => ({ lean: () => Promise.resolve({ teamId: TEAM_A_ID }) }) };
+      });
+      mockTeamFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([{ _id: TEAM_A_ID }]) }) });
+      mockProfileFindOne.mockResolvedValue(referentialProfileFixture());
+      mockReviewCreate.mockResolvedValue(makeReviewDoc({ team: TEAM_A_ID }));
+      mockReviewFindOneAndUpdate.mockResolvedValue(
+        makeReviewDoc({
+          team: TEAM_A_ID,
+          generalAssessmentRoleProfile: 'dev_back',
+          generalManagerAssessment: {
+            axes: {
+              technique: [{ label: 'Qualité du code & revues', score: 4, answer: 'Réponse correcte' }],
+              impact: [],
+              collaboration: [],
+              leadership: []
+            }
+          }
+        })
+      );
+
+      const res = await request(app).patch(url).send(validPayload);
+
+      expect(res.status).toBe(200);
+      expect(mockProfileFindOne).toHaveBeenCalledWith({ roleProfile: 'dev_back' });
+      expect(mockReviewCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ user: TARGET_USER_ID, team: TEAM_A_ID })
+      );
+      const [, update] = mockReviewFindOneAndUpdate.mock.calls[0];
+      expect(update.$set.generalManagerAssessment.axes.technique).toEqual([
+        { label: 'Qualité du code & revues', score: 4, answer: 'Réponse correcte' }
+      ]);
+      expect(update.$set.generalAssessmentRoleProfile).toBe('dev_back');
+      expect(res.body.review.generalManagerAssessment.technique).toEqual([
+        { label: 'Qualité du code & revues', score: 4, answer: 'Réponse correcte' }
+      ]);
+      expect(res.body.review.generalAssessmentRoleProfile).toBe('dev_back');
+    });
+
+    it("200 réutilise le profil de poste déjà mémorisé sur la fiche quand roleProfile n'est pas refourni", async () => {
+      const existing = makeReviewDoc({ team: TEAM_A_ID, generalAssessmentRoleProfile: 'qa' });
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(existing);
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      mockProfileFindOne.mockResolvedValue(referentialProfileFixture({ roleProfile: 'qa', label: 'QA' }));
+      mockReviewFindOneAndUpdate.mockResolvedValue(makeReviewDoc({ team: TEAM_A_ID, generalAssessmentRoleProfile: 'qa' }));
+
+      const res = await request(app)
+        .patch(url)
+        .send({ axes: { technique: [{ label: 'Qualité du code & revues', answer: 'Réponse correcte' }] } });
+
+      expect(res.status).toBe(200);
+      expect(mockProfileFindOne).toHaveBeenCalledWith({ roleProfile: 'qa' });
+      const [, update] = mockReviewFindOneAndUpdate.mock.calls[0];
+      // Le profil n'a pas changé : pas besoin de le réécrire.
+      expect(update.$set.generalAssessmentRoleProfile).toBeUndefined();
+    });
+
+    it('200 mémorise le profil de poste seul, sans sous-critère à résoudre', async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(makeReviewDoc({ team: TEAM_A_ID }));
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      mockReviewFindOneAndUpdate.mockResolvedValue(
+        makeReviewDoc({ team: TEAM_A_ID, generalAssessmentRoleProfile: 'dba' })
+      );
+
+      const res = await request(app).patch(url).send({ roleProfile: 'dba', axes: {} });
+
+      expect(res.status).toBe(200);
+      expect(mockProfileFindOne).not.toHaveBeenCalled();
+      const [, update] = mockReviewFindOneAndUpdate.mock.calls[0];
+      expect(update.$set.generalAssessmentRoleProfile).toBe('dba');
+    });
+
+    it("200 remplace les sous-critères de l'axe fourni sans toucher aux autres axes déjà renseignés, ni à generalSelfAssessment", async () => {
+      const existing = makeReviewDoc({
+        team: TEAM_A_ID,
+        generalSelfAssessment: {
+          axes: { technique: [{ label: 'Qualité du code & revues', score: 2 }], impact: [], collaboration: [], leadership: [] }
+        },
+        generalManagerAssessment: {
+          axes: {
+            technique: [{ label: 'Ancien critère', score: 3 }],
+            impact: [{ label: 'Livraison (delivery)', score: 4 }],
+            collaboration: [],
+            leadership: []
+          }
+        }
+      });
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(existing);
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      mockProfileFindOne.mockResolvedValue(referentialProfileFixture());
+      mockReviewFindOneAndUpdate.mockResolvedValue(makeReviewDoc({ team: TEAM_A_ID }));
+
+      const res = await request(app).patch(url).send(validPayload);
+
+      expect(res.status).toBe(200);
+      const [, update] = mockReviewFindOneAndUpdate.mock.calls[0];
+      expect(update.$set.generalManagerAssessment.axes.technique).toEqual([
+        { label: 'Qualité du code & revues', score: 4, answer: 'Réponse correcte' }
+      ]);
+      expect(update.$set.generalManagerAssessment.axes.impact).toEqual([
+        { label: 'Livraison (delivery)', score: 4 }
+      ]);
+      expect(update.$set.generalSelfAssessment).toBeUndefined();
+    });
+
+    it('409 si la fiche a été modifiée en même temps (verrou optimiste épuisé)', async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(makeReviewDoc({ team: TEAM_A_ID }));
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      mockProfileFindOne.mockResolvedValue(referentialProfileFixture());
+      mockReviewFindOneAndUpdate.mockResolvedValue(null);
+
+      const res = await request(app).patch(url).send(validPayload);
+
+      expect(res.status).toBe(409);
+      expect(mockReviewFindOneAndUpdate).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  describe('GET /general-assessment-referential', () => {
+    const url = '/api/performance/general-assessment-referential';
+
+    it('200 liste les profils triés et sérialisés', async () => {
+      const stored = [
+        {
+          roleProfile: 'dev_back',
+          label: 'Développeur Back',
+          axes: { technique: [], impact: [], collaboration: [], leadership: [] },
+          updatedBy: { id: TEST_USER_ID, name: 'admin' },
+          updatedAt: new Date('2026-09-01')
+        }
+      ];
+      mockProfileFind.mockReturnValue({ sort: jest.fn().mockResolvedValue(stored) });
+
+      const res = await request(app).get(url);
+
+      expect(res.status).toBe(200);
+      expect(res.body.profiles).toEqual([
+        expect.objectContaining({ roleProfile: 'dev_back', label: 'Développeur Back' })
+      ]);
+    });
+
+    it("200 renvoie une liste vide si aucun profil n'a encore été enregistré", async () => {
+      mockProfileFind.mockReturnValue({ sort: jest.fn().mockResolvedValue([]) });
+
+      const res = await request(app).get(url);
+
+      expect(res.status).toBe(200);
+      expect(res.body.profiles).toEqual([]);
+    });
+  });
+
+  describe('PUT /general-assessment-referential/:roleProfile', () => {
+    const url = '/api/performance/general-assessment-referential/dev_back';
+    const emptyAxes = { technique: [], impact: [], collaboration: [], leadership: [] };
+    const validPayload = { label: 'Développeur Back', axes: emptyAxes };
+
+    it("403 si l'acteur n'a pas d'accès global", async () => {
+      const res = await request(app).put(url).send(validPayload);
+      expect(res.status).toBe(403);
+      expect(mockProfileFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('400 si le profil de poste est inconnu', async () => {
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+
+      const res = await request(app)
+        .put('/api/performance/general-assessment-referential/product_owner')
+        .send(validPayload);
+
+      expect(res.status).toBe(400);
+      expect(mockProfileFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('400 si le label est manquant', async () => {
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+
+      const res = await request(app).put(url).send({ axes: emptyAxes });
+
+      expect(res.status).toBe(400);
+      expect(mockProfileFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('400 si les axes sont invalides (axe manquant)', async () => {
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      const { leadership: _leadership, ...incompleteAxes } = emptyAxes;
+
+      const res = await request(app)
+        .put(url)
+        .send({ label: 'Développeur Back', axes: incompleteAxes });
+
+      expect(res.status).toBe(400);
+      expect(mockProfileFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('200 crée ou met à jour le profil (upsert) et renvoie le profil sérialisé', async () => {
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      mockProfileFindOneAndUpdate.mockResolvedValue({
+        roleProfile: 'dev_back',
+        label: 'Développeur Back',
+        axes: emptyAxes,
+        updatedBy: { id: TEST_USER_ID, name: 'admin' },
+        updatedAt: new Date('2026-09-01')
+      });
+
+      const res = await request(app).put(url).send(validPayload);
+
+      expect(res.status).toBe(200);
+      expect(res.body.profile).toEqual(
+        expect.objectContaining({ roleProfile: 'dev_back', label: 'Développeur Back' })
+      );
+      expect(mockProfileFindOneAndUpdate).toHaveBeenCalledWith(
+        { roleProfile: 'dev_back' },
+        expect.objectContaining({
+          $set: expect.objectContaining({ label: 'Développeur Back', axes: emptyAxes })
+        }),
+        expect.objectContaining({ new: true, upsert: true, runValidators: true })
+      );
+    });
+  });
+
   describe('PATCH /reviews/:userId/manager-assessment', () => {
     const url = `/api/performance/reviews/${TARGET_USER_ID}/manager-assessment`;
     const payload = { objectives: [{ id: 'obj-1', status: 'atteint', comment: 'Bien joué' }] };
@@ -487,7 +1001,45 @@ describe('performanceRoutes — portée équipe/CTO (TI)', () => {
       expect(res.status).toBe(403);
     });
 
-    it('200 applique l\'évaluation manager et passe la fiche à "complete" (tous objectifs évalués)', async () => {
+    const FULL_GENERAL_MANAGER_ASSESSMENT = {
+      axes: {
+        technique: [{ label: 'Qualité du code', score: 4, answer: 'Bon' }],
+        impact: [{ label: 'Delivery', score: 3, answer: 'Correct' }],
+        collaboration: [{ label: 'Entraide', score: 5, answer: 'Excellent' }],
+        leadership: [{ label: 'Mentorat', score: 2, answer: 'Faible' }]
+      }
+    };
+
+    it('200 applique l\'évaluation manager sans passer la fiche à "complete" (clôture réservée au CTA semestre)', async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(
+        makeReviewDoc({
+          team: TEAM_A_ID,
+          objectives: [objectiveFixture()],
+          status: 'en_cours',
+          generalManagerAssessment: FULL_GENERAL_MANAGER_ASSESSMENT
+        })
+      );
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      mockReviewFindOneAndUpdate.mockResolvedValue(
+        makeReviewDoc({
+          team: TEAM_A_ID,
+          status: 'en_cours',
+          objectives: [objectiveFixture({ managerAssessment: { status: 'atteint', comment: 'Bien joué' } })]
+        })
+      );
+
+      const res = await request(app).patch(url).send(payload);
+
+      expect(res.status).toBe(200);
+      const [, update] = mockReviewFindOneAndUpdate.mock.calls[0];
+      expect(update.$set.status).toBe('en_cours');
+      expect(update.$set.objectives[0].managerAssessment).toEqual({ status: 'atteint', comment: 'Bien joué' });
+    });
+
+    it("200 laisse la fiche \"en_cours\" si tous les objectifs sont évalués mais que la grille générale manager n'est pas encore complète", async () => {
       mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
       mockReviewFindOne.mockResolvedValue(
         makeReviewDoc({ team: TEAM_A_ID, objectives: [objectiveFixture()], status: 'en_cours' })
@@ -498,7 +1050,7 @@ describe('performanceRoutes — portée équipe/CTO (TI)', () => {
       mockReviewFindOneAndUpdate.mockResolvedValue(
         makeReviewDoc({
           team: TEAM_A_ID,
-          status: 'complete',
+          status: 'en_cours',
           objectives: [objectiveFixture({ managerAssessment: { status: 'atteint', comment: 'Bien joué' } })]
         })
       );
@@ -507,8 +1059,7 @@ describe('performanceRoutes — portée équipe/CTO (TI)', () => {
 
       expect(res.status).toBe(200);
       const [, update] = mockReviewFindOneAndUpdate.mock.calls[0];
-      expect(update.$set.status).toBe('complete');
-      expect(update.$set.objectives[0].managerAssessment).toEqual({ status: 'atteint', comment: 'Bien joué' });
+      expect(update.$set.status).toBe('en_cours');
     });
 
     it('409 si la fiche a été modifiée en même temps (verrou optimiste épuisé)', async () => {
@@ -523,6 +1074,60 @@ describe('performanceRoutes — portée équipe/CTO (TI)', () => {
 
       expect(res.status).toBe(409);
       expect(mockReviewFindOneAndUpdate).toHaveBeenCalledTimes(5);
+    });
+  });
+
+  describe('PATCH /reviews/:userId/complete', () => {
+    const url = `/api/performance/reviews/${TARGET_USER_ID}/complete`;
+
+    it('400 si les pré-conditions de clôture ne sont pas réunies', async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(
+        makeReviewDoc({ team: TEAM_A_ID, objectives: [objectiveFixture()], status: 'en_cours' })
+      );
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+
+      const res = await request(app).patch(url).send({});
+
+      expect(res.status).toBe(400);
+      expect(mockReviewFindOneAndUpdate).not.toHaveBeenCalled();
+    });
+
+    it('200 passe la fiche à "complete" quand objectifs et grille manager sont complets', async () => {
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFindOne.mockResolvedValue(
+        makeReviewDoc({
+          team: TEAM_A_ID,
+          status: 'en_cours',
+          objectives: [objectiveFixture({ managerAssessment: { status: 'atteint', comment: 'Bien joué' } })],
+          generalManagerAssessment: {
+            axes: {
+              technique: [{ label: 'Qualité du code', score: 4, answer: 'Bon' }],
+              impact: [{ label: 'Delivery', score: 3, answer: 'Correct' }],
+              collaboration: [{ label: 'Entraide', score: 5, answer: 'Excellent' }],
+              leadership: [{ label: 'Mentorat', score: 2, answer: 'Faible' }]
+            }
+          }
+        })
+      );
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      mockReviewFindOneAndUpdate.mockResolvedValue(
+        makeReviewDoc({
+          team: TEAM_A_ID,
+          status: 'complete',
+          objectives: [objectiveFixture({ managerAssessment: { status: 'atteint', comment: 'Bien joué' } })]
+        })
+      );
+
+      const res = await request(app).patch(url).send({});
+
+      expect(res.status).toBe(200);
+      const [, update] = mockReviewFindOneAndUpdate.mock.calls[0];
+      expect(update.$set.status).toBe('complete');
     });
   });
 });

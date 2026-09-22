@@ -11,6 +11,8 @@ import {
 } from 'lucide-react';
 import { performanceApi, teamApi } from '../services/api';
 import { TeamsCyclesAdminPanel } from './TeamsCyclesAdminPanel';
+import { GeneralAssessmentSummary } from './GeneralAssessmentSummary';
+import { GeneralManagerAssessmentForm, GeneralManagerAssessmentSaveInput } from './GeneralManagerAssessmentForm';
 import { useSocketOptional } from '../hooks/useSocketContext';
 import { useStore } from '../store/useStore';
 import type { Team } from '../domain/team';
@@ -20,6 +22,7 @@ import {
   PerformanceCycle,
   ObjectiveDefinitionInput,
   AssessmentInput,
+  GeneralAssessmentReferentialProfile,
   ObjectiveAssessmentStatus,
   PerformanceReviewStatus,
   CompetencyAxis,
@@ -27,8 +30,15 @@ import {
   OBJECTIVE_ASSESSMENT_STATUSES,
   COMPETENCY_AXES,
   computeReviewScore,
+  computeObjectiveProgress,
+  computeAutoObjectiveStatus,
+  computeGeneralAssessmentGlobalScore,
   validateObjectivesDefinition,
+  suggestCompetencyAxes,
   OBJECTIVE_STATUS_LABELS,
+  OBJECTIVE_STATUS_BADGE_CLASS,
+  summarizeObjectiveStatuses,
+  summarizeTeamReviews,
   REVIEW_STATUS_LABELS,
   REVIEW_STATUS_BADGE_CLASS,
   CYCLE_STATUS_LABELS,
@@ -54,9 +64,61 @@ function reviewUserLabel(review: PerformanceReview): string {
   return name || user.email || user._id;
 }
 
+/** Score global (0-5) de la grille générale, formaté pour l'affichage — utilisé pour la colonne self ET manager (même forme `GeneralAssessmentAxes` des deux côtés). */
+function formatGeneralAssessmentScore(axes: PerformanceReview['generalSelfAssessment']): string {
+  const score = computeGeneralAssessmentGlobalScore(axes);
+  if (score <= 0) return '—';
+  return `${score.toFixed(1)} / 5`;
+}
+
+/** Formate une moyenne déjà calculée par `summarizeTeamReviews` (null = rien à afficher). */
+function formatAvgScore(score: number | null, suffix: string): string {
+  if (score == null) return '—';
+  return `${score.toFixed(1)}${suffix}`;
+}
+
 function memberLabel(member: PerformanceTeamMember): string {
   const name = `${member.firstName ?? ''} ${member.lastName ?? ''}`.trim();
   return name || member.email;
+}
+
+/**
+ * Résumé compact de la répartition des statuts d'objectifs d'une fiche (colonne "Objectifs" du
+ * tableau récap d'équipe) : un badge par statut présent avec son nombre d'objectifs, dans l'ordre
+ * du moins bon au meilleur (voir `summarizeObjectiveStatuses`). Aucun objectif statué (des deux
+ * côtés) -> tiret, pour rester cohérent avec les autres colonnes du tableau.
+ */
+function ObjectiveStatusBadges({ objectives }: { objectives: PerformanceReview['objectives'] }) {
+  const summary = summarizeObjectiveStatuses(objectives);
+  if (summary.length === 0) return <span className="text-surface-500">—</span>;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {summary.map(({ status, count }) => (
+        <span key={status} className={`badge ${OBJECTIVE_STATUS_BADGE_CLASS[status]}`}>
+          {count} {OBJECTIVE_STATUS_LABELS[status]}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * Résumé compact de la répartition des fiches par statut au sein d'une équipe (carte "Répartition
+ * par équipe") — un badge par statut représenté, dans l'ordre `PERFORMANCE_REVIEW_STATUSES`. Un
+ * statut à 0 fiche n'est pas affiché, pour ne pas surcharger la ligne.
+ */
+function ReviewStatusCountBadges({ statusCounts }: { statusCounts: Record<PerformanceReviewStatus, number> }) {
+  const present = PERFORMANCE_REVIEW_STATUSES.filter((status) => statusCounts[status] > 0);
+  if (present.length === 0) return <span className="text-surface-500">—</span>;
+  return (
+    <div className="flex flex-wrap gap-1">
+      {present.map((status) => (
+        <span key={status} className={`badge ${REVIEW_STATUS_BADGE_CLASS[status]}`}>
+          {statusCounts[status]} {REVIEW_STATUS_LABELS[status]}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function buildEmptyReviewForMember(member: PerformanceTeamMember, cycleId: string): PerformanceReview {
@@ -72,12 +134,8 @@ function buildEmptyReviewForMember(member: PerformanceTeamMember, cycleId: strin
       growthAreas: {},
       overallReview: {}
     },
-    competencyScores: {
-      technique: {},
-      impact: {},
-      collaboration: {},
-      leadership: {}
-    },
+    generalSelfAssessment: { technique: [], impact: [], collaboration: [], leadership: [] },
+    generalManagerAssessment: { technique: [], impact: [], collaboration: [], leadership: [] },
     status: 'dossier_manquant',
     createdBy: { id: member.id, name: memberLabel(member) },
     createdAt: new Date().toISOString(),
@@ -103,6 +161,9 @@ interface ObjectiveDraft {
   description: string;
   weightPct: string;
   krs: KrDraft[];
+  competencyAxes: CompetencyAxis[];
+  /** true dès que le lead/CTO a modifié les axes à la main — bloque alors la re-suggestion automatique au fil de la saisie. */
+  competencyAxesTouched: boolean;
 }
 
 function buildObjectivesDraft(objectives: PerformanceReview['objectives']): ObjectiveDraft[] {
@@ -111,7 +172,10 @@ function buildObjectivesDraft(objectives: PerformanceReview['objectives']): Obje
     title: o.title,
     description: o.description ?? '',
     weightPct: String(Math.round(o.weight * 100)),
-    krs: o.krs.map((kr) => ({ id: kr.id, label: kr.label, weightPct: String(Math.round(kr.weight * 100)) }))
+    krs: o.krs.map((kr) => ({ id: kr.id, label: kr.label, weightPct: String(Math.round(kr.weight * 100)) })),
+    competencyAxes: o.competencyAxes ?? [],
+    // Un objectif déjà défini a déjà des axes (éventuellement vides) choisis délibérément — on ne les re-suggère pas.
+    competencyAxesTouched: true
   }));
 }
 
@@ -121,6 +185,7 @@ function draftToDefinitionInput(objectives: ObjectiveDraft[]): ObjectiveDefiniti
     title: o.title.trim(),
     description: o.description.trim() || undefined,
     weight: (Number(o.weightPct) || 0) / 100,
+    competencyAxes: o.competencyAxes,
     krs: o.krs.map((kr) => ({
       id: kr.id,
       label: kr.label.trim(),
@@ -139,7 +204,6 @@ interface ManagerObjectiveDraft {
 interface ManagerDraft {
   objectives: Record<string, ManagerObjectiveDraft>;
   qualitative: Record<QualitativeKey, string>;
-  competencyScores: Record<CompetencyAxis, string>;
 }
 
 function buildManagerDraft(review: PerformanceReview): ManagerDraft {
@@ -148,7 +212,10 @@ function buildManagerDraft(review: PerformanceReview): ManagerDraft {
     objectives: Object.fromEntries(
       normalized.objectives.map((o) => [
         o.id,
-        { status: o.managerAssessment.status ?? '', comment: o.managerAssessment.comment ?? '' }
+        {
+          status: o.managerAssessment.status ?? computeAutoObjectiveStatus(computeObjectiveProgress(o)),
+          comment: o.managerAssessment.comment ?? ''
+        }
       ])
     ),
     qualitative: {
@@ -156,24 +223,6 @@ function buildManagerDraft(review: PerformanceReview): ManagerDraft {
       challenges: normalized.qualitative.challenges.manager ?? '',
       growthAreas: normalized.qualitative.growthAreas.manager ?? '',
       overallReview: normalized.qualitative.overallReview.manager ?? ''
-    },
-    competencyScores: {
-      technique:
-        normalized.competencyScores.technique.manager != null
-          ? String(normalized.competencyScores.technique.manager)
-          : '',
-      impact:
-        normalized.competencyScores.impact.manager != null
-          ? String(normalized.competencyScores.impact.manager)
-          : '',
-      collaboration:
-        normalized.competencyScores.collaboration.manager != null
-          ? String(normalized.competencyScores.collaboration.manager)
-          : '',
-      leadership:
-        normalized.competencyScores.leadership.manager != null
-          ? String(normalized.competencyScores.leadership.manager)
-          : ''
     }
   };
 }
@@ -206,6 +255,10 @@ export function TeamPerformancePage() {
 
   const [managerDraft, setManagerDraft] = useState<ManagerDraft | null>(null);
   const [savingManager, setSavingManager] = useState(false);
+  const [savingGeneralManager, setSavingGeneralManager] = useState(false);
+
+  const [referentialProfiles, setReferentialProfiles] = useState<GeneralAssessmentReferentialProfile[]>([]);
+  const [loadingReferential, setLoadingReferential] = useState(true);
 
   const cycle = useMemo(() => cycles.find((c) => c.status === 'active') ?? null, [cycles]);
   const isReadOnly = cycle != null && cycle.status !== 'active';
@@ -242,6 +295,26 @@ export function TeamPerformancePage() {
     [members, reviewedUserIds, statusFilter]
   );
 
+  // Vue agrégée par équipe (carte "Répartition par équipe") : regroupe les fiches actuellement
+  // chargées (déjà scopées par teamFilter/statusFilter côté API) par équipe, et résume chaque
+  // groupe via `summarizeTeamReviews`. Recalculé à chaque render (liste courte, pas besoin de
+  // dépendre de `teamLabelForReview` dans un useMemo).
+  const teamSummaries = (() => {
+    const grouped = new Map<string, PerformanceReview[]>();
+    for (const review of reviews) {
+      const label = teamLabelForReview(review);
+      const bucket = grouped.get(label);
+      if (bucket) {
+        bucket.push(review);
+      } else {
+        grouped.set(label, [review]);
+      }
+    }
+    return Array.from(grouped.entries())
+      .map(([label, teamReviews]) => ({ label, summary: summarizeTeamReviews(teamReviews) }))
+      .sort((a, b) => a.label.localeCompare(b.label, 'fr'));
+  })();
+
   const loadTeamsAndCycles = useCallback(async () => {
     const [cyclesResult, teamsResult] = await Promise.allSettled([performanceApi.getCycles(), teamApi.list()]);
     if (cyclesResult.status === 'fulfilled' && cyclesResult.value.success) {
@@ -250,6 +323,26 @@ export function TeamPerformancePage() {
     if (teamsResult.status === 'fulfilled' && teamsResult.value.success) {
       setTeams(teamsResult.value.teams);
     }
+  }, []);
+
+  // Référentiels de notation détaillée (un par profil de poste) : chargés une fois, indépendamment
+  // du cycle/de l'équipe — alimentent le formulaire de notation manager de la grille générale.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setLoadingReferential(true);
+      try {
+        const res = await performanceApi.getGeneralAssessmentReferential();
+        if (!cancelled && res.success) {
+          setReferentialProfiles(res.profiles);
+        }
+      } finally {
+        if (!cancelled) setLoadingReferential(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -356,7 +449,15 @@ export function TeamPerformancePage() {
   function addObjective() {
     setObjectivesDraft((prev) => [
       ...prev,
-      { id: generateId('obj'), title: '', description: '', weightPct: '0', krs: [] }
+      {
+        id: generateId('obj'),
+        title: '',
+        description: '',
+        weightPct: '0',
+        krs: [],
+        competencyAxes: [],
+        competencyAxesTouched: false
+      }
     ]);
   }
 
@@ -365,7 +466,31 @@ export function TeamPerformancePage() {
   }
 
   function updateObjective(objectiveId: string, patch: Partial<Omit<ObjectiveDraft, 'krs'>>) {
-    setObjectivesDraft((prev) => prev.map((o) => (o.id === objectiveId ? { ...o, ...patch } : o)));
+    setObjectivesDraft((prev) =>
+      prev.map((o) => {
+        if (o.id !== objectiveId) return o;
+        const next = { ...o, ...patch };
+        // Re-suggère les axes tant que le lead/CTO n'y a pas touché lui-même (voir competencyAxesTouched).
+        if (!o.competencyAxesTouched && (patch.title !== undefined || patch.description !== undefined)) {
+          next.competencyAxes = suggestCompetencyAxes(next.title, next.description);
+        }
+        return next;
+      })
+    );
+  }
+
+  function toggleObjectiveCompetencyAxis(objectiveId: string, axis: CompetencyAxis) {
+    setObjectivesDraft((prev) =>
+      prev.map((o) => {
+        if (o.id !== objectiveId) return o;
+        const alreadySelected = o.competencyAxes.includes(axis);
+        if (!alreadySelected && o.competencyAxes.length >= 2) return o; // plafond à 2 axes
+        const competencyAxes = alreadySelected
+          ? o.competencyAxes.filter((a) => a !== axis)
+          : [...o.competencyAxes, axis];
+        return { ...o, competencyAxes, competencyAxesTouched: true };
+      })
+    );
   }
 
   function addKeyResult(objectiveId: string) {
@@ -437,12 +562,6 @@ export function TeamPerformancePage() {
     setManagerDraft((prev) => (prev ? { ...prev, qualitative: { ...prev.qualitative, [field]: value } } : prev));
   }
 
-  function updateManagerCompetency(axis: CompetencyAxis, value: string) {
-    setManagerDraft((prev) =>
-      prev ? { ...prev, competencyScores: { ...prev.competencyScores, [axis]: value } } : prev
-    );
-  }
-
   async function handleSaveManagerAssessment() {
     if (!detail || !managerDraft) return;
 
@@ -460,13 +579,7 @@ export function TeamPerformancePage() {
         challenges: managerDraft.qualitative.challenges.trim() || undefined,
         growthAreas: managerDraft.qualitative.growthAreas.trim() || undefined,
         overallReview: managerDraft.qualitative.overallReview.trim() || undefined
-      },
-      competencyScores: Object.fromEntries(
-        COMPETENCY_AXES.filter((axis) => managerDraft.competencyScores[axis].trim() !== '').map((axis) => [
-          axis,
-          Number(managerDraft.competencyScores[axis])
-        ])
-      )
+      }
     };
 
     setSavingManager(true);
@@ -484,6 +597,25 @@ export function TeamPerformancePage() {
       );
     } finally {
       setSavingManager(false);
+    }
+  }
+
+  async function handleSaveGeneralManagerAssessment({ axes, roleProfile }: GeneralManagerAssessmentSaveInput) {
+    if (!detail) return;
+    setSavingGeneralManager(true);
+    try {
+      const res = await performanceApi.updateGeneralManagerAssessment(reviewUserId(detail), { axes, roleProfile });
+      const merged: PerformanceReview = { ...res.review, user: detail.user };
+      setDetail(merged);
+      upsertReviewInList(merged);
+      socket?.notify?.success('Grille enregistrée', 'La grille manager a bien été sauvegardée');
+    } catch (err) {
+      socket?.notify?.error(
+        "Échec de l'enregistrement",
+        extractApiErrorMessage(err, "Erreur lors de l'enregistrement de la grille manager")
+      );
+    } finally {
+      setSavingGeneralManager(false);
     }
   }
 
@@ -592,6 +724,36 @@ export function TeamPerformancePage() {
             </select>
           </div>
 
+          {!listLoading && teamSummaries.length > 0 && (
+            <div className="card-glass overflow-hidden">
+              <h3 className="text-base font-semibold text-surface-100 p-4 pb-0">Répartition par équipe</h3>
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-surface-700/50 text-left text-surface-400">
+                    <th className="p-3 font-medium">Équipe</th>
+                    <th className="p-3 font-medium">Fiches</th>
+                    <th className="p-3 font-medium">Score objectifs (moy.)</th>
+                    <th className="p-3 font-medium">Score auto-évaluation (moy.)</th>
+                    <th className="p-3 font-medium">Score évaluation manager (moy.)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {teamSummaries.map(({ label, summary }) => (
+                    <tr key={label} className="border-b border-surface-800/50">
+                      <td className="p-3 text-surface-200">{label}</td>
+                      <td className="p-3">
+                        <ReviewStatusCountBadges statusCounts={summary.statusCounts} />
+                      </td>
+                      <td className="p-3 text-surface-300">{formatAvgScore(summary.avgObjectivesScore, '%')}</td>
+                      <td className="p-3 text-surface-300">{formatAvgScore(summary.avgSelfAssessmentScore, ' / 5')}</td>
+                      <td className="p-3 text-surface-300">{formatAvgScore(summary.avgManagerAssessmentScore, ' / 5')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
           <div className="card-glass overflow-hidden">
             {listLoading ? (
               <div className="p-8 text-center">
@@ -609,6 +771,9 @@ export function TeamPerformancePage() {
                     <th className="p-3 font-medium">Équipe</th>
                     <th className="p-3 font-medium">Statut</th>
                     <th className="p-3 font-medium">Score</th>
+                    <th className="p-3 font-medium">Score auto-évaluation</th>
+                    <th className="p-3 font-medium">Score évaluation manager</th>
+                    <th className="p-3 font-medium">Objectifs</th>
                     <th className="p-3" />
                   </tr>
                 </thead>
@@ -623,6 +788,15 @@ export function TeamPerformancePage() {
                         </span>
                       </td>
                       <td className="p-3 text-surface-300">{Math.round(computeReviewScore(review.objectives))}%</td>
+                      <td className="p-3 text-surface-300">
+                        {formatGeneralAssessmentScore(review.generalSelfAssessment)}
+                      </td>
+                      <td className="p-3 text-surface-300">
+                        {formatGeneralAssessmentScore(review.generalManagerAssessment)}
+                      </td>
+                      <td className="p-3">
+                        <ObjectiveStatusBadges objectives={review.objectives} />
+                      </td>
                       <td className="p-3 text-right">
                         <button
                           type="button"
@@ -644,6 +818,9 @@ export function TeamPerformancePage() {
                         </span>
                       </td>
                       <td className="p-3 text-surface-300">—</td>
+                      <td className="p-3 text-surface-300">—</td>
+                      <td className="p-3 text-surface-300">—</td>
+                      <td className="p-3 text-surface-500">—</td>
                       <td className="p-3 text-right">
                         <button
                           type="button"
@@ -750,6 +927,29 @@ export function TeamPerformancePage() {
                       )}
                     </div>
 
+                    <div className="flex flex-wrap items-center gap-3 pl-1">
+                      <span className="text-xs text-surface-400">Axes de compétence (max 2) :</span>
+                      {COMPETENCY_AXES.map((axis) => {
+                        const checked = objective.competencyAxes.includes(axis);
+                        const disabled = isReadOnly || (!checked && objective.competencyAxes.length >= 2);
+                        return (
+                          <label
+                            key={axis}
+                            className="flex items-center gap-1.5 text-sm text-surface-300"
+                          >
+                            <input
+                              type="checkbox"
+                              className="rounded border-surface-600"
+                              checked={checked}
+                              disabled={disabled}
+                              onChange={() => toggleObjectiveCompetencyAxis(objective.id, axis)}
+                            />
+                            {COMPETENCY_AXIS_LABELS[axis]}
+                          </label>
+                        );
+                      })}
+                    </div>
+
                     <div className="pl-2 space-y-2">
                       {objective.krs.map((kr) => (
                         <div key={kr.id} className="grid sm:grid-cols-[1fr_100px_auto] gap-2 items-center">
@@ -817,6 +1017,19 @@ export function TeamPerformancePage() {
                 )}
               </div>
 
+              <GeneralAssessmentSummary axes={detail.generalSelfAssessment} objectives={detail.objectives} />
+
+              <GeneralManagerAssessmentForm
+                selfAxes={detail.generalSelfAssessment}
+                managerAxes={detail.generalManagerAssessment}
+                roleProfile={detail.generalAssessmentRoleProfile}
+                referentialProfiles={referentialProfiles}
+                loadingReferential={loadingReferential}
+                disabled={isReadOnly}
+                saving={savingGeneralManager}
+                onSave={handleSaveGeneralManagerAssessment}
+              />
+
               {managerDraft && detail.objectives.length > 0 && (
                 <div className="card-glass p-6 space-y-6">
                   <h3 className="text-base font-semibold text-surface-100">Évaluation manager</h3>
@@ -826,25 +1039,39 @@ export function TeamPerformancePage() {
                       const draft = managerDraft.objectives[objective.id] ?? { status: '', comment: '' };
                       return (
                         <div key={objective.id} className="border border-surface-700/50 rounded-xl p-4">
-                          <p className="font-medium text-surface-200 mb-3">{objective.title}</p>
+                          <div className="flex items-center gap-2 flex-wrap mb-3">
+                            <p className="font-medium text-surface-200">{objective.title}</p>
+                            {(objective.competencyAxes ?? []).map((axis) => (
+                              <span key={axis} className="badge bg-surface-700/60 text-surface-300">
+                                {COMPETENCY_AXIS_LABELS[axis]}
+                              </span>
+                            ))}
+                          </div>
                           <div className="grid sm:grid-cols-[220px_1fr] gap-3">
-                            <select
-                              className="input"
-                              value={draft.status}
-                              disabled={isReadOnly}
-                              onChange={(e) =>
-                                updateManagerObjectiveDraft(objective.id, {
-                                  status: e.target.value as ObjectiveAssessmentStatus | ''
-                                })
-                              }
-                            >
-                              <option value="">Statut non renseigné</option>
-                              {OBJECTIVE_ASSESSMENT_STATUSES.map((status) => (
-                                <option key={status} value={status}>
-                                  {OBJECTIVE_STATUS_LABELS[status]}
-                                </option>
-                              ))}
-                            </select>
+                            <div className="flex items-center gap-2">
+                              <select
+                                className="input"
+                                value={draft.status}
+                                disabled={isReadOnly}
+                                onChange={(e) =>
+                                  updateManagerObjectiveDraft(objective.id, {
+                                    status: e.target.value as ObjectiveAssessmentStatus | ''
+                                  })
+                                }
+                              >
+                                <option value="">Statut non renseigné</option>
+                                {OBJECTIVE_ASSESSMENT_STATUSES.map((status) => (
+                                  <option key={status} value={status}>
+                                    {OBJECTIVE_STATUS_LABELS[status]}
+                                  </option>
+                                ))}
+                              </select>
+                              {draft.status && (
+                                <span className={`badge ${OBJECTIVE_STATUS_BADGE_CLASS[draft.status]}`}>
+                                  {OBJECTIVE_STATUS_LABELS[draft.status]}
+                                </span>
+                              )}
+                            </div>
                             <textarea
                               className="input min-h-[38px]"
                               placeholder="Votre commentaire"
@@ -854,8 +1081,11 @@ export function TeamPerformancePage() {
                             />
                           </div>
                           {objective.selfAssessment.status && (
-                            <p className="mt-2 text-xs text-surface-500">
-                              Auto-évaluation : {OBJECTIVE_STATUS_LABELS[objective.selfAssessment.status]}
+                            <p className="mt-2 flex items-center gap-1.5 text-xs text-surface-500">
+                              Bilan du cycle (collaborateur) :
+                              <span className={`badge ${OBJECTIVE_STATUS_BADGE_CLASS[objective.selfAssessment.status]}`}>
+                                {OBJECTIVE_STATUS_LABELS[objective.selfAssessment.status]}
+                              </span>
                               {objective.selfAssessment.comment ? ` — ${objective.selfAssessment.comment}` : ''}
                             </p>
                           )}
@@ -879,31 +1109,6 @@ export function TeamPerformancePage() {
                         )}
                       </div>
                     ))}
-                  </div>
-
-                  <div>
-                    <p className="text-sm font-medium text-surface-300 mb-2">Grille de compétences (1 à 5)</p>
-                    <div className="grid sm:grid-cols-4 gap-3">
-                      {COMPETENCY_AXES.map((axis) => (
-                        <div key={axis}>
-                          <label className="block text-xs text-surface-400 mb-1">{COMPETENCY_AXIS_LABELS[axis]}</label>
-                          <input
-                            type="number"
-                            min={1}
-                            max={5}
-                            className="input"
-                            value={managerDraft.competencyScores[axis]}
-                            disabled={isReadOnly}
-                            onChange={(e) => updateManagerCompetency(axis, e.target.value)}
-                          />
-                          {detail.competencyScores[axis].self != null && (
-                            <p className="mt-1 text-xs text-surface-500">
-                              Collaborateur : {detail.competencyScores[axis].self}
-                            </p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
                   </div>
 
                   <button

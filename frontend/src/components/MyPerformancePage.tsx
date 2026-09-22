@@ -11,17 +11,17 @@ import {
 } from 'lucide-react';
 import { performanceApi } from '../services/api';
 import { useSocketOptional } from '../hooks/useSocketContext';
+import { GeneralAssessmentSummary } from './GeneralAssessmentSummary';
 import {
   PerformanceReview,
   PerformanceCycle,
   Objective,
   KeyResult,
-  CompetencyAxis,
   ObjectiveAssessmentStatus,
   AssessmentInput,
   OBJECTIVE_ASSESSMENT_STATUSES,
-  COMPETENCY_AXES,
   computeObjectiveProgress,
+  computeAutoObjectiveStatus,
   normalizePerformanceReview,
   OBJECTIVE_STATUS_LABELS,
   REVIEW_STATUS_LABELS,
@@ -55,7 +55,6 @@ interface SelfObjectiveDraft {
 interface SelfDraft {
   objectives: Record<string, SelfObjectiveDraft>;
   qualitative: Record<'successes' | 'challenges' | 'growthAreas' | 'overallReview', string>;
-  competencyScores: Record<CompetencyAxis, string>;
 }
 
 function buildSelfDraft(review: PerformanceReview): SelfDraft {
@@ -64,7 +63,10 @@ function buildSelfDraft(review: PerformanceReview): SelfDraft {
     objectives: Object.fromEntries(
       normalized.objectives.map((o) => [
         o.id,
-        { status: o.selfAssessment.status ?? '', comment: o.selfAssessment.comment ?? '' }
+        {
+          status: o.selfAssessment.status ?? computeAutoObjectiveStatus(computeObjectiveProgress(o)),
+          comment: o.selfAssessment.comment ?? ''
+        }
       ])
     ),
     qualitative: {
@@ -72,22 +74,6 @@ function buildSelfDraft(review: PerformanceReview): SelfDraft {
       challenges: normalized.qualitative.challenges.self ?? '',
       growthAreas: normalized.qualitative.growthAreas.self ?? '',
       overallReview: normalized.qualitative.overallReview.self ?? ''
-    },
-    competencyScores: {
-      technique:
-        normalized.competencyScores.technique.self != null
-          ? String(normalized.competencyScores.technique.self)
-          : '',
-      impact:
-        normalized.competencyScores.impact.self != null ? String(normalized.competencyScores.impact.self) : '',
-      collaboration:
-        normalized.competencyScores.collaboration.self != null
-          ? String(normalized.competencyScores.collaboration.self)
-          : '',
-      leadership:
-        normalized.competencyScores.leadership.self != null
-          ? String(normalized.competencyScores.leadership.self)
-          : ''
     }
   };
 }
@@ -216,12 +202,6 @@ export function MyPerformancePage() {
     setSelfDraft((prev) => (prev ? { ...prev, qualitative: { ...prev.qualitative, [field]: value } } : prev));
   }
 
-  function updateSelfCompetency(axis: CompetencyAxis, value: string) {
-    setSelfDraft((prev) =>
-      prev ? { ...prev, competencyScores: { ...prev.competencyScores, [axis]: value } } : prev
-    );
-  }
-
   async function handleSaveSelfAssessment() {
     if (!review || !selfDraft) return;
 
@@ -239,13 +219,7 @@ export function MyPerformancePage() {
         challenges: selfDraft.qualitative.challenges.trim() || undefined,
         growthAreas: selfDraft.qualitative.growthAreas.trim() || undefined,
         overallReview: selfDraft.qualitative.overallReview.trim() || undefined
-      },
-      competencyScores: Object.fromEntries(
-        COMPETENCY_AXES.filter((axis) => selfDraft.competencyScores[axis].trim() !== '').map((axis) => [
-          axis,
-          Number(selfDraft.competencyScores[axis])
-        ])
-      )
+      }
     };
 
     setSavingSelf(true);
@@ -341,16 +315,25 @@ export function MyPerformancePage() {
                 ))}
               </div>
 
+              <GeneralAssessmentSummary axes={review.generalSelfAssessment} objectives={review.objectives} />
+
               {selfDraft && (
                 <div className="card-glass p-6 space-y-6">
-                  <h2 className="text-lg font-semibold text-surface-100">Mon auto-évaluation</h2>
+                  <h2 className="text-lg font-semibold text-surface-100">Bilan du cycle</h2>
 
                   <div className="space-y-4">
                     {review.objectives.map((objective) => {
                       const draft = selfDraft.objectives[objective.id] ?? { status: '', comment: '' };
                       return (
                         <div key={objective.id} className="border border-surface-700/50 rounded-xl p-4">
-                          <p className="font-medium text-surface-200 mb-3">{objective.title}</p>
+                          <div className="flex items-center gap-2 flex-wrap mb-3">
+                            <p className="font-medium text-surface-200">{objective.title}</p>
+                            {(objective.competencyAxes ?? []).map((axis) => (
+                              <span key={axis} className="badge bg-surface-700/60 text-surface-300">
+                                {COMPETENCY_AXIS_LABELS[axis]}
+                              </span>
+                            ))}
+                          </div>
                           <div className="grid sm:grid-cols-[220px_1fr] gap-3">
                             <select
                               className="input"
@@ -407,31 +390,6 @@ export function MyPerformancePage() {
                     ))}
                   </div>
 
-                  <div>
-                    <p className="text-sm font-medium text-surface-300 mb-2">Grille de compétences (1 à 5)</p>
-                    <div className="grid sm:grid-cols-4 gap-3">
-                      {COMPETENCY_AXES.map((axis) => (
-                        <div key={axis}>
-                          <label className="block text-xs text-surface-400 mb-1">{COMPETENCY_AXIS_LABELS[axis]}</label>
-                          <input
-                            type="number"
-                            min={1}
-                            max={5}
-                            className="input"
-                            value={selfDraft.competencyScores[axis]}
-                            disabled={isReadOnly}
-                            onChange={(e) => updateSelfCompetency(axis, e.target.value)}
-                          />
-                          {review.competencyScores[axis].manager != null && (
-                            <p className="mt-1 text-xs text-surface-500">
-                              Manager : {review.competencyScores[axis].manager}
-                            </p>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-
                   <button
                     type="button"
                     className="btn-primary"
@@ -478,7 +436,14 @@ function ObjectiveCard({
     <div className="card-glass p-6">
       <div className="flex items-start justify-between gap-4 mb-1">
         <div>
-          <h3 className="text-lg font-semibold text-surface-100">{objective.title}</h3>
+          <div className="flex items-center gap-2 flex-wrap">
+            <h3 className="text-lg font-semibold text-surface-100">{objective.title}</h3>
+            {(objective.competencyAxes ?? []).map((axis) => (
+              <span key={axis} className="badge bg-surface-700/60 text-surface-300">
+                {COMPETENCY_AXIS_LABELS[axis]}
+              </span>
+            ))}
+          </div>
           {objective.description && <p className="text-sm text-surface-400 mt-1">{objective.description}</p>}
         </div>
         <span className="badge badge-info flex-shrink-0">Poids {Math.round(objective.weight * 100)}%</span>

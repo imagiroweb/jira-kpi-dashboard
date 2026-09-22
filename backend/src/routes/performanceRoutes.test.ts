@@ -71,7 +71,6 @@ function makeReview(overrides: Record<string, unknown> = {}) {
     cycle: ACTIVE_CYCLE._id,
     objectives: [],
     qualitative: {},
-    competencyScores: {},
     status: 'dossier_manquant',
     createdBy: { id: TEST_USER_ID, name: 'admin', role: 'collaborateur' },
     createdAt: new Date('2026-09-01'),
@@ -105,7 +104,7 @@ function objectiveFixture(krs = [krFixture()]) {
 /** Document mocké tel que renvoyé par `PerformanceReview.findOne` dans la route progress. */
 function makeReviewDoc(
   objectives = [objectiveFixture()],
-  overrides: { qualitative?: Record<string, unknown>; competencyScores?: Record<string, unknown> } = {}
+  overrides: { qualitative?: Record<string, unknown> } = {}
 ) {
   return {
     _id: 'review-1',
@@ -113,8 +112,7 @@ function makeReviewDoc(
     status: 'en_cours',
     toObject: () => ({
       objectives: structuredClone(objectives),
-      qualitative: structuredClone(overrides.qualitative ?? {}),
-      competencyScores: structuredClone(overrides.competencyScores ?? {})
+      qualitative: structuredClone(overrides.qualitative ?? {})
     })
   };
 }
@@ -168,12 +166,6 @@ describe('performanceRoutes (TI)', () => {
         challenges: {},
         growthAreas: {},
         overallReview: {}
-      });
-      expect(res.body.review.competencyScores).toEqual({
-        technique: {},
-        impact: {},
-        collaboration: {},
-        leadership: {}
       });
       expect(mockReviewCreate).not.toHaveBeenCalled();
     });
@@ -348,24 +340,22 @@ describe('performanceRoutes (TI)', () => {
       expect(update.$set.objectives[0]).not.toHaveProperty('managerAssessment.status');
     });
 
-    it("200 fusionne le bilan qualitatif et les scores de compétence côté self", async () => {
+    it("200 fusionne le bilan qualitatif côté self", async () => {
       mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
       mockReviewFindOne.mockResolvedValue(
         makeReviewDoc([], {
-          qualitative: { successes: { manager: 'Bravo' } },
-          competencyScores: { technique: { manager: 3 } }
+          qualitative: { successes: { manager: 'Bravo' } }
         })
       );
       mockReviewFindOneAndUpdate.mockResolvedValue(makeReview());
 
       const res = await request(app)
         .patch(url)
-        .send({ qualitative: { successes: 'Content de moi' }, competencyScores: { technique: 4 } });
+        .send({ qualitative: { successes: 'Content de moi' } });
 
       expect(res.status).toBe(200);
       const [, update] = mockReviewFindOneAndUpdate.mock.calls[0];
       expect(update.$set.qualitative.successes).toEqual({ manager: 'Bravo', self: 'Content de moi' });
-      expect(update.$set.competencyScores.technique).toEqual({ manager: 3, self: 4 });
     });
 
     it('409 si la fiche a été modifiée en même temps (verrou optimiste épuisé)', async () => {

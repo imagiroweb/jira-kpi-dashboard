@@ -14,13 +14,25 @@ describe('objectivesToApiInput', () => {
         id: 'obj-1',
         title: 'Objectif A',
         weight: 0.6,
+        competencyAxes: [],
         krs: [
           { id: 'obj-1-kr-1', label: 'KR A1', weight: 0.5 },
           { id: 'obj-1-kr-2', label: 'KR A2', weight: 0.5 }
         ]
       },
-      { id: 'obj-2', title: 'Objectif B', weight: 0.4, krs: [] }
+      { id: 'obj-2', title: 'Objectif B', weight: 0.4, competencyAxes: [], krs: [] }
     ]);
+  });
+
+  it("suggère les axes de compétence à partir du titre de l'objectif (suggestCompetencyAxes)", () => {
+    const parsed: ParsedObjective[] = [
+      { title: "Refactoriser l'architecture technique", weight: 0.5, krs: [] },
+      { title: 'Objectif neutre sans mot-clé', weight: 0.5, krs: [] }
+    ];
+
+    const result = objectivesToApiInput(parsed);
+    expect(result[0].competencyAxes).toEqual(['technique']);
+    expect(result[1].competencyAxes).toEqual([]);
   });
 
   it('produit toujours les mêmes id pour la même liste (idempotent entre deux exécutions)', () => {

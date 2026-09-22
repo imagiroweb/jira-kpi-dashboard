@@ -17,8 +17,12 @@ import {
   type UpdatePerformanceCycleInput,
   type ObjectiveDefinitionInput,
   type AssessmentInput,
+  type GeneralAssessmentManagerAxesInput,
+  type GeneralAssessmentReferentialProfile,
   type ProgressUpdateInput,
-  type OkrImportResult
+  type OkrImportResult,
+  type GeneralAssessmentImportResult,
+  type RoleProfile
 } from '../domain/performance';
 import type { Team, CreateTeamInput, UpdateTeamInput, RosterUser } from '../domain/team';
 
@@ -750,6 +754,27 @@ export const performanceApi = {
     const { data } = await api.patch(`/performance/reviews/${userId}/manager-assessment`, input);
     return { ...data, review: normalizePerformanceReview(data.review) };
   },
+  /**
+   * Évaluation manager sur la grille générale (4 axes × sous-critères) — le manager choisit une
+   * réponse verbeuse par sous-critère (`axes`), jamais une note brute : le score est résolu
+   * serveur à partir du référentiel du profil de poste ciblé (`roleProfile`, mémorisé sur la
+   * fiche s'il est fourni). Voir `getGeneralAssessmentReferential` pour charger les référentiels.
+   */
+  updateGeneralManagerAssessment: async (
+    userId: string,
+    input: { axes: GeneralAssessmentManagerAxesInput; roleProfile?: RoleProfile; cycleId?: string }
+  ): Promise<{ success: boolean; review: PerformanceReview }> => {
+    const { data } = await api.patch(`/performance/reviews/${userId}/general-manager-assessment`, input);
+    return { ...data, review: normalizePerformanceReview(data.review) };
+  },
+  /** Référentiels de notation détaillée (un par profil de poste), pour le formulaire de notation manager. */
+  getGeneralAssessmentReferential: async (): Promise<{
+    success: boolean;
+    profiles: GeneralAssessmentReferentialProfile[];
+  }> => {
+    const { data } = await api.get('/performance/general-assessment-referential');
+    return data;
+  },
   /** Membres d'équipe dans la portée de l'acteur, avec ou sans fiche de performance ouverte. */
   getTeamMembers: async (params?: {
     teamId?: string;
@@ -768,6 +793,29 @@ export const performanceApi = {
     form.append('dryRun', String(input.dryRun));
     input.files.forEach((file) => form.append('files', file));
     const { data } = await api.post('/performance/import-okr', form, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      transformRequest: [
+        (body, headers) => {
+          if (body instanceof FormData) {
+            delete headers['Content-Type'];
+          }
+          return body;
+        }
+      ]
+    });
+    return data;
+  },
+  /** Import grilles d'auto-évaluation individuelle (session courante, rien n'est persisté hors notes). */
+  importGeneralAssessment: async (input: {
+    files: File[];
+    cycleId: string;
+    dryRun: boolean;
+  }): Promise<GeneralAssessmentImportResult> => {
+    const form = new FormData();
+    form.append('cycleId', input.cycleId);
+    form.append('dryRun', String(input.dryRun));
+    input.files.forEach((file) => form.append('files', file));
+    const { data } = await api.post('/performance/import-general-assessment', form, {
       headers: { 'Content-Type': 'multipart/form-data' },
       transformRequest: [
         (body, headers) => {

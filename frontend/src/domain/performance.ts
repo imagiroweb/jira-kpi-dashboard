@@ -23,6 +23,15 @@ export type CompetencyAxis = (typeof COMPETENCY_AXES)[number];
 export const REVIEW_AUTHOR_ROLES = ['collaborateur', 'lead', 'cto'] as const;
 export type ReviewAuthorRole = (typeof REVIEW_AUTHOR_ROLES)[number];
 
+/**
+ * Profils de poste utilisés pour la notation manager de la grille générale — miroir exact de
+ * `ROLE_PROFILES` côté backend (`PerformanceReview.ts`). La composante Technique du référentiel
+ * varie selon le profil ; les libellés d'affichage viennent du référentiel chargé via
+ * `GET /performance/general-assessment-referential` (champ `label`), pas d'une table statique ici.
+ */
+export const ROLE_PROFILES = ['dev_back', 'dev_front', 'qa', 'dba'] as const;
+export type RoleProfile = (typeof ROLE_PROFILES)[number];
+
 export const PERFORMANCE_CYCLE_STATUSES = ['draft', 'active', 'closed'] as const;
 export type PerformanceCycleStatus = (typeof PERFORMANCE_CYCLE_STATUSES)[number];
 
@@ -61,6 +70,8 @@ export interface Objective {
   title: string;
   description?: string;
   weight: number;
+  /** Jusqu'à 2 axes de compétence associés à cet objectif (rapprochement OKR / grille de compétences). */
+  competencyAxes?: CompetencyAxis[];
   krs: KeyResult[];
   selfAssessment: ObjectiveAssessment;
   managerAssessment: ObjectiveAssessment;
@@ -79,12 +90,82 @@ export interface Qualitative {
   overallReview: QualitativeEntry;
 }
 
-export interface CompetencyScore {
-  self?: number;
-  manager?: number;
+/**
+ * Un sous-critère noté (1-5) de l'auto-évaluation générale — distincte du "Bilan du cycle"
+ * (`qualitative` ci-dessus, rempli à chaque cycle par le collaborateur et son manager). Reprend
+ * la grille à 4 axes × 3 sous-critères des fichiers Excel importés (voir `IGeneralAssessmentAxes`
+ * côté backend) ; pas encore éditable depuis l'UI, alimentée par l'import.
+ */
+export interface GeneralAssessmentSubCriterion {
+  label: string;
+  score: number;
+  /**
+   * Réponse verbeuse choisie — uniquement renseignée côté évaluation manager (le score est
+   * toujours résolu serveur à partir de cette réponse, voir `GeneralAssessmentManagerAxesInput`).
+   * Absente côté auto-évaluation (import Excel : seul le score y est connu).
+   */
+  answer?: string;
 }
 
-export type CompetencyScores = Record<CompetencyAxis, CompetencyScore>;
+export type GeneralAssessmentAxes = Record<CompetencyAxis, GeneralAssessmentSubCriterion[]>;
+
+/** Payload de `PATCH .../general-self-assessment` — un axe absent n'est pas modifié. */
+export type GeneralAssessmentAxesInput = Partial<Record<CompetencyAxis, GeneralAssessmentSubCriterion[]>>;
+
+/**
+ * Un sous-critère tel que noté par le manager : uniquement la réponse verbeuse choisie (son
+ * texte exact, tel qu'il apparaît dans le référentiel du profil de poste ciblé) — jamais de note
+ * brute, résolue côté serveur (voir `GeneralAssessmentReferentialProfile`).
+ */
+export interface GeneralAssessmentManagerSubCriterionInput {
+  label: string;
+  answer: string;
+}
+
+/** Payload de `PATCH .../general-manager-assessment` — un axe absent n'est pas modifié. */
+export type GeneralAssessmentManagerAxesInput = Partial<Record<CompetencyAxis, GeneralAssessmentManagerSubCriterionInput[]>>;
+
+/** Une réponse verbeuse possible pour un sous-critère, avec ses points (1-5). */
+export interface ReferentialAnswer {
+  text: string;
+  points: number;
+}
+
+/** Un sous-critère noté : toujours 5 réponses, de la moins bonne à la meilleure. */
+export interface ReferentialCriterion {
+  label: string;
+  answers: ReferentialAnswer[];
+}
+
+export type ReferentialAxes = Record<CompetencyAxis, ReferentialCriterion[]>;
+
+/**
+ * Référentiel de notation détaillée d'un profil de poste (`GET /performance/general-assessment-referential`)
+ * — un document par profil, les 4 axes × leurs sous-critères × leurs 5 réponses possibles. Alimente
+ * le formulaire de notation manager (`GeneralManagerAssessmentForm`) : le manager choisit une
+ * réponse par sous-critère, jamais une note brute.
+ */
+export interface GeneralAssessmentReferentialProfile {
+  roleProfile: RoleProfile;
+  /** Libellé d'affichage, ex. "Développeur Back", "QA". */
+  label: string;
+  axes: ReferentialAxes;
+  updatedBy?: ReviewAuthor;
+  updatedAt: string;
+}
+
+/**
+ * Référentiel des 12 sous-critères (4 axes × 3), identiques quel que soit le rôle du
+ * collaborateur — miroir exact de `GENERAL_ASSESSMENT_REFERENTIAL` côté backend
+ * (`src/domain/performance/performanceReview.ts`). Sert de trame fixe au formulaire de notation
+ * manager, pour que chaque sous-critère self soit comparable au même sous-critère manager.
+ */
+export const GENERAL_ASSESSMENT_REFERENTIAL: Record<CompetencyAxis, string[]> = {
+  technique: ['Qualité du code & revues', 'Autonomie & résolution de bugs', 'Conception & architecture'],
+  impact: ['Livraison (delivery)', 'Contribution aux OKR', "Périmètre d'influence"],
+  collaboration: ['Communication & transparence', 'Partage & documentation', "Esprit d'équipe & rituels"],
+  leadership: ['Initiative & autonomie', 'Mentorat & développement des autres', 'Vision & influence']
+};
 
 /** Utilisateur tel que renvoyé quand la fiche est peuplée (listes/détail lead-CTO). */
 export interface PerformanceReviewUserRef {
@@ -104,7 +185,12 @@ export interface PerformanceReview {
   teamNameSnapshot?: string;
   objectives: Objective[];
   qualitative: Qualitative;
-  competencyScores: CompetencyScores;
+  /** Auto-évaluation générale (4 axes × sous-critères) — voir `GeneralAssessmentAxes`. */
+  generalSelfAssessment: GeneralAssessmentAxes;
+  /** Évaluation manager sur la même grille, pour rapprochement avec l'auto-évaluation. */
+  generalManagerAssessment: GeneralAssessmentAxes;
+  /** Profil de poste choisi par le lead/CTO pour la notation manager de la grille générale (mémorisé sur la fiche). */
+  generalAssessmentRoleProfile?: RoleProfile;
   status: PerformanceReviewStatus;
   /** Qui a défini les objectifs de cette fiche (un lead pour son équipe, ou le CTO). */
   definedBy?: ReviewAuthor;
@@ -139,6 +225,8 @@ export interface ObjectiveDefinitionInput {
   title: string;
   description?: string;
   weight: number;
+  /** Jusqu'à 2 axes de compétence associés (voir `suggestCompetencyAxes`), librement modifiables. */
+  competencyAxes?: CompetencyAxis[];
   krs: KeyResultDefinitionInput[];
 }
 
@@ -161,7 +249,6 @@ export interface QualitativeAssessmentInput {
 export interface AssessmentInput {
   objectives?: ObjectiveAssessmentInput[];
   qualitative?: QualitativeAssessmentInput;
-  competencyScores?: Partial<Record<CompetencyAxis, number>>;
 }
 
 /** Payload de `POST /reviews/me/objectives/:objectiveId/krs/:krId/progress`. */
@@ -213,6 +300,24 @@ export interface OkrImportResult {
   writes: { name: string; email: string; ok: boolean; error?: string }[];
 }
 
+export interface GeneralAssessmentImportPlanEntry {
+  name: string;
+  fileName: string;
+  outcome: 'no_match' | 'worksheet_not_found' | 'read_error' | 'empty' | 'ready';
+  email: string | null;
+  warnings: string[];
+  errors: string[];
+  scoredAxisCount: number;
+}
+
+export interface GeneralAssessmentImportResult {
+  success: boolean;
+  dryRun: boolean;
+  cycle: { id: string; label: string; status: string };
+  entries: GeneralAssessmentImportPlanEntry[];
+  writes: { name: string; email: string; ok: boolean; error?: string }[];
+}
+
 // --- Aides d'affichage pures (miroir de src/domain/performance/performanceReview.ts côté backend). ---
 // Le backend reste la seule source de vérité : ces fonctions ne font qu'anticiper le même calcul
 // côté client (barres de progression, validation immédiate d'un formulaire) avant l'appel API, qui
@@ -240,6 +345,18 @@ export function computeObjectiveProgress(objective: Pick<Objective, 'krs'>): num
   return weightedSum / totalWeight;
 }
 
+/**
+ * Statut d'objectif suggéré à partir de son avancement (0-100), pour pré-remplir le select de
+ * statut du bilan du cycle avant toute saisie manuelle : 0-50 % → non atteint, 50-95 % →
+ * partiellement atteint, 95-100 % → atteint. "Dépassé" ne peut pas être déduit d'un avancement
+ * plafonné à 100 % et reste un choix exclusivement manuel : cette fonction ne le retourne jamais.
+ */
+export function computeAutoObjectiveStatus(progress: number): ObjectiveAssessmentStatus {
+  if (progress < 50) return 'non_atteint';
+  if (progress < 95) return 'partiellement_atteint';
+  return 'atteint';
+}
+
 /** Score global d'une fiche (0-100) : moyenne pondérée de l'avancement des objectifs. */
 export function computeReviewScore(objectives: Pick<Objective, 'weight' | 'krs'>[]): number {
   const totalWeight = sumWeights(objectives);
@@ -249,6 +366,107 @@ export function computeReviewScore(objectives: Pick<Objective, 'weight' | 'krs'>
     0
   );
   return weightedSum / totalWeight;
+}
+
+/** Une entrée du résumé de répartition des statuts d'objectifs (voir `summarizeObjectiveStatuses`). */
+export interface ObjectiveStatusSummary {
+  status: ObjectiveAssessmentStatus;
+  count: number;
+}
+
+/**
+ * Résume la répartition des statuts d'objectifs d'une fiche pour un affichage compact (ex.
+ * colonne "Objectifs" du tableau récap d'équipe) : le statut manager fait foi une fois renseigné,
+ * sinon on retombe sur le bilan du cycle du collaborateur (self) — un objectif sans statut des
+ * deux côtés n'est pas compté (rien de pertinent à afficher pour lui). Résultat trié dans l'ordre
+ * de `OBJECTIVE_ASSESSMENT_STATUSES` (du moins bon au meilleur) pour un affichage stable.
+ */
+export function summarizeObjectiveStatuses(
+  objectives: Pick<Objective, 'selfAssessment' | 'managerAssessment'>[]
+): ObjectiveStatusSummary[] {
+  const counts = new Map<ObjectiveAssessmentStatus, number>();
+  for (const objective of objectives) {
+    const status = objective.managerAssessment.status ?? objective.selfAssessment.status;
+    if (!status) continue;
+    counts.set(status, (counts.get(status) ?? 0) + 1);
+  }
+  return OBJECTIVE_ASSESSMENT_STATUSES.filter((status) => counts.has(status)).map((status) => ({
+    status,
+    count: counts.get(status) as number
+  }));
+}
+
+/** Résumé agrégé d'un ensemble de fiches (typiquement toutes celles d'une équipe) — voir `summarizeTeamReviews`. */
+export interface TeamPerformanceSummary {
+  reviewCount: number;
+  statusCounts: Record<PerformanceReviewStatus, number>;
+  /** Moyenne (0-100) sur les fiches ayant des objectifs définis ; null si aucune. */
+  avgObjectivesScore: number | null;
+  /** Moyenne (0-5) sur les fiches ayant au moins un axe noté ; null si aucune. */
+  avgSelfAssessmentScore: number | null;
+  /** Moyenne (0-5) sur les fiches ayant au moins un axe noté par le manager ; null si aucune. */
+  avgManagerAssessmentScore: number | null;
+}
+
+function average(values: number[]): number {
+  return values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+/**
+ * Résume un ensemble de fiches (typiquement toutes celles d'une équipe, ou tout le périmètre
+ * affiché) pour une vue agrégée : répartition des statuts de fiche, et scores moyens (objectifs,
+ * auto-évaluation, évaluation manager de la grille générale). Chaque moyenne ne porte que sur les
+ * fiches ayant une valeur exploitable (objectifs définis / axe noté) — une fiche vide n'est pas
+ * comptée comme un 0, pour ne pas tirer artificiellement la moyenne vers le bas.
+ */
+export function summarizeTeamReviews(
+  reviews: Pick<PerformanceReview, 'status' | 'objectives' | 'generalSelfAssessment' | 'generalManagerAssessment'>[]
+): TeamPerformanceSummary {
+  const statusCounts: Record<PerformanceReviewStatus, number> = {
+    dossier_manquant: 0,
+    en_cours: 0,
+    complete: 0
+  };
+  for (const review of reviews) {
+    statusCounts[review.status] += 1;
+  }
+
+  const objectivesScores = reviews
+    .filter((review) => review.objectives.length > 0)
+    .map((review) => computeReviewScore(review.objectives));
+  const selfScores = reviews
+    .map((review) => computeGeneralAssessmentGlobalScore(review.generalSelfAssessment))
+    .filter((score) => score > 0);
+  const managerScores = reviews
+    .map((review) => computeGeneralAssessmentGlobalScore(review.generalManagerAssessment))
+    .filter((score) => score > 0);
+
+  return {
+    reviewCount: reviews.length,
+    statusCounts,
+    avgObjectivesScore: objectivesScores.length > 0 ? average(objectivesScores) : null,
+    avgSelfAssessmentScore: selfScores.length > 0 ? average(selfScores) : null,
+    avgManagerAssessmentScore: managerScores.length > 0 ? average(managerScores) : null
+  };
+}
+
+/** Score d'un axe de l'auto-évaluation générale (0-5) : moyenne des scores de ses sous-critères, 0 si aucun. */
+export function computeGeneralAssessmentAxisScore(subCriteria: GeneralAssessmentSubCriterion[]): number {
+  if (subCriteria.length === 0) return 0;
+  const sum = subCriteria.reduce((total, subCriterion) => total + subCriterion.score, 0);
+  return sum / subCriteria.length;
+}
+
+/**
+ * Score global de l'auto-évaluation générale (0-5) : moyenne des scores des 4 axes, en excluant
+ * un axe sans sous-critère renseigné (pas compté comme 0) — miroir exact de
+ * `computeGeneralAssessmentGlobalScore` côté backend.
+ */
+export function computeGeneralAssessmentGlobalScore(axes: GeneralAssessmentAxes): number {
+  const axisScores = COMPETENCY_AXES.map((axis) => axes[axis]).filter((subCriteria) => subCriteria.length > 0);
+  if (axisScores.length === 0) return 0;
+  const sum = axisScores.reduce((total, subCriteria) => total + computeGeneralAssessmentAxisScore(subCriteria), 0);
+  return sum / axisScores.length;
 }
 
 export interface ObjectivesDefinitionValidation {
@@ -309,6 +527,40 @@ export function validateObjectivesDefinition(objectives: ObjectiveDefinitionInpu
   return { valid: errors.length === 0, errors };
 }
 
+/**
+ * Mots-clés associés à chaque axe de compétence, utilisés par
+ * `suggestCompetencyAxes` — miroir exact de `COMPETENCY_AXIS_KEYWORDS` côté
+ * backend (`src/domain/performance/performanceReview.ts`), à garder
+ * synchronisé si la table évolue.
+ */
+const COMPETENCY_AXIS_KEYWORDS: Record<CompetencyAxis, string[]> = {
+  technique: ['code', 'architecture', 'technique', 'technologie', 'dette technique', 'infrastructure', 'infra', 'sécurité'],
+  impact: ['client', 'business', 'arr', 'delivery', 'livraison', "chiffre d'affaires", 'roadmap produit', 'produit'],
+  collaboration: ['équipe', 'collaborat', 'communication', 'coordination', 'transverse'],
+  leadership: ['mentor', 'vision', 'manager', 'leadership', 'encadrement', 'recrutement']
+};
+
+/**
+ * Suggère jusqu'à 2 axes de compétence pour un objectif, par mots-clés sur
+ * son titre + sa description — pure fonction, miroir exact de
+ * `suggestCompetencyAxes` côté backend, qui reste la seule source de vérité
+ * (cette fonction anticipe le même calcul côté client pour un aperçu
+ * instantané dans le formulaire ; le lead/CTO reste libre de modifier la
+ * sélection avant enregistrement).
+ */
+export function suggestCompetencyAxes(title: string, description?: string): CompetencyAxis[] {
+  const haystack = `${title} ${description ?? ''}`.toLowerCase();
+
+  return COMPETENCY_AXES.map((axis) => ({
+    axis,
+    matchCount: COMPETENCY_AXIS_KEYWORDS[axis].filter((keyword) => haystack.includes(keyword)).length
+  }))
+    .filter((entry) => entry.matchCount > 0)
+    .sort((a, b) => b.matchCount - a.matchCount)
+    .slice(0, 2)
+    .map((entry) => entry.axis);
+}
+
 // --- Libellés d'affichage partagés (français) ---
 
 export const OBJECTIVE_STATUS_LABELS: Record<ObjectiveAssessmentStatus, string> = {
@@ -328,6 +580,14 @@ export const REVIEW_STATUS_BADGE_CLASS: Record<PerformanceReviewStatus, string> 
   dossier_manquant: 'badge-danger',
   en_cours: 'badge-warning',
   complete: 'badge-success'
+};
+
+/** Couleur de badge par statut d'objectif — seules 4 classes existent (success/warning/danger/info) : 'depasse' utilise 'badge-info' pour rester visuellement distinct d'un simple 'atteint'. */
+export const OBJECTIVE_STATUS_BADGE_CLASS: Record<ObjectiveAssessmentStatus, string> = {
+  non_atteint: 'badge-danger',
+  partiellement_atteint: 'badge-warning',
+  atteint: 'badge-success',
+  depasse: 'badge-info'
 };
 
 export const CYCLE_STATUS_LABELS: Record<PerformanceCycleStatus, string> = {
@@ -361,10 +621,6 @@ export function emptyQualitative(): Qualitative {
   return { successes: {}, challenges: {}, growthAreas: {}, overallReview: {} };
 }
 
-export function emptyCompetencyScores(): CompetencyScores {
-  return { technique: {}, impact: {}, collaboration: {}, leadership: {} };
-}
-
 export function normalizeQualitative(raw?: Partial<Qualitative> | null): Qualitative {
   const base = emptyQualitative();
   if (!raw) return base;
@@ -376,14 +632,18 @@ export function normalizeQualitative(raw?: Partial<Qualitative> | null): Qualita
   };
 }
 
-export function normalizeCompetencyScores(raw?: Partial<CompetencyScores> | null): CompetencyScores {
-  const base = emptyCompetencyScores();
+export function emptyGeneralAssessmentAxes(): GeneralAssessmentAxes {
+  return { technique: [], impact: [], collaboration: [], leadership: [] };
+}
+
+export function normalizeGeneralAssessmentAxes(raw?: Partial<GeneralAssessmentAxes> | null): GeneralAssessmentAxes {
+  const base = emptyGeneralAssessmentAxes();
   if (!raw) return base;
   return {
-    technique: raw.technique ?? {},
-    impact: raw.impact ?? {},
-    collaboration: raw.collaboration ?? {},
-    leadership: raw.leadership ?? {}
+    technique: raw.technique ?? [],
+    impact: raw.impact ?? [],
+    collaboration: raw.collaboration ?? [],
+    leadership: raw.leadership ?? []
   };
 }
 
@@ -397,7 +657,8 @@ export function normalizePerformanceReview(review: PerformanceReview): Performan
       managerAssessment: objective.managerAssessment ?? {}
     })),
     qualitative: normalizeQualitative(review.qualitative),
-    competencyScores: normalizeCompetencyScores(review.competencyScores)
+    generalSelfAssessment: normalizeGeneralAssessmentAxes(review.generalSelfAssessment),
+    generalManagerAssessment: normalizeGeneralAssessmentAxes(review.generalManagerAssessment)
   };
 }
 

@@ -78,3 +78,32 @@ describe('POST /api/performance/import-okr', () => {
     expect(res.status).toBe(403);
   });
 });
+
+describe('POST /api/performance/import-general-assessment', () => {
+  const app = createTestApp({ mountPath: '/api/performance', router: performanceRoutes });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    mockTeamFind.mockReturnValue({ select: () => ({ lean: () => Promise.resolve([]) }) });
+    mockRoleFindById.mockReturnValue({ select: () => ({ lean: () => Promise.resolve(null) }) });
+    mockUserFindById.mockReturnValue({
+      select: () => ({ lean: () => Promise.resolve({ role: 'super_admin', roleId: null }) })
+    });
+  });
+
+  it('400 sans fichier', async () => {
+    const res = await request(app).post('/api/performance/import-general-assessment').field('dryRun', 'true');
+    expect(res.status).toBe(400);
+    expect(res.body.message).toMatch(/fichier/i);
+  });
+
+  it('403 si l’acteur n’a pas d’accès global', async () => {
+    mockUserFindById.mockReturnValue({
+      select: () => ({ lean: () => Promise.resolve({ role: null, roleId: null }) })
+    });
+    const res = await request(app)
+      .post('/api/performance/import-general-assessment')
+      .attach('files', Buffer.from('x'), 'deguil-robin.xlsx');
+    expect(res.status).toBe(403);
+  });
+});

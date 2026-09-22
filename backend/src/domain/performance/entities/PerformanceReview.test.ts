@@ -6,7 +6,8 @@ import {
   PerformanceReview,
   OBJECTIVE_ASSESSMENT_STATUSES,
   PERFORMANCE_REVIEW_STATUSES,
-  COMPETENCY_AXES
+  COMPETENCY_AXES,
+  ROLE_PROFILES
 } from './PerformanceReview';
 
 function baseReview() {
@@ -47,17 +48,13 @@ describe('PerformanceReview', () => {
     expect(review.toObject().objectives).toEqual([]);
   });
 
-  it('déclare les sous-champs qualitative et competencyScores sur le schéma', () => {
+  it('déclare les sous-champs qualitative sur le schéma', () => {
     const schema = PerformanceReview.schema;
     expect(schema.path('qualitative.successes.self')).toBeDefined();
     expect(schema.path('qualitative.successes.manager')).toBeDefined();
     expect(schema.path('qualitative.challenges.self')).toBeDefined();
     expect(schema.path('qualitative.growthAreas.self')).toBeDefined();
     expect(schema.path('qualitative.overallReview.self')).toBeDefined();
-    COMPETENCY_AXES.forEach((axis) => {
-      expect(schema.path(`competencyScores.${axis}.self`)).toBeDefined();
-      expect(schema.path(`competencyScores.${axis}.manager`)).toBeDefined();
-    });
   });
 
   it('accepte un objectif avec KR et historique de progression', () => {
@@ -109,11 +106,180 @@ describe('PerformanceReview', () => {
     expect(error).toBeDefined();
   });
 
+  it('déclare le sous-champ generalSelfAssessment (4 axes) sur le schéma', () => {
+    const schema = PerformanceReview.schema;
+    COMPETENCY_AXES.forEach((axis) => {
+      expect(schema.path(`generalSelfAssessment.axes.${axis}`)).toBeDefined();
+    });
+  });
+
+  it('remplit generalSelfAssessment avec les 4 axes vides par défaut', () => {
+    const review = new PerformanceReview(baseReview());
+    const axes = review.toObject().generalSelfAssessment.axes;
+    COMPETENCY_AXES.forEach((axis) => {
+      expect(axes[axis]).toEqual([]);
+    });
+  });
+
+  it('accepte des sous-critères notés (1-5) par axe pour generalSelfAssessment', () => {
+    const review = new PerformanceReview({
+      ...baseReview(),
+      generalSelfAssessment: {
+        axes: {
+          technique: [
+            { label: 'Qualité du code & revues', score: 3 },
+            { label: 'Autonomie & résolution de bugs', score: 4 },
+            { label: 'Conception & architecture', score: 3 }
+          ],
+          impact: [],
+          collaboration: [],
+          leadership: []
+        }
+      }
+    });
+    const error = review.validateSync();
+    expect(error).toBeUndefined();
+    expect(review.toObject().generalSelfAssessment.axes.technique).toHaveLength(3);
+  });
+
+  it('refuse un score de sous-critère hors de la plage 1-5', () => {
+    const review = new PerformanceReview({
+      ...baseReview(),
+      generalSelfAssessment: {
+        axes: {
+          technique: [{ label: 'Qualité du code & revues', score: 7 }],
+          impact: [],
+          collaboration: [],
+          leadership: []
+        }
+      }
+    });
+    const error = review.validateSync();
+    expect(error).toBeDefined();
+  });
+
+  it('déclare le sous-champ generalManagerAssessment (4 axes) sur le schéma', () => {
+    const schema = PerformanceReview.schema;
+    COMPETENCY_AXES.forEach((axis) => {
+      expect(schema.path(`generalManagerAssessment.axes.${axis}`)).toBeDefined();
+    });
+  });
+
+  it('remplit generalManagerAssessment avec les 4 axes vides par défaut', () => {
+    const review = new PerformanceReview(baseReview());
+    const axes = review.toObject().generalManagerAssessment.axes;
+    COMPETENCY_AXES.forEach((axis) => {
+      expect(axes[axis]).toEqual([]);
+    });
+  });
+
+  it('accepte des sous-critères notés (1-5) par axe pour generalManagerAssessment, indépendamment de generalSelfAssessment', () => {
+    const review = new PerformanceReview({
+      ...baseReview(),
+      generalSelfAssessment: {
+        axes: {
+          technique: [{ label: 'Qualité du code & revues', score: 2 }],
+          impact: [],
+          collaboration: [],
+          leadership: []
+        }
+      },
+      generalManagerAssessment: {
+        axes: {
+          technique: [
+            { label: 'Qualité du code & revues', score: 4 },
+            { label: 'Autonomie & résolution de bugs', score: 5 },
+            { label: 'Conception & architecture', score: 4 }
+          ],
+          impact: [],
+          collaboration: [],
+          leadership: []
+        }
+      }
+    });
+    const error = review.validateSync();
+    expect(error).toBeUndefined();
+    const obj = review.toObject();
+    expect(obj.generalManagerAssessment.axes.technique).toHaveLength(3);
+    expect(obj.generalSelfAssessment.axes.technique).toEqual([{ label: 'Qualité du code & revues', score: 2 }]);
+  });
+
+  it('refuse un score de sous-critère hors de la plage 1-5 pour generalManagerAssessment', () => {
+    const review = new PerformanceReview({
+      ...baseReview(),
+      generalManagerAssessment: {
+        axes: {
+          technique: [{ label: 'Qualité du code & revues', score: 0 }],
+          impact: [],
+          collaboration: [],
+          leadership: []
+        }
+      }
+    });
+    const error = review.validateSync();
+    expect(error).toBeDefined();
+  });
+
   it('applique la contrainte d\'unicité (user, cycle) au niveau de l\'index', () => {
     const indexes = PerformanceReview.schema.indexes();
     const uniqueUserCycle = indexes.find(
       ([fields, options]) => fields.user === 1 && fields.cycle === 1 && options.unique
     );
     expect(uniqueUserCycle).toBeDefined();
+  });
+
+  it('accepte un sous-critère avec une réponse verbeuse (answer), en plus du score résolu', () => {
+    const review = new PerformanceReview({
+      ...baseReview(),
+      generalManagerAssessment: {
+        axes: {
+          technique: [{ label: 'Qualité du code & revues', score: 4, answer: 'Réponse correcte' }],
+          impact: [],
+          collaboration: [],
+          leadership: []
+        }
+      }
+    });
+    const error = review.validateSync();
+    expect(error).toBeUndefined();
+    expect(review.toObject().generalManagerAssessment.axes.technique).toEqual([
+      { label: 'Qualité du code & revues', score: 4, answer: 'Réponse correcte' }
+    ]);
+  });
+
+  it("n'exige pas de réponse (answer) : reste optionnelle, notamment pour generalSelfAssessment (import Excel)", () => {
+    const review = new PerformanceReview({
+      ...baseReview(),
+      generalSelfAssessment: {
+        axes: {
+          technique: [{ label: 'Qualité du code & revues', score: 3 }],
+          impact: [],
+          collaboration: [],
+          leadership: []
+        }
+      }
+    });
+    const error = review.validateSync();
+    expect(error).toBeUndefined();
+    expect(review.toObject().generalSelfAssessment.axes.technique[0].answer).toBeUndefined();
+  });
+
+  it('déclare generalAssessmentRoleProfile parmi les profils de poste autorisés (ROLE_PROFILES), champ optionnel', () => {
+    const schema = PerformanceReview.schema;
+    expect(schema.paths.generalAssessmentRoleProfile.options.enum).toEqual(ROLE_PROFILES);
+
+    const withoutProfile = new PerformanceReview(baseReview());
+    expect(withoutProfile.validateSync()).toBeUndefined();
+    expect(withoutProfile.toObject().generalAssessmentRoleProfile).toBeUndefined();
+
+    const withProfile = new PerformanceReview({ ...baseReview(), generalAssessmentRoleProfile: 'dev_back' });
+    expect(withProfile.validateSync()).toBeUndefined();
+    expect(withProfile.toObject().generalAssessmentRoleProfile).toBe('dev_back');
+  });
+
+  it('refuse une valeur de generalAssessmentRoleProfile hors de ROLE_PROFILES', () => {
+    const review = new PerformanceReview({ ...baseReview(), generalAssessmentRoleProfile: 'product_owner' });
+    const error = review.validateSync();
+    expect(error).toBeDefined();
   });
 });

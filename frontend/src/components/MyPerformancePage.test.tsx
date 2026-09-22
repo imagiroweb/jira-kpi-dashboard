@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PerformanceCycle, PerformanceReview } from '../domain/performance';
 
@@ -67,12 +67,8 @@ function makeReview(overrides: Partial<PerformanceReview> = {}): PerformanceRevi
       growthAreas: {},
       overallReview: {}
     },
-    competencyScores: {
-      technique: {},
-      impact: {},
-      collaboration: {},
-      leadership: {}
-    },
+    generalSelfAssessment: { technique: [], impact: [], collaboration: [], leadership: [] },
+    generalManagerAssessment: { technique: [], impact: [], collaboration: [], leadership: [] },
     status: 'en_cours',
     createdBy: { id: 'user-1', name: 'bruno', role: 'collaborateur' },
     createdAt: '2026-08-01T00:00:00.000Z',
@@ -104,12 +100,42 @@ describe('MyPerformancePage', () => {
     expect(screen.getByText('Réduire le taux d’incidents de 30%')).toBeInTheDocument();
   });
 
-  it('ne plante pas si qualitative / competencyScores arrivent vides depuis l’API', async () => {
+  it('affiche les badges d\'axes de compétence associés à un objectif', async () => {
     mockGetMyReview.mockResolvedValue({
       success: true,
       review: makeReview({
-        qualitative: {} as PerformanceReview['qualitative'],
-        competencyScores: {} as PerformanceReview['competencyScores']
+        objectives: [
+          {
+            id: 'obj-1',
+            title: 'Améliorer la fiabilité du produit',
+            weight: 1,
+            competencyAxes: ['technique', 'impact'],
+            krs: [],
+            selfAssessment: {},
+            managerAssessment: {}
+          }
+        ]
+      })
+    });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+
+    render(<MyPerformancePage />);
+
+    const heading = await screen.findByRole('heading', {
+      name: 'Améliorer la fiabilité du produit',
+      level: 3
+    });
+    const objectiveCard = heading.closest('.card-glass') as HTMLElement;
+    expect(within(objectiveCard).getByText('Technique')).toBeInTheDocument();
+    expect(within(objectiveCard).getByText('Impact')).toBeInTheDocument();
+    expect(within(objectiveCard).queryByText('Collaboration')).not.toBeInTheDocument();
+  });
+
+  it('ne plante pas si qualitative arrive vide depuis l’API', async () => {
+    mockGetMyReview.mockResolvedValue({
+      success: true,
+      review: makeReview({
+        qualitative: {} as PerformanceReview['qualitative']
       })
     });
     mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
@@ -119,7 +145,7 @@ describe('MyPerformancePage', () => {
     expect(
       await screen.findByRole('heading', { name: 'Améliorer la fiabilité du produit', level: 3 })
     ).toBeInTheDocument();
-    expect(screen.getByText('Mon auto-évaluation')).toBeInTheDocument();
+    expect(screen.getByText('Bilan du cycle')).toBeInTheDocument();
   });
 
   it("affiche un message si aucun cycle de performance n'est actif", async () => {
@@ -193,7 +219,7 @@ describe('MyPerformancePage', () => {
     mockUpdateSelfAssessment.mockResolvedValue({ success: true, review: makeReview() });
 
     render(<MyPerformancePage />);
-    await screen.findByText('Mon auto-évaluation');
+    await screen.findByText('Bilan du cycle');
 
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'atteint' } });
     fireEvent.click(screen.getByRole('button', { name: /Enregistrer mon auto-évaluation/i }));
@@ -202,6 +228,40 @@ describe('MyPerformancePage', () => {
       expect(mockUpdateSelfAssessment).toHaveBeenCalledWith(
         expect.objectContaining({
           objectives: [{ id: 'obj-1', status: 'atteint', comment: undefined }]
+        })
+      );
+    });
+  });
+
+  it('pré-remplit le statut de l’objectif à partir de son avancement, tout en restant modifiable', async () => {
+    mockGetMyReview.mockResolvedValue({ success: true, review: makeReview() });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+
+    render(<MyPerformancePage />);
+    await screen.findByText('Bilan du cycle');
+
+    // Le KR de l'objectif est à 40% d'avancement → bande 0-50% → statut auto "non atteint".
+    const select = screen.getByRole('combobox') as HTMLSelectElement;
+    expect(select.value).toBe('non_atteint');
+
+    fireEvent.change(select, { target: { value: 'depasse' } });
+    expect(select.value).toBe('depasse');
+  });
+
+  it("envoie le statut auto-calculé si le select n'a pas été modifié manuellement", async () => {
+    mockGetMyReview.mockResolvedValue({ success: true, review: makeReview() });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockUpdateSelfAssessment.mockResolvedValue({ success: true, review: makeReview() });
+
+    render(<MyPerformancePage />);
+    await screen.findByText('Bilan du cycle');
+
+    fireEvent.click(screen.getByRole('button', { name: /Enregistrer mon auto-évaluation/i }));
+
+    await waitFor(() => {
+      expect(mockUpdateSelfAssessment).toHaveBeenCalledWith(
+        expect.objectContaining({
+          objectives: [{ id: 'obj-1', status: 'non_atteint', comment: undefined }]
         })
       );
     });

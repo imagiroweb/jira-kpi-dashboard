@@ -16,8 +16,6 @@ export type {
   IObjectiveAssessment,
   IQualitative,
   IQualitativeEntry,
-  ICompetencyScores,
-  ICompetencyScore,
   IReviewAuthor,
   ObjectiveAssessmentStatus,
   PerformanceReviewStatus,
