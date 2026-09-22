@@ -42,6 +42,15 @@ export interface ISprintRepository {
    * @param maxResults - Deprecated: all results are now fetched via pagination
    */
   findBacklogIssues(projectKey: string, maxResults?: number): Promise<SprintIssue[]>;
+
+  /**
+   * Get backlog issues of a board (scoped by the board filter, not the whole project).
+   * Several boards (teams) can share the same Jira project: using the project would
+   * return the same backlog for every board.
+   * @param boardId - The board id
+   * @param fallbackProjectKey - Project used if the board filter cannot be resolved
+   */
+  findBoardBacklogIssues(boardId: number, fallbackProjectKey?: string): Promise<SprintIssue[]>;
 }
 
 /**

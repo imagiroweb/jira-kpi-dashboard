@@ -4,6 +4,7 @@ import { SprintIssue } from '../../domain/sprint/entities/SprintIssue';
 import { JiraClient } from './JiraClient';
 import { SprintMapper } from './mappers/SprintMapper';
 import { logger } from '../../utils/logger';
+import { buildBoardBacklogJql, buildProjectBacklogJql } from './jql';
 
 /**
  * Jira implementation of Sprint Repository
@@ -92,9 +93,36 @@ export class JiraSprintRepository implements ISprintRepository {
   }
 
   async findBacklogIssues(projectKey: string, _maxResults: number = 1000): Promise<SprintIssue[]> {
-    const jql = `project = "${projectKey}" AND Sprint is EMPTY AND statusCategory != Done ORDER BY created DESC`;
+    const jql = buildProjectBacklogJql(projectKey);
     const fields = `key,summary,issuetype,status,${this.storyPointsField}`;
     
+    const response = await this.jiraClient.searchIssuesWithPagination(jql, fields);
+    return SprintMapper.issuesToDomain(response.issues, this.storyPointsField);
+  }
+
+  async findBoardBacklogIssues(boardId: number, fallbackProjectKey?: string): Promise<SprintIssue[]> {
+    let jql: string | null = null;
+    try {
+      const config = await this.jiraClient.getBoardConfiguration(boardId);
+      if (config?.filter?.id) {
+        const filterJql = await this.jiraClient.getFilterJql(config.filter.id);
+        if (filterJql && filterJql.trim()) jql = buildBoardBacklogJql(filterJql);
+      }
+    } catch (err) {
+      logger.warn(`[Board ${boardId}] Could not resolve board filter for backlog: ${err}`);
+    }
+
+    if (!jql) {
+      if (!fallbackProjectKey) {
+        logger.warn(`[Board ${boardId}] No board filter and no project key: empty backlog`);
+        return [];
+      }
+      logger.warn(`[Board ${boardId}] No board filter, falling back to project ${fallbackProjectKey} backlog`);
+      return this.findBacklogIssues(fallbackProjectKey);
+    }
+
+    logger.info(`[Board ${boardId}] Backlog JQL (board filter): ${jql}`);
+    const fields = `key,summary,issuetype,status,${this.storyPointsField}`;
     const response = await this.jiraClient.searchIssuesWithPagination(jql, fields);
     return SprintMapper.issuesToDomain(response.issues, this.storyPointsField);
   }
