@@ -1,9 +1,14 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetStore } from '@/test/mocks/store';
-import { TEST_USER } from '@/test/fixtures/users';
+import { TEST_USER, TEST_USER_ID } from '@/test/fixtures/users';
 import { useStore } from '@/store/useStore';
-import type { PerformanceCycle, PerformanceReview } from '../domain/performance';
+import {
+  computeReviewCoaching,
+  COACHING_STATUS_LABELS,
+  type PerformanceCycle,
+  type PerformanceReview
+} from '../domain/performance';
 import type { Team } from '../domain/team';
 
 vi.mock('../services/api', () => ({
@@ -13,6 +18,7 @@ vi.mock('../services/api', () => ({
     getReview: vi.fn(),
     defineObjectives: vi.fn(),
     updateManagerAssessment: vi.fn(),
+    completeReview: vi.fn(),
     updateGeneralManagerAssessment: vi.fn(),
     getGeneralAssessmentReferential: vi.fn(),
     getTeamMembers: vi.fn(),
@@ -33,6 +39,7 @@ const mockListReviews = vi.mocked(performanceApi.listReviews);
 const mockGetReview = vi.mocked(performanceApi.getReview);
 const mockDefineObjectives = vi.mocked(performanceApi.defineObjectives);
 const mockUpdateManagerAssessment = vi.mocked(performanceApi.updateManagerAssessment);
+const mockCompleteReview = vi.mocked(performanceApi.completeReview);
 const mockUpdateGeneralManagerAssessment = vi.mocked(performanceApi.updateGeneralManagerAssessment);
 const mockGetGeneralAssessmentReferential = vi.mocked(performanceApi.getGeneralAssessmentReferential);
 const mockGetTeamMembers = vi.mocked(performanceApi.getTeamMembers);
@@ -185,8 +192,19 @@ describe('TeamPerformancePage', () => {
     render(<TeamPerformancePage />);
 
     expect(await screen.findByRole('columnheader', { name: 'Score auto-évaluation' })).toBeInTheDocument();
+    expect(screen.getByRole('columnheader', { name: 'Accompagnement' })).toBeInTheDocument();
     const row = screen.getByText('Alice Martin').closest('tr');
     expect(row).toHaveTextContent('4.5 / 5');
+    const coaching = computeReviewCoaching(
+      [
+        {
+          weight: 1,
+          krs: [{ id: 'kr-1', label: 'Réduire les incidents', weight: 1, progress: 50, progressHistory: [] }]
+        }
+      ],
+      ACTIVE_CYCLE
+    );
+    expect(row).toHaveTextContent(COACHING_STATUS_LABELS[coaching.status]);
   });
 
   it('limite le filtre équipe aux équipes dirigées pour un lead sans accès global', async () => {
@@ -229,6 +247,8 @@ describe('TeamPerformancePage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Ouvrir' }));
     await screen.findByPlaceholderText("Titre de l'objectif");
+    expect(screen.getByText('Avancement total')).toBeInTheDocument();
+    expect(screen.getAllByText(/Score pondéré/).length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole('button', { name: /Enregistrer les objectifs/i }));
 
@@ -359,16 +379,69 @@ describe('TeamPerformancePage', () => {
     ) as HTMLElement;
 
     fireEvent.change(within(objectiveEvaluationCard).getByRole('combobox'), { target: { value: 'atteint' } });
+    fireEvent.change(within(objectiveEvaluationCard).getByPlaceholderText(/Action particulière/), {
+      target: { value: 'Prioriser le KR incidents cette semaine' }
+    });
     fireEvent.click(screen.getByRole('button', { name: /Enregistrer l'évaluation/i }));
 
     await waitFor(() => {
       expect(mockUpdateManagerAssessment).toHaveBeenCalledWith(
         'user-1',
         expect.objectContaining({
-          objectives: [{ id: 'obj-1', status: 'atteint', comment: undefined }]
+          objectives: [
+            {
+              id: 'obj-1',
+              status: 'atteint',
+              comment: undefined,
+              coachingAction: 'Prioriser le KR incidents cette semaine'
+            }
+          ]
         })
       );
     });
+    expect(mockCompleteReview).not.toHaveBeenCalled();
+  });
+
+  it('valide le semestre via le CTA dédié, sans enregistrer l’évaluation', async () => {
+    seedUser({ performanceGlobalAccess: true });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    const readyReview = makeReview({
+      status: 'en_cours',
+      objectives: [
+        {
+          id: 'obj-1',
+          title: 'Améliorer la fiabilité',
+          weight: 1,
+          krs: [{ id: 'kr-1', label: 'Réduire les incidents', weight: 1, progress: 50, progressHistory: [] }],
+          selfAssessment: {},
+          managerAssessment: { status: 'atteint' }
+        }
+      ],
+      generalManagerAssessment: {
+        technique: [{ label: 'Qualité du code & revues', score: 4 }],
+        impact: [{ label: 'Livraison (delivery)', score: 4 }],
+        collaboration: [{ label: 'Communication & transparence', score: 4 }],
+        leadership: [{ label: 'Initiative & autonomie', score: 4 }]
+      }
+    });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [readyReview] });
+    mockGetReview.mockResolvedValue({ success: true, review: readyReview });
+    mockCompleteReview.mockResolvedValue({ success: true, review: { ...readyReview, status: 'complete' } });
+
+    render(<TeamPerformancePage />);
+    await screen.findByText('Alice Martin');
+    fireEvent.click(screen.getByRole('button', { name: 'Ouvrir' }));
+
+    const validateButton = await screen.findByRole('button', { name: /Valider le semestre/i });
+    expect(validateButton).toBeEnabled();
+    fireEvent.click(validateButton);
+
+    await waitFor(() => {
+      expect(mockCompleteReview).toHaveBeenCalledWith('user-1', 'cycle-1');
+    });
+    expect(mockUpdateManagerAssessment).not.toHaveBeenCalled();
+    expect(await screen.findByText('Semestre validé')).toBeInTheDocument();
   });
 
   it('pré-remplit le statut de l’objectif à partir de son avancement côté manager, tout en restant modifiable', async () => {
@@ -412,7 +485,7 @@ describe('TeamPerformancePage', () => {
       expect(mockUpdateManagerAssessment).toHaveBeenCalledWith(
         'user-1',
         expect.objectContaining({
-          objectives: [{ id: 'obj-1', status: 'partiellement_atteint', comment: undefined }]
+          objectives: [{ id: 'obj-1', status: 'partiellement_atteint', comment: undefined, coachingAction: '' }]
         })
       );
     });
@@ -614,6 +687,68 @@ describe('TeamPerformancePage', () => {
     expect(screen.queryByText('Dossier manquant', { selector: 'span' })).not.toBeInTheDocument();
   });
 
+  it("n'expose pas Ouvrir sur la propre fiche d'un lead (pas d'évaluation manager sur soi-même)", async () => {
+    seedUser({ performanceGlobalAccess: false, leadTeamIds: ['team-1'] });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    mockListReviews.mockResolvedValue({
+      success: true,
+      reviews: [
+        makeReview({
+          user: {
+            _id: TEST_USER_ID,
+            firstName: 'Admin',
+            lastName: 'Test',
+            email: 'admin@test.com'
+          }
+        }),
+        makeReview({
+          id: 'review-alice',
+          user: { _id: 'user-1', firstName: 'Alice', lastName: 'Martin', email: 'alice@test.com' }
+        })
+      ]
+    });
+    mockGetTeamMembers.mockResolvedValue({
+      success: true,
+      members: [
+        { id: TEST_USER_ID, firstName: 'Admin', lastName: 'Test', email: 'admin@test.com', teamId: 'team-1' },
+        { id: 'user-1', firstName: 'Alice', lastName: 'Martin', email: 'alice@test.com', teamId: 'team-1' }
+      ]
+    });
+
+    render(<TeamPerformancePage />);
+
+    expect(await screen.findByText('Admin Test')).toBeInTheDocument();
+    expect(screen.getByText('Alice Martin')).toBeInTheDocument();
+
+    const ownRow = screen.getByText('Admin Test').closest('tr') as HTMLElement;
+    const aliceRow = screen.getByText('Alice Martin').closest('tr') as HTMLElement;
+    expect(within(ownRow).queryByRole('button', { name: 'Ouvrir' })).not.toBeInTheDocument();
+    expect(within(aliceRow).getByRole('button', { name: 'Ouvrir' })).toBeInTheDocument();
+  });
+
+  it("n'expose pas Ouvrir sur la propre ligne d'un lead sans fiche encore ouverte", async () => {
+    seedUser({ performanceGlobalAccess: false, leadTeamIds: ['team-1'] });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [] });
+    mockGetTeamMembers.mockResolvedValue({
+      success: true,
+      members: [
+        { id: TEST_USER_ID, firstName: 'Admin', lastName: 'Test', email: 'admin@test.com', teamId: 'team-1' },
+        { id: 'user-2', firstName: 'Bob', lastName: 'Dupont', email: 'bob@test.com', teamId: 'team-1' }
+      ]
+    });
+
+    render(<TeamPerformancePage />);
+
+    expect(await screen.findByText('Admin Test')).toBeInTheDocument();
+    const ownRow = screen.getByText('Admin Test').closest('tr') as HTMLElement;
+    const bobRow = screen.getByText('Bob Dupont').closest('tr') as HTMLElement;
+    expect(within(ownRow).queryByRole('button', { name: 'Ouvrir' })).not.toBeInTheDocument();
+    expect(within(bobRow).getByRole('button', { name: 'Ouvrir' })).toBeInTheDocument();
+  });
+
   it("n'affiche pas l'onglet de gestion pour un lead sans accès global", async () => {
     seedUser({ performanceGlobalAccess: false, leadTeamIds: ['team-1'] });
     mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
@@ -775,7 +910,7 @@ describe('TeamPerformancePage', () => {
     expect(within(row).getByText('5.0 / 5')).toBeInTheDocument();
   });
 
-  it("affiche un tiret dans la colonne Objectifs quand aucun objectif n'est encore statué", async () => {
+  it("affiche le nombre d'objectifs même sans statut de bilan (fiche pas encore complète)", async () => {
     seedUser({ performanceGlobalAccess: true });
     mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
     mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
@@ -787,7 +922,7 @@ describe('TeamPerformancePage', () => {
     const row = screen.getByText('Alice Martin').closest('tr') as HTMLElement;
     const cells = within(row).getAllByRole('cell');
     // Colonne Objectifs = avant-dernière cellule (la dernière est l'action "Ouvrir").
-    expect(cells[cells.length - 2]).toHaveTextContent('—');
+    expect(cells[cells.length - 2]).toHaveTextContent('1 objectif');
   });
 
   it("affiche un badge de statut pour le bilan du cycle du collaborateur dans l'évaluation manager", async () => {

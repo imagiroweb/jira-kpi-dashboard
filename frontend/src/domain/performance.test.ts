@@ -1,7 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   GENERAL_ASSESSMENT_REFERENTIAL,
+  coachingStatusLabel,
+  canCompleteReview,
   computeAutoObjectiveStatus,
+  computeCoachingStatus,
+  computeCyclePace,
+  computeObjectiveCoaching,
+  computeObjectiveWeightedScore,
+  computeReviewCoaching,
+  cycleMonthCheckpoints,
+  formatWeightedScore,
   normalizePerformanceReview,
   suggestCompetencyAxes,
   summarizeObjectiveStatuses,
@@ -99,6 +108,28 @@ describe('GENERAL_ASSESSMENT_REFERENTIAL', () => {
   });
 });
 
+
+describe('canCompleteReview', () => {
+  const fullAxes = {
+    technique: [{ label: 'Qualité du code & revues', score: 4 }],
+    impact: [{ label: 'Livraison (delivery)', score: 4 }],
+    collaboration: [{ label: 'Communication & transparence', score: 4 }],
+    leadership: [{ label: 'Initiative & autonomie', score: 4 }]
+  };
+  const emptyAxes = { technique: [], impact: [], collaboration: [], leadership: [] };
+
+  it('est valide quand chaque objectif a un statut manager et que la grille est complète', () => {
+    expect(
+      canCompleteReview([{ managerAssessment: { status: 'atteint' } }], fullAxes)
+    ).toEqual({ valid: true, errors: [] });
+  });
+
+  it('refuse une fiche sans objectif ou sans grille manager complète', () => {
+    expect(canCompleteReview([], fullAxes).valid).toBe(false);
+    expect(canCompleteReview([{ managerAssessment: { status: 'atteint' } }], emptyAxes).valid).toBe(false);
+    expect(canCompleteReview([{ managerAssessment: {} }], fullAxes).valid).toBe(false);
+  });
+});
 
 describe('summarizeObjectiveStatuses', () => {
   it('compte les objectifs par statut manager, trié du moins bon au meilleur', () => {
@@ -220,6 +251,102 @@ describe('summarizeTeamReviews', () => {
     ]);
     expect(summary.avgManagerAssessmentScore).toBe(4);
     expect(summary.avgSelfAssessmentScore).toBeNull();
+  });
+});
+
+const S2_2026 = { startDate: '2026-07-01', endDate: '2026-12-31' };
+
+describe('computeObjectiveWeightedScore', () => {
+  it('multiplie l’avancement par le poids de l’objectif', () => {
+    const objective: Pick<Objective, 'weight' | 'krs'> = {
+      weight: 0.3,
+      krs: [{ id: 'kr-1', label: 'KR', weight: 1, progress: 50, progressHistory: [] }]
+    };
+    expect(computeObjectiveWeightedScore(objective)).toBeCloseTo(15);
+  });
+});
+
+describe('computeCyclePace', () => {
+  it('place le début du semestre à 0 et la fin à 100 % attendu', () => {
+    expect(computeCyclePace(S2_2026.startDate, S2_2026.endDate, new Date('2026-07-01T00:00:00.000Z')).expectedProgress).toBe(0);
+    expect(computeCyclePace(S2_2026.startDate, S2_2026.endDate, new Date('2026-12-31T00:00:00.000Z')).expectedProgress).toBe(100);
+  });
+
+  it('répartit le semestre en 6 mois : à mi-parcours, 3 mois écoulés / 50 % attendu', () => {
+    const mid = computeCyclePace(S2_2026.startDate, S2_2026.endDate, new Date('2026-10-01T00:00:00.000Z'));
+    expect(mid.expectedProgress).toBeCloseTo(50.27, 0);
+    expect(mid.elapsedMonths).toBeCloseTo(3, 0);
+    expect(mid.remainingMonths).toBeCloseTo(3, 0);
+    expect(mid.monthIndex).toBe(4);
+  });
+
+  it('reste à 0 si les dates du cycle sont invalides', () => {
+    const pace = computeCyclePace('invalid', 'also-invalid');
+    expect(pace.expectedProgress).toBe(0);
+    expect(pace.remainingMonths).toBe(6);
+  });
+});
+
+describe('computeCoachingStatus', () => {
+  it('est performant quand l’avancement dépasse l’attendu de plus de 8 pts', () => {
+    expect(computeCoachingStatus(60, 50)).toBe('performant');
+  });
+
+  it('reste en progression dans la bande des délais (±8 pts)', () => {
+    expect(computeCoachingStatus(50, 50)).toBe('en_progression');
+    expect(computeCoachingStatus(55, 50)).toBe('en_progression');
+    expect(computeCoachingStatus(42, 50)).toBe('en_progression');
+  });
+
+  it('demande une action à mener quand on est en retard de plus de 8 pts', () => {
+    expect(computeCoachingStatus(40, 50)).toBe('action_a_mener');
+  });
+
+  it('adresse "Action requise" au collaborateur et "Action à mener" au manager', () => {
+    expect(coachingStatusLabel('action_a_mener', 'self')).toBe('Action requise');
+    expect(coachingStatusLabel('action_a_mener', 'manager')).toBe('Action à mener');
+    expect(coachingStatusLabel('performant', 'self')).toBe('Performant');
+  });
+});
+
+describe('computeObjectiveCoaching / computeReviewCoaching', () => {
+  const now = new Date('2026-10-01T00:00:00.000Z');
+
+  it('calcule score pondéré + statut d’un objectif à mi-semestre', () => {
+    const coaching = computeObjectiveCoaching(
+      {
+        weight: 0.4,
+        krs: [{ id: 'kr-1', label: 'KR', weight: 1, progress: 80, progressHistory: [] }]
+      },
+      S2_2026,
+      now
+    );
+    expect(coaching.weightedScore).toBeCloseTo(32);
+    expect(coaching.status).toBe('performant');
+  });
+
+  it('agrège l’avancement total de la fiche sur la même courbe à 6 mois', () => {
+    const coaching = computeReviewCoaching(
+      [
+        { weight: 0.4, krs: [{ id: 'a', label: 'A', weight: 1, progress: 60, progressHistory: [] }] },
+        { weight: 0.4, krs: [{ id: 'b', label: 'B', weight: 1, progress: 40, progressHistory: [] }] },
+        { weight: 0.2, krs: [{ id: 'c', label: 'C', weight: 1, progress: 100, progressHistory: [] }] }
+      ],
+      S2_2026,
+      now
+    );
+    expect(coaching.weightedScore).toBeCloseTo(60);
+    expect(coaching.status).toBe('performant');
+  });
+});
+
+describe('cycleMonthCheckpoints / formatWeightedScore', () => {
+  it('expose les 6 jalons mensuels (17, 33, 50, 67, 83, 100)', () => {
+    expect(cycleMonthCheckpoints().map((value) => Math.round(value))).toEqual([17, 33, 50, 67, 83, 100]);
+  });
+
+  it('formate le réalisé pondéré sur le poids de l’objectif', () => {
+    expect(formatWeightedScore(15, 0.3)).toBe('15 / 30 pts');
   });
 });
 

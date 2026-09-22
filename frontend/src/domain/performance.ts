@@ -63,6 +63,8 @@ export interface KeyResult {
 export interface ObjectiveAssessment {
   status?: ObjectiveAssessmentStatus;
   comment?: string;
+  /** Action d'accompagnement saisie par le manager, à suivre par le collaborateur. */
+  coachingAction?: string;
 }
 
 export interface Objective {
@@ -235,6 +237,8 @@ export interface ObjectiveAssessmentInput {
   id: string;
   status?: ObjectiveAssessmentStatus;
   comment?: string;
+  /** Action d'accompagnement — uniquement persistée côté manager. */
+  coachingAction?: string;
 }
 
 /** Champs qualitatifs remplis d'un côté (self ou manager) — un champ omis n'est pas modifié. */
@@ -368,10 +372,187 @@ export function computeReviewScore(objectives: Pick<Objective, 'weight' | 'krs'>
   return weightedSum / totalWeight;
 }
 
+/**
+ * Score pondéré d'un objectif (0-100 de la fiche) : avancement × poids. Un objectif à 30 %
+ * réalisé à 50 % contribue 15 points au score global — c'est le "réalisé par rapport au
+ * pourcentage de l'objectif" affiché à côté de la barre d'avancement.
+ */
+export function computeObjectiveWeightedScore(objective: Pick<Objective, 'weight' | 'krs'>): number {
+  return (objective.weight || 0) * computeObjectiveProgress(objective);
+}
+
+/** Un semestre de performance est réparti en 6 mois, courbe d'avancement linéaire. */
+export const PERFORMANCE_CYCLE_MONTHS = 6;
+
+/**
+ * Bande (points de %) autour de la courbe attendue pour rester "en progression" :
+ * un écart de moins d'un demi-mois (~8 pts sur 6 mois) est encore dans les délais.
+ */
+export const COACHING_ON_TRACK_TOLERANCE = 8;
+
+export const COACHING_STATUSES = ['performant', 'en_progression', 'action_a_mener'] as const;
+export type CoachingStatus = (typeof COACHING_STATUSES)[number];
+
+/** Avancement temporel d'un cycle (0-1) et courbe attendue correspondante (0-100). */
+export interface CyclePace {
+  elapsedRatio: number;
+  expectedProgress: number;
+  elapsedMonths: number;
+  remainingMonths: number;
+  /** Mois courant dans le semestre (1-6), 1 au démarrage. */
+  monthIndex: number;
+}
+
+/**
+ * Position dans le semestre : le temps écoulé entre `startDate` et `endDate` est découpé
+ * en 6 parts égales. Avant le début → 0 ; après la fin → 1. `now` est injectable pour
+ * les tests (sinon la date du jour).
+ */
+export function computeCyclePace(
+  startDate: string,
+  endDate: string,
+  now: Date = new Date()
+): CyclePace {
+  const start = new Date(startDate).getTime();
+  const end = new Date(endDate).getTime();
+  const t = now.getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return {
+      elapsedRatio: 0,
+      expectedProgress: 0,
+      elapsedMonths: 0,
+      remainingMonths: PERFORMANCE_CYCLE_MONTHS,
+      monthIndex: 1
+    };
+  }
+
+  const elapsedRatio = Math.min(1, Math.max(0, (t - start) / (end - start)));
+  const elapsedMonths = elapsedRatio * PERFORMANCE_CYCLE_MONTHS;
+  const remainingMonths = PERFORMANCE_CYCLE_MONTHS - elapsedMonths;
+  const monthIndex = Math.min(
+    PERFORMANCE_CYCLE_MONTHS,
+    Math.max(1, elapsedRatio <= 0 ? 1 : Math.ceil(elapsedMonths))
+  );
+
+  return {
+    elapsedRatio,
+    expectedProgress: elapsedRatio * 100,
+    elapsedMonths,
+    remainingMonths,
+    monthIndex
+  };
+}
+
+/**
+ * Statut d'accompagnement à partir de l'avancement réel vs la courbe linéaire du semestre :
+ * en avance → performant, dans la bande des délais → en progression, en retard → action à mener.
+ */
+export function computeCoachingStatus(actualProgress: number, expectedProgress: number): CoachingStatus {
+  if (actualProgress > expectedProgress + COACHING_ON_TRACK_TOLERANCE) return 'performant';
+  if (actualProgress < expectedProgress - COACHING_ON_TRACK_TOLERANCE) return 'action_a_mener';
+  return 'en_progression';
+}
+
+/** Instantané d'accompagnement d'un objectif (ou de la fiche entière via `computeReviewCoaching`). */
+export interface ObjectiveCoachingSnapshot {
+  progress: number;
+  weight: number;
+  weightedScore: number;
+  expectedProgress: number;
+  expectedWeightedScore: number;
+  remainingMonths: number;
+  elapsedMonths: number;
+  monthIndex: number;
+  status: CoachingStatus;
+}
+
+export function computeObjectiveCoaching(
+  objective: Pick<Objective, 'weight' | 'krs'>,
+  cycle: Pick<PerformanceCycle, 'startDate' | 'endDate'>,
+  now: Date = new Date()
+): ObjectiveCoachingSnapshot {
+  const pace = computeCyclePace(cycle.startDate, cycle.endDate, now);
+  const progress = computeObjectiveProgress(objective);
+  const weight = objective.weight || 0;
+  return {
+    progress,
+    weight,
+    weightedScore: weight * progress,
+    expectedProgress: pace.expectedProgress,
+    expectedWeightedScore: weight * pace.expectedProgress,
+    remainingMonths: pace.remainingMonths,
+    elapsedMonths: pace.elapsedMonths,
+    monthIndex: pace.monthIndex,
+    status: computeCoachingStatus(progress, pace.expectedProgress)
+  };
+}
+
+/**
+ * Accompagnement de la fiche entière : même courbe à 6 mois, avancement = score pondéré
+ * global (`computeReviewScore`). Le poids affiché est 1 (100 % de la fiche).
+ */
+export function computeReviewCoaching(
+  objectives: Pick<Objective, 'weight' | 'krs'>[],
+  cycle: Pick<PerformanceCycle, 'startDate' | 'endDate'>,
+  now: Date = new Date()
+): ObjectiveCoachingSnapshot {
+  const pace = computeCyclePace(cycle.startDate, cycle.endDate, now);
+  const progress = computeReviewScore(objectives);
+  return {
+    progress,
+    weight: 1,
+    weightedScore: progress,
+    expectedProgress: pace.expectedProgress,
+    expectedWeightedScore: pace.expectedProgress,
+    remainingMonths: pace.remainingMonths,
+    elapsedMonths: pace.elapsedMonths,
+    monthIndex: pace.monthIndex,
+    status: computeCoachingStatus(progress, pace.expectedProgress)
+  };
+}
+
+/** Jalons mensuels (1-6) : avancement attendu à la fin de chaque mois du semestre. */
+export function cycleMonthCheckpoints(): number[] {
+  return Array.from(
+    { length: PERFORMANCE_CYCLE_MONTHS },
+    (_, index) => ((index + 1) / PERFORMANCE_CYCLE_MONTHS) * 100
+  );
+}
+
+/** "15 / 30 pts" : réalisé pondéré / poids de l'objectif, tous deux en points sur 100. */
+export function formatWeightedScore(weightedScore: number, weight: number): string {
+  const maxPoints = Math.round(weight * 100);
+  const points = Math.round(weightedScore);
+  return `${points} / ${maxPoints} pts`;
+}
+
 /** Une entrée du résumé de répartition des statuts d'objectifs (voir `summarizeObjectiveStatuses`). */
 export interface ObjectiveStatusSummary {
   status: ObjectiveAssessmentStatus;
   count: number;
+}
+
+/**
+ * Pré-conditions pour clôturer le semestre (CTA "Valider le semestre") — miroir de
+ * `canCompleteReview` côté backend. L'enregistrement de l'évaluation ne passe plus la fiche
+ * à "complete" tout seul.
+ */
+export function canCompleteReview(
+  objectives: Pick<Objective, 'managerAssessment'>[],
+  generalManagerAssessment: GeneralAssessmentAxes
+): { valid: boolean; errors: string[] } {
+  const errors: string[] = [];
+  if (objectives.length === 0) {
+    errors.push('Au moins un objectif est requis pour valider le semestre');
+  }
+  if (objectives.some((objective) => !objective.managerAssessment?.status)) {
+    errors.push("Chaque objectif doit avoir un statut d'évaluation manager");
+  }
+  const gridComplete = COMPETENCY_AXES.every((axis) => (generalManagerAssessment[axis]?.length ?? 0) > 0);
+  if (!gridComplete) {
+    errors.push("La grille d'évaluation manager doit être complète");
+  }
+  return { valid: errors.length === 0, errors };
 }
 
 /**
@@ -588,6 +769,35 @@ export const OBJECTIVE_STATUS_BADGE_CLASS: Record<ObjectiveAssessmentStatus, str
   partiellement_atteint: 'badge-warning',
   atteint: 'badge-success',
   depasse: 'badge-info'
+};
+
+/** Libellés côté manager / lead (page Performance équipe). */
+export const COACHING_STATUS_LABELS: Record<CoachingStatus, string> = {
+  performant: 'Performant',
+  en_progression: 'En progression',
+  action_a_mener: 'Action à mener'
+};
+
+/**
+ * Libellés adressés au collaborateur (page Ma performance) : "Action requise" plutôt
+ * qu'"Action à mener", qui s'adresse au manager.
+ */
+export const COACHING_STATUS_LABELS_SELF: Record<CoachingStatus, string> = {
+  performant: 'Performant',
+  en_progression: 'En progression',
+  action_a_mener: 'Action requise'
+};
+
+export type CoachingAudience = 'self' | 'manager';
+
+export function coachingStatusLabel(status: CoachingStatus, audience: CoachingAudience = 'manager'): string {
+  return audience === 'self' ? COACHING_STATUS_LABELS_SELF[status] : COACHING_STATUS_LABELS[status];
+}
+
+export const COACHING_STATUS_BADGE_CLASS: Record<CoachingStatus, string> = {
+  performant: 'badge-success',
+  en_progression: 'badge-info',
+  action_a_mener: 'badge-danger'
 };
 
 export const CYCLE_STATUS_LABELS: Record<PerformanceCycleStatus, string> = {
