@@ -7,7 +7,8 @@ import {
   Plus,
   Trash2,
   Save,
-  Lock
+  Lock,
+  CheckCircle2
 } from 'lucide-react';
 import { performanceApi, teamApi } from '../services/api';
 import { TeamsCyclesAdminPanel } from './TeamsCyclesAdminPanel';
@@ -31,9 +32,12 @@ import {
   COMPETENCY_AXES,
   computeReviewScore,
   computeObjectiveProgress,
+  computeObjectiveCoaching,
+  computeReviewCoaching,
   computeAutoObjectiveStatus,
   computeGeneralAssessmentGlobalScore,
   validateObjectivesDefinition,
+  canCompleteReview,
   suggestCompetencyAxes,
   OBJECTIVE_STATUS_LABELS,
   OBJECTIVE_STATUS_BADGE_CLASS,
@@ -47,6 +51,7 @@ import {
   PerformanceTeamMember,
   normalizePerformanceReview
 } from '../domain/performance';
+import { CoachingStatusBadge, ObjectivePaceSummary } from './ObjectivePaceSummary';
 
 function extractApiErrorMessage(err: unknown, fallback: string): string {
   const e = err as { response?: { data?: { message?: string } }; message?: string };
@@ -89,10 +94,13 @@ function memberLabel(member: PerformanceTeamMember): string {
  * côtés) -> tiret, pour rester cohérent avec les autres colonnes du tableau.
  */
 function ObjectiveStatusBadges({ objectives }: { objectives: PerformanceReview['objectives'] }) {
+  if (objectives.length === 0) return <span className="text-surface-500">—</span>;
   const summary = summarizeObjectiveStatuses(objectives);
-  if (summary.length === 0) return <span className="text-surface-500">—</span>;
   return (
-    <div className="flex flex-wrap gap-1">
+    <div className="flex flex-wrap gap-1 items-center">
+      <span className="text-surface-300">
+        {objectives.length} objectif{objectives.length > 1 ? 's' : ''}
+      </span>
       {summary.map(({ status, count }) => (
         <span key={status} className={`badge ${OBJECTIVE_STATUS_BADGE_CLASS[status]}`}>
           {count} {OBJECTIVE_STATUS_LABELS[status]}
@@ -199,6 +207,7 @@ type QualitativeKey = 'successes' | 'challenges' | 'growthAreas' | 'overallRevie
 interface ManagerObjectiveDraft {
   status: ObjectiveAssessmentStatus | '';
   comment: string;
+  coachingAction: string;
 }
 
 interface ManagerDraft {
@@ -214,7 +223,8 @@ function buildManagerDraft(review: PerformanceReview): ManagerDraft {
         o.id,
         {
           status: o.managerAssessment.status ?? computeAutoObjectiveStatus(computeObjectiveProgress(o)),
-          comment: o.managerAssessment.comment ?? ''
+          comment: o.managerAssessment.comment ?? '',
+          coachingAction: o.managerAssessment.coachingAction ?? ''
         }
       ])
     ),
@@ -255,6 +265,7 @@ export function TeamPerformancePage() {
 
   const [managerDraft, setManagerDraft] = useState<ManagerDraft | null>(null);
   const [savingManager, setSavingManager] = useState(false);
+  const [savingComplete, setSavingComplete] = useState(false);
   const [savingGeneralManager, setSavingGeneralManager] = useState(false);
 
   const [referentialProfiles, setReferentialProfiles] = useState<GeneralAssessmentReferentialProfile[]>([]);
@@ -262,6 +273,19 @@ export function TeamPerformancePage() {
 
   const cycle = useMemo(() => cycles.find((c) => c.status === 'active') ?? null, [cycles]);
   const isReadOnly = cycle != null && cycle.status !== 'active';
+  const currentUserId = user?.id ? String(user.id) : '';
+
+  /** Un lead/CTO n'ouvre pas sa propre fiche ici : l'évaluation manager ne s'applique pas à soi-même. */
+  function isOwnPerformanceRow(targetUserId: string): boolean {
+    return !!currentUserId && String(targetUserId) === currentUserId;
+  }
+  const semesterReadiness = useMemo(
+    () =>
+      detail
+        ? canCompleteReview(detail.objectives, detail.generalManagerAssessment)
+        : { valid: false, errors: [] as string[] },
+    [detail]
+  );
 
   const teamsById = useMemo(() => new Map(teams.map((t) => [String(t.id), t.name])), [teams]);
   const membersById = useMemo(() => new Map(members.map((m) => [String(m.id), m])), [members]);
@@ -398,7 +422,7 @@ export function TeamPerformancePage() {
   }, [cycle, teamFilter, statusFilter, isGlobal, activeTab]);
 
   async function handleOpenDetail(userId: string) {
-    if (!cycle) return;
+    if (!cycle || isOwnPerformanceRow(userId)) return;
     setSelectedUserId(userId);
     setDetail(null);
     setDetailError(null);
@@ -418,7 +442,7 @@ export function TeamPerformancePage() {
   }
 
   function handleOpenNewMember(member: PerformanceTeamMember) {
-    if (!cycle) return;
+    if (!cycle || isOwnPerformanceRow(member.id)) return;
     const synthetic = buildEmptyReviewForMember(member, cycle.id);
     setSelectedUserId(member.id);
     setDetail(synthetic);
@@ -553,7 +577,7 @@ export function TeamPerformancePage() {
   function updateManagerObjectiveDraft(objectiveId: string, patch: Partial<ManagerObjectiveDraft>) {
     setManagerDraft((prev) => {
       if (!prev) return prev;
-      const current = prev.objectives[objectiveId] ?? { status: '', comment: '' };
+      const current = prev.objectives[objectiveId] ?? { status: '', comment: '', coachingAction: '' };
       return { ...prev, objectives: { ...prev.objectives, [objectiveId]: { ...current, ...patch } } };
     });
   }
@@ -571,7 +595,8 @@ export function TeamPerformancePage() {
         return {
           id: o.id,
           status: draft?.status || undefined,
-          comment: draft?.comment.trim() ? draft.comment.trim() : undefined
+          comment: draft?.comment.trim() ? draft.comment.trim() : undefined,
+          coachingAction: draft?.coachingAction.trim() ?? ''
         };
       }),
       qualitative: {
@@ -597,6 +622,32 @@ export function TeamPerformancePage() {
       );
     } finally {
       setSavingManager(false);
+    }
+  }
+
+  async function handleCompleteReview() {
+    if (!detail || !cycle) return;
+    const readiness = canCompleteReview(detail.objectives, detail.generalManagerAssessment);
+    if (!readiness.valid) {
+      socket?.notify?.error('Semestre incomplet', readiness.errors.join(' — '));
+      return;
+    }
+
+    setSavingComplete(true);
+    try {
+      const res = await performanceApi.completeReview(reviewUserId(detail), cycle.id);
+      const merged: PerformanceReview = { ...res.review, user: detail.user };
+      setDetail(merged);
+      setManagerDraft(buildManagerDraft(merged));
+      upsertReviewInList(merged);
+      socket?.notify?.success('Semestre validé', 'La fiche est maintenant complète');
+    } catch (err) {
+      socket?.notify?.error(
+        'Échec de la validation',
+        extractApiErrorMessage(err, 'Erreur lors de la validation du semestre')
+      );
+    } finally {
+      setSavingComplete(false);
     }
   }
 
@@ -771,6 +822,7 @@ export function TeamPerformancePage() {
                     <th className="p-3 font-medium">Équipe</th>
                     <th className="p-3 font-medium">Statut</th>
                     <th className="p-3 font-medium">Score</th>
+                    <th className="p-3 font-medium">Accompagnement</th>
                     <th className="p-3 font-medium">Score auto-évaluation</th>
                     <th className="p-3 font-medium">Score évaluation manager</th>
                     <th className="p-3 font-medium">Objectifs</th>
@@ -788,6 +840,13 @@ export function TeamPerformancePage() {
                         </span>
                       </td>
                       <td className="p-3 text-surface-300">{Math.round(computeReviewScore(review.objectives))}%</td>
+                      <td className="p-3">
+                        {cycle && review.objectives.length > 0 ? (
+                          <CoachingStatusBadge status={computeReviewCoaching(review.objectives, cycle).status} />
+                        ) : (
+                          <span className="text-surface-500">—</span>
+                        )}
+                      </td>
                       <td className="p-3 text-surface-300">
                         {formatGeneralAssessmentScore(review.generalSelfAssessment)}
                       </td>
@@ -798,13 +857,15 @@ export function TeamPerformancePage() {
                         <ObjectiveStatusBadges objectives={review.objectives} />
                       </td>
                       <td className="p-3 text-right">
-                        <button
-                          type="button"
-                          className="btn-ghost text-xs px-3 py-1.5"
-                          onClick={() => handleOpenDetail(reviewUserId(review))}
-                        >
-                          Ouvrir
-                        </button>
+                        {!isOwnPerformanceRow(reviewUserId(review)) && (
+                          <button
+                            type="button"
+                            className="btn-ghost text-xs px-3 py-1.5"
+                            onClick={() => handleOpenDetail(reviewUserId(review))}
+                          >
+                            Ouvrir
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -820,15 +881,18 @@ export function TeamPerformancePage() {
                       <td className="p-3 text-surface-300">—</td>
                       <td className="p-3 text-surface-300">—</td>
                       <td className="p-3 text-surface-300">—</td>
+                      <td className="p-3 text-surface-300">—</td>
                       <td className="p-3 text-surface-500">—</td>
                       <td className="p-3 text-right">
-                        <button
-                          type="button"
-                          className="btn-ghost text-xs px-3 py-1.5"
-                          onClick={() => handleOpenNewMember(member)}
-                        >
-                          Ouvrir
-                        </button>
+                        {!isOwnPerformanceRow(member.id) && (
+                          <button
+                            type="button"
+                            className="btn-ghost text-xs px-3 py-1.5"
+                            onClick={() => handleOpenNewMember(member)}
+                          >
+                            Ouvrir
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -867,6 +931,13 @@ export function TeamPerformancePage() {
                   {REVIEW_STATUS_LABELS[detail.status]}
                 </span>
                 <span className="badge badge-info">Score {Math.round(computeReviewScore(detail.objectives))}%</span>
+                {cycle && detail.objectives.length > 0 && (
+                  <ObjectivePaceSummary
+                    compact
+                    title="Avancement total"
+                    coaching={computeReviewCoaching(detail.objectives, cycle)}
+                  />
+                )}
               </div>
 
               <div className="card-glass p-6 space-y-4">
@@ -885,7 +956,9 @@ export function TeamPerformancePage() {
                   )}
                 </div>
 
-                {objectivesDraft.map((objective) => (
+                {objectivesDraft.map((objective) => {
+                  const savedObjective = detail.objectives.find((item) => item.id === objective.id);
+                  return (
                   <div key={objective.id} className="border border-surface-700/50 rounded-xl p-4 space-y-3">
                     <div className="grid sm:grid-cols-[1fr_100px_auto] gap-2 items-start">
                       <div className="space-y-2">
@@ -950,6 +1023,13 @@ export function TeamPerformancePage() {
                       })}
                     </div>
 
+                    {cycle && savedObjective && (
+                      <ObjectivePaceSummary
+                        coaching={computeObjectiveCoaching(savedObjective, cycle)}
+                        coachingAction={savedObjective.managerAssessment.coachingAction}
+                      />
+                    )}
+
                     <div className="pl-2 space-y-2">
                       {objective.krs.map((kr) => (
                         <div key={kr.id} className="grid sm:grid-cols-[1fr_100px_auto] gap-2 items-center">
@@ -994,7 +1074,8 @@ export function TeamPerformancePage() {
                       )}
                     </div>
                   </div>
-                ))}
+                  );
+                })}
 
                 {!objectivesValidation.valid && objectivesDraft.length > 0 && (
                   <ul className="text-xs text-danger-400 list-disc pl-4">
@@ -1036,7 +1117,11 @@ export function TeamPerformancePage() {
 
                   <div className="space-y-4">
                     {detail.objectives.map((objective) => {
-                      const draft = managerDraft.objectives[objective.id] ?? { status: '', comment: '' };
+                      const draft = managerDraft.objectives[objective.id] ?? {
+                        status: '',
+                        comment: '',
+                        coachingAction: ''
+                      };
                       return (
                         <div key={objective.id} className="border border-surface-700/50 rounded-xl p-4">
                           <div className="flex items-center gap-2 flex-wrap mb-3">
@@ -1047,6 +1132,14 @@ export function TeamPerformancePage() {
                               </span>
                             ))}
                           </div>
+                          {cycle && (
+                            <div className="mb-3">
+                              <ObjectivePaceSummary
+                                coaching={computeObjectiveCoaching(objective, cycle)}
+                                coachingAction={draft.coachingAction || objective.managerAssessment.coachingAction}
+                              />
+                            </div>
+                          )}
                           <div className="grid sm:grid-cols-[220px_1fr] gap-3">
                             <div className="flex items-center gap-2">
                               <select
@@ -1080,6 +1173,20 @@ export function TeamPerformancePage() {
                               onChange={(e) => updateManagerObjectiveDraft(objective.id, { comment: e.target.value })}
                             />
                           </div>
+                          <div className="mt-3">
+                            <label className="block text-sm font-medium text-surface-300 mb-1.5">
+                              Action à suivre
+                            </label>
+                            <textarea
+                              className="input min-h-[60px]"
+                              placeholder="Action particulière que le collaborateur doit suivre"
+                              value={draft.coachingAction}
+                              disabled={isReadOnly}
+                              onChange={(e) =>
+                                updateManagerObjectiveDraft(objective.id, { coachingAction: e.target.value })
+                              }
+                            />
+                          </div>
                           {objective.selfAssessment.status && (
                             <p className="mt-2 flex items-center gap-1.5 text-xs text-surface-500">
                               Bilan du cycle (collaborateur) :
@@ -1111,15 +1218,41 @@ export function TeamPerformancePage() {
                     ))}
                   </div>
 
-                  <button
-                    type="button"
-                    className="btn-primary"
-                    disabled={isReadOnly || savingManager}
-                    onClick={handleSaveManagerAssessment}
-                  >
-                    {savingManager ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-                    Enregistrer l'évaluation
-                  </button>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <button
+                      type="button"
+                      className="btn-primary"
+                      disabled={isReadOnly || savingManager || detail.status === 'complete'}
+                      onClick={handleSaveManagerAssessment}
+                    >
+                      {savingManager ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                      Enregistrer l'évaluation
+                    </button>
+                    {detail.status === 'complete' ? (
+                      <span className="badge badge-success">Semestre validé</span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        disabled={isReadOnly || savingComplete || !semesterReadiness.valid}
+                        onClick={handleCompleteReview}
+                      >
+                        {savingComplete ? (
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                        ) : (
+                          <CheckCircle2 className="w-4 h-4" />
+                        )}
+                        Valider le semestre
+                      </button>
+                    )}
+                  </div>
+                  {detail.status !== 'complete' && !semesterReadiness.valid && (
+                      <ul className="text-xs text-surface-500 list-disc pl-4">
+                        {semesterReadiness.errors.map((msg) => (
+                          <li key={msg}>{msg}</li>
+                        ))}
+                      </ul>
+                    )}
                 </div>
               )}
             </>

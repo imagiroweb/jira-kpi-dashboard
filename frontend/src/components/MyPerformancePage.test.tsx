@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PerformanceCycle, PerformanceReview } from '../domain/performance';
 
 vi.mock('../services/api', () => ({
@@ -86,6 +86,10 @@ describe('MyPerformancePage', () => {
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('affiche la fiche de performance une fois chargée', async () => {
     mockGetMyReview.mockResolvedValue({ success: true, review: makeReview() });
     mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
@@ -98,6 +102,49 @@ describe('MyPerformancePage', () => {
     expect(screen.getByText('S2-2026 — Actif')).toBeInTheDocument();
     expect(screen.getByText('En cours')).toBeInTheDocument();
     expect(screen.getByText('Réduire le taux d’incidents de 30%')).toBeInTheDocument();
+    expect(screen.getByText('Avancement total')).toBeInTheDocument();
+    expect(screen.getAllByText(/Score pondéré/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('M1').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('M6').length).toBeGreaterThan(0);
+  });
+
+  it('adresse "Action requise" au collaborateur et affiche l’action saisie par le manager', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-10-01T00:00:00.000Z'));
+
+    mockGetMyReview.mockResolvedValue({
+      success: true,
+      review: makeReview({
+        objectives: [
+          {
+            id: 'obj-1',
+            title: 'Améliorer la fiabilité du produit',
+            weight: 1,
+            krs: [
+              {
+                id: 'kr-1',
+                label: 'Réduire le taux d’incidents de 30%',
+                weight: 1,
+                progress: 20,
+                progressHistory: []
+              }
+            ],
+            selfAssessment: {},
+            managerAssessment: { coachingAction: 'Prioriser le KR incidents cette semaine' }
+          }
+        ]
+      })
+    });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+
+    render(<MyPerformancePage />);
+
+    expect((await screen.findAllByText('Action requise')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Action à mener')).not.toBeInTheDocument();
+    expect(screen.getByText(/Prioriser le KR incidents cette semaine/)).toBeInTheDocument();
+    expect(screen.getByText(/Action à suivre/)).toBeInTheDocument();
+
+    vi.useRealTimers();
   });
 
   it('affiche les badges d\'axes de compétence associés à un objectif', async () => {
@@ -193,7 +240,8 @@ describe('MyPerformancePage', () => {
         evidenceUrl: undefined
       });
     });
-    expect(await screen.findAllByText('65%')).toHaveLength(2);
+    expect(await screen.findByText(/Avancement 65%/)).toBeInTheDocument();
+    expect(screen.getByText('65%')).toBeInTheDocument();
   });
 
   it('masque la saisie et affiche un badge lecture seule quand le cycle est clos', async () => {

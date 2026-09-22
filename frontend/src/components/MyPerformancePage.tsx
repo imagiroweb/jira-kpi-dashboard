@@ -21,6 +21,8 @@ import {
   AssessmentInput,
   OBJECTIVE_ASSESSMENT_STATUSES,
   computeObjectiveProgress,
+  computeObjectiveCoaching,
+  computeReviewCoaching,
   computeAutoObjectiveStatus,
   normalizePerformanceReview,
   OBJECTIVE_STATUS_LABELS,
@@ -30,6 +32,7 @@ import {
   COMPETENCY_AXIS_LABELS,
   QUALITATIVE_FIELDS
 } from '../domain/performance';
+import { ObjectivePaceSummary } from './ObjectivePaceSummary';
 
 function extractApiErrorMessage(err: unknown, fallback: string): string {
   const e = err as { response?: { data?: { message?: string }; status?: number }; message?: string };
@@ -290,6 +293,14 @@ export function MyPerformancePage() {
                 Ce cycle est clos, lecture seule
               </span>
             )}
+            {cycle && review.objectives.length > 0 && (
+              <ObjectivePaceSummary
+                compact
+                audience="self"
+                title="Avancement total"
+                coaching={computeReviewCoaching(review.objectives, cycle)}
+              />
+            )}
           </div>
 
           {review.objectives.length === 0 ? (
@@ -304,6 +315,7 @@ export function MyPerformancePage() {
                   <ObjectiveCard
                     key={objective.id}
                     objective={objective}
+                    cycle={cycle}
                     isReadOnly={isReadOnly}
                     krDrafts={krDrafts}
                     savingKr={savingKr}
@@ -411,6 +423,7 @@ export function MyPerformancePage() {
 
 interface ObjectiveCardProps {
   objective: Objective;
+  cycle: PerformanceCycle | null;
   isReadOnly: boolean;
   krDrafts: Record<string, KrDraft>;
   savingKr: Record<string, boolean>;
@@ -422,6 +435,7 @@ interface ObjectiveCardProps {
 
 function ObjectiveCard({
   objective,
+  cycle,
   isReadOnly,
   krDrafts,
   savingKr,
@@ -431,6 +445,7 @@ function ObjectiveCard({
   onToggleHistory
 }: ObjectiveCardProps) {
   const progress = Math.round(computeObjectiveProgress(objective));
+  const coaching = cycle ? computeObjectiveCoaching(objective, cycle) : null;
 
   return (
     <div className="card-glass p-6">
@@ -450,13 +465,23 @@ function ObjectiveCard({
       </div>
 
       <div className="mt-3 mb-5">
-        <div className="flex items-center justify-between text-xs text-surface-400 mb-1">
-          <span>Avancement de l'objectif</span>
-          <span>{progress}%</span>
-        </div>
-        <div className="h-2.5 rounded-full bg-surface-800 overflow-hidden">
-          <div className="h-full bg-primary-500" style={{ width: `${Math.min(100, progress)}%` }} />
-        </div>
+        {coaching ? (
+          <ObjectivePaceSummary
+            audience="self"
+            coaching={coaching}
+            coachingAction={objective.managerAssessment.coachingAction}
+          />
+        ) : (
+          <>
+            <div className="flex items-center justify-between text-xs text-surface-400 mb-1">
+              <span>Avancement de l'objectif</span>
+              <span>{progress}%</span>
+            </div>
+            <div className="h-2.5 rounded-full bg-surface-800 overflow-hidden">
+              <div className="h-full bg-primary-500" style={{ width: `${Math.min(100, progress)}%` }} />
+            </div>
+          </>
+        )}
       </div>
 
       <div className="space-y-4">

@@ -754,6 +754,14 @@ export const performanceApi = {
     const { data } = await api.patch(`/performance/reviews/${userId}/manager-assessment`, input);
     return { ...data, review: normalizePerformanceReview(data.review) };
   },
+  /** Clôture explicite du semestre — seul passage à "complete". */
+  completeReview: async (
+    userId: string,
+    cycleId?: string
+  ): Promise<{ success: boolean; review: PerformanceReview }> => {
+    const { data } = await api.patch(`/performance/reviews/${userId}/complete`, cycleId ? { cycleId } : {});
+    return { ...data, review: normalizePerformanceReview(data.review) };
+  },
   /**
    * Évaluation manager sur la grille générale (4 axes × sous-critères) — le manager choisit une
    * réponse verbeuse par sous-critère (`axes`), jamais une note brute : le score est résolu
