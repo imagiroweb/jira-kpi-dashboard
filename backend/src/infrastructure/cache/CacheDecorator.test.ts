@@ -51,6 +51,31 @@ describe('CacheDecorator', () => {
     expect(inner.search).toHaveBeenCalledTimes(2);
   });
 
+  it('CachedSprintRepository met en cache le backlog par board (clé distincte par board)', async () => {
+    globalCache.clear();
+    const inner = {
+      findByBoard: jest.fn(),
+      findOpenSprints: jest.fn(),
+      findClosedSprints: jest.fn(),
+      findById: jest.fn(),
+      findSprintIssues: jest.fn(),
+      findOpenSprintIssues: jest.fn(),
+      findBacklogIssues: jest.fn(),
+      findBoardBacklogIssues: jest.fn().mockImplementation(async (boardId: number) =>
+        boardId === 810 ? [{ issueKey: 'AD-1' }] : [{ issueKey: 'AD-2' }, { issueKey: 'AD-3' }]
+      )
+    } as unknown as jest.Mocked<ISprintRepository>;
+    const repo = new CachedSprintRepository(inner);
+
+    const a1 = await repo.findBoardBacklogIssues(810, 'AD');
+    const b1 = await repo.findBoardBacklogIssues(843, 'AD');
+    const a2 = await repo.findBoardBacklogIssues(810, 'AD');
+    expect(a1).toHaveLength(1);
+    expect(b1).toHaveLength(2);
+    expect(a2).toBe(a1);
+    expect(inner.findBoardBacklogIssues).toHaveBeenCalledTimes(2);
+  });
+
   it('CachedSprintRepository met en cache findByBoard et pas findById=null', async () => {
     const inner = {
       findByBoard: jest.fn().mockResolvedValue([{ id: 1 }]),
@@ -59,7 +84,8 @@ describe('CacheDecorator', () => {
       findById: jest.fn().mockResolvedValue(null),
       findSprintIssues: jest.fn(),
       findOpenSprintIssues: jest.fn(),
-      findBacklogIssues: jest.fn()
+      findBacklogIssues: jest.fn(),
+      findBoardBacklogIssues: jest.fn()
     } as jest.Mocked<ISprintRepository>;
     const repo = new CachedSprintRepository(inner);
 
@@ -155,7 +181,8 @@ describe('CacheDecorator', () => {
       findById: jest.fn(),
       findSprintIssues: jest.fn().mockResolvedValue([]),
       findOpenSprintIssues: jest.fn().mockResolvedValue([]),
-      findBacklogIssues: jest.fn().mockResolvedValue([])
+      findBacklogIssues: jest.fn().mockResolvedValue([]),
+      findBoardBacklogIssues: jest.fn()
     } as jest.Mocked<ISprintRepository>;
     const repo = new CachedSprintRepository(inner);
 
@@ -190,7 +217,8 @@ describe('CacheDecorator', () => {
       findById: jest.fn().mockResolvedValue(sprint),
       findSprintIssues: jest.fn(),
       findOpenSprintIssues: jest.fn(),
-      findBacklogIssues: jest.fn()
+      findBacklogIssues: jest.fn(),
+      findBoardBacklogIssues: jest.fn()
     } as jest.Mocked<ISprintRepository>;
     const repo = new CachedSprintRepository(inner);
     await repo.findById(5);

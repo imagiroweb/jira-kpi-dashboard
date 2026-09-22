@@ -8,6 +8,7 @@ import { globalCache } from '../../infrastructure/cache/CacheDecorator';
 import { worklogHoursDailyService, bucketHoursByCalendarDate } from './WorklogHoursDailyService';
 import { logger } from '../../utils/logger';
 import { getWorklogCalendarDate } from '../../utils/worklogDate';
+import { stripOrderBy } from '../../infrastructure/jira/jql';
 
 function cacheTtlMinutes(envKey: string, defaultMinutes: number): number {
   const n = parseInt(process.env[envKey] || '', 10);
@@ -1278,15 +1279,6 @@ export class WorklogApplicationService {
     const teamField = process.env.JIRA_TEAM_FIELD || 'customfield_10001';
     const fields = `key,updated,resolutiondate,issuetype,${teamField},${storyPointsField}`;
 
-    /** Strip ORDER BY from filter JQL so we can append our conditions before it (valid JQL) */
-    const stripOrderBy = (jql: string): { base: string; orderBy: string } => {
-      const orderByIdx = jql.toUpperCase().lastIndexOf(' ORDER BY ');
-      if (orderByIdx === -1) return { base: jql.trim(), orderBy: '' };
-      return {
-        base: jql.substring(0, orderByIdx).trim(),
-        orderBy: jql.substring(orderByIdx).trim()
-      };
-    };
 
     // Quand on utilise la résolution (nom ou ID) : les filtres board excluent souvent les résolus.
     // On fait une requête par projet et on répartit les comptes sur tous les boards de ce projet.
@@ -1748,10 +1740,9 @@ export class WorklogApplicationService {
       // Fetch backlog
       (async () => {
         try {
-          if (board?.location?.projectKey) {
-            logger.info(`[Board ${boardId}] Fetching backlog for project ${board.location.projectKey}...`);
-            return await sprintRepo.findBacklogIssues(board.location.projectKey);
-          }
+          // Backlog scopé par le filtre du board (plusieurs équipes partagent le même projet Jira)
+          logger.info(`[Board ${boardId}] Fetching backlog (board filter)...`);
+          return await sprintRepo.findBoardBacklogIssues(boardId, board?.location?.projectKey);
         } catch (backlogError) {
           logger.warn(`[Board ${boardId}] Failed to fetch backlog: ${backlogError}`);
         }

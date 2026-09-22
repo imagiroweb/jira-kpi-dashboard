@@ -10,12 +10,16 @@ describe('JiraSprintRepository', () => {
   const getBoards = jest.fn();
   const searchIssuesWithPagination = jest.fn();
   const getSprintIssues = jest.fn();
+  const getBoardConfiguration = jest.fn();
+  const getFilterJql = jest.fn();
 
   const jiraClient = {
     getBoardSprints,
     getBoards,
     searchIssuesWithPagination,
-    getSprintIssues
+    getSprintIssues,
+    getBoardConfiguration,
+    getFilterJql
   } as unknown as JiraClient;
 
   beforeEach(() => {
@@ -114,5 +118,59 @@ describe('JiraSprintRepository', () => {
     expect(searchIssuesWithPagination).toHaveBeenCalled();
     await repo.findBacklogIssues('CFG');
     expect(searchIssuesWithPagination).toHaveBeenCalledTimes(2);
+  });
+
+  it('findBoardBacklogIssues utilise le filtre du board (pas tout le projet)', async () => {
+    getBoardConfiguration.mockResolvedValue({ filter: { id: '12345' } });
+    getFilterJql.mockResolvedValue('project = AD AND "Team[Team]" = 7 ORDER BY Rank ASC');
+    searchIssuesWithPagination.mockResolvedValue({
+      issues: [
+        {
+          key: 'AD-10',
+          fields: {
+            summary: 'B',
+            issuetype: { name: 'Story' },
+            status: { name: 'To Do', statusCategory: { name: 'To Do', key: 'new' } },
+            customfield_10127: 3
+          }
+        }
+      ]
+    });
+    const repo = new JiraSprintRepository(jiraClient);
+    const issues = await repo.findBoardBacklogIssues(843, 'AD');
+    expect(getBoardConfiguration).toHaveBeenCalledWith(843);
+    expect(getFilterJql).toHaveBeenCalledWith('12345');
+    const jql = searchIssuesWithPagination.mock.calls[0][0] as string;
+    expect(jql).toContain('(project = AD AND "Team[Team]" = 7) AND Sprint is EMPTY');
+    expect(jql).not.toContain('ORDER BY Rank');
+    expect(issues).toHaveLength(1);
+    expect(issues[0].storyPoints).toBe(3);
+  });
+
+  it('findBoardBacklogIssues retombe sur le backlog projet si le board n’a pas de filtre', async () => {
+    getBoardConfiguration.mockResolvedValue(null);
+    searchIssuesWithPagination.mockResolvedValue({ issues: [] });
+    const repo = new JiraSprintRepository(jiraClient);
+    await repo.findBoardBacklogIssues(843, 'AD');
+    expect(searchIssuesWithPagination.mock.calls[0][0]).toBe(
+      'project = "AD" AND Sprint is EMPTY AND statusCategory != Done ORDER BY created DESC'
+    );
+  });
+
+  it('findBoardBacklogIssues retombe sur le projet si la résolution du filtre échoue', async () => {
+    getBoardConfiguration.mockRejectedValue(new Error('403'));
+    searchIssuesWithPagination.mockResolvedValue({ issues: [] });
+    const repo = new JiraSprintRepository(jiraClient);
+    await repo.findBoardBacklogIssues(843, 'AD');
+    expect(searchIssuesWithPagination.mock.calls[0][0]).toContain('project = "AD"');
+  });
+
+  it('findBoardBacklogIssues sans filtre ni projet renvoie un backlog vide', async () => {
+    getBoardConfiguration.mockResolvedValue({ filter: { id: '1' } });
+    getFilterJql.mockResolvedValue('   ');
+    const repo = new JiraSprintRepository(jiraClient);
+    const issues = await repo.findBoardBacklogIssues(843);
+    expect(issues).toEqual([]);
+    expect(searchIssuesWithPagination).not.toHaveBeenCalled();
   });
 });

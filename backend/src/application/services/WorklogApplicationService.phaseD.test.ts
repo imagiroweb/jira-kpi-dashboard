@@ -37,6 +37,7 @@ const mockWorklogRepo = {
 
 const mockSprintRepo = {
   findBacklogIssues: jest.fn(),
+  findBoardBacklogIssues: jest.fn(),
   findOpenSprintIssues: jest.fn(),
   findOpenSprints: jest.fn(),
   findClosedSprints: jest.fn(),
@@ -154,6 +155,7 @@ describe('WorklogApplicationService (phase D — Jira orchestration)', () => {
     mockWorklogRepo.search.mockResolvedValue([]);
     mockWorklogRepo.findByProject.mockResolvedValue([]);
     mockSprintRepo.findBacklogIssues.mockResolvedValue([]);
+    mockSprintRepo.findBoardBacklogIssues.mockResolvedValue([]);
 
     mockJiraClient.getProjects.mockResolvedValue([{ key: 'K', name: 'Proj', id: 'id1' }]);
     mockJiraClient.getAllProjects.mockResolvedValue([{ key: 'ALL', name: 'All', id: 'id2' }]);
@@ -401,7 +403,7 @@ describe('WorklogApplicationService (phase D — Jira orchestration)', () => {
         }
       }
     ]);
-    mockSprintRepo.findBacklogIssues.mockResolvedValueOnce([]);
+    mockSprintRepo.findBoardBacklogIssues.mockResolvedValueOnce([]);
     const res = await service.getSprintIssuesForBoard(1);
     expect(res.issues).toHaveLength(1);
     expect(res.issues[0].issueKey).toBe('PROJ-77');
@@ -420,10 +422,33 @@ describe('WorklogApplicationService (phase D — Jira orchestration)', () => {
         }
       }
     ]);
-    mockSprintRepo.findBacklogIssues.mockResolvedValueOnce([]);
+    mockSprintRepo.findBoardBacklogIssues.mockResolvedValueOnce([]);
     const res = await service.getSprintIssuesForBoard(1);
     expect(res.issues).toHaveLength(1);
-    expect(mockSprintRepo.findBacklogIssues).toHaveBeenCalled();
+    expect(mockSprintRepo.findBoardBacklogIssues).toHaveBeenCalled();
+  });
+
+  it('getSprintIssuesForBoard : backlog scopé par board (pas par projet partagé)', async () => {
+    mockJiraClient.getBoard.mockResolvedValue({ id: 843, name: 'Choco', location: { projectKey: 'AD' } });
+    mockJiraClient.getBoardSprintIssues.mockResolvedValueOnce([
+      {
+        key: 'AD-1',
+        fields: {
+          summary: 'A',
+          issuetype: { name: 'Story' },
+          status: { name: 'To Do', statusCategory: { key: 'new', name: 'To Do' } },
+          customfield_10127: 1
+        }
+      }
+    ]);
+    mockSprintRepo.findBoardBacklogIssues.mockResolvedValueOnce([
+      { storyPoints: 3 },
+      { storyPoints: 2 }
+    ]);
+    const res = await service.getSprintIssuesForBoard(843);
+    expect(mockSprintRepo.findBoardBacklogIssues).toHaveBeenCalledWith(843, 'AD');
+    expect(mockSprintRepo.findBacklogIssues).not.toHaveBeenCalled();
+    expect(res.backlog).toEqual({ ticketCount: 2, storyPoints: 5 });
   });
 
   it('getSprintIssuesForAllConfiguredBoards agrège succès et échec', async () => {

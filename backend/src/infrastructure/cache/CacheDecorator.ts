@@ -202,6 +202,17 @@ export class CachedSprintRepository implements ISprintRepository {
     cache.set(key, result, 10); // Cache for 10 minutes (backlog changes less frequently)
     return result;
   }
+
+  async findBoardBacklogIssues(boardId: number, fallbackProjectKey?: string): Promise<SprintIssue[]> {
+    // Clé par board : plusieurs boards peuvent partager le même projet Jira
+    const key = `sprint:backlog:board:${boardId}`;
+    const cached = cache.get<SprintIssue[]>(key);
+    if (cached) return cached;
+
+    const result = await this.inner.findBoardBacklogIssues(boardId, fallbackProjectKey);
+    cache.set(key, result, 10);
+    return result;
+  }
 }
 
 export { cache as globalCache };
