@@ -4,7 +4,17 @@ Guide pour écrire et maintenir les tests d’intégration (TI) et unitaires de 
 
 ## Objectif
 
-Couvrir les routes HTTP (`src/routes/`) de bout en bout via **supertest**, sans démarrer le serveur ni toucher à MongoDB / APIs externes réelles. Les dépendances (auth, services, clients, modèles) sont mockées de façon reproductible grâce à l’infrastructure partagée dans `src/test/`. **Objectif 80 %** de couverture lignes — vérifier avec `yarn test:coverage`.
+Couvrir les routes HTTP (`src/routes/`) de bout en bout via **supertest**, sans démarrer le serveur ni toucher à MongoDB / APIs externes réelles. Les dépendances (auth, services, clients, modèles) sont mockées de façon reproductible grâce à l’infrastructure partagée dans `src/test/`.
+
+### Indicateur de couverture (80 %)
+
+`yarn test:coverage` mesure un **périmètre métier** (pas tout `src/**`) et échoue sous les seuils :
+
+| Inclus | Exclu |
+|--------|--------|
+| `domain/`, `application/`, `routes/`, `middleware/`, `utils/`, `services/`, `websocket/` | scripts, clients infra, barrels `index.ts`, `WorklogApplicationService.ts` (orchestration massive) |
+
+Seuils Jest (`coverageThreshold`) : **lignes ≥ 80 %**, **branches ≥ 70 %**, **fonctions ≥ 80 %**.
 
 ## Stack
 
@@ -28,7 +38,7 @@ yarn test
 # Uniquement les tests de routes
 yarn test:routes
 
-# Couverture globale
+# Couverture (périmètre métier + seuils)
 yarn test:coverage
 
 # Fichier ou motif précis
