@@ -81,8 +81,76 @@ export const jiraApi = {
   getTimeConfig: async (): Promise<{ success: boolean } & TimeTrackingConfig> => {
     const { data } = await api.get('/jira/time-config');
     return data;
+  },
+  getClaudeUsStats: async (
+    quarter: ClaudeUsQuarter,
+    year: number = new Date().getFullYear()
+  ): Promise<{ success: boolean } & ClaudeUsStats> => {
+    const { data } = await api.get('/jira/claude-us-stats', { params: { quarter, year } });
+    return data;
+  },
+  getClaudeUsIssues: async (params: ClaudeUsIssuesParams): Promise<{ success: boolean } & ClaudeUsIssuesResponse> => {
+    const { data } = await api.get('/jira/claude-us-issues', { params });
+    return data;
   }
 };
+
+export type ClaudeUsBasis = 'done' | 'created';
+
+/** Détail des US Claude d'une série. */
+export interface ClaudeUsIssuesParams {
+  quarter: ClaudeUsQuarter;
+  year: number;
+  basis: ClaudeUsBasis;
+  /** Restreint au board (équipe) ; absent = tous les boards. */
+  boardId?: number;
+}
+
+/** Ligne du détail des US Claude. */
+export interface ClaudeUsIssueRow {
+  key: string;
+  summary: string;
+  status: string;
+  created: string | null;
+  /** Date de résolution Jira, sinon date de passage à Done. */
+  resolved: string | null;
+  /** Date d'ajout du label Claude, lue dans l'historique Jira. */
+  labelAddedAt: string | null;
+}
+
+export interface ClaudeUsIssuesResponse {
+  jql: string;
+  label: string;
+  issues: ClaudeUsIssueRow[];
+}
+
+export type ClaudeUsQuarter = 'all' | 'Q1' | 'Q2' | 'Q3' | 'Q4';
+
+export interface ClaudeUsCounts {
+  claudeCount: number;
+  nonClaudeCount: number;
+  totalCount: number;
+  claudePercent: number;
+}
+
+/** Une série d'indicateurs US Claude (US terminées ou US créées sur la période). */
+export interface ClaudeUsSection extends ClaudeUsCounts {
+  /** Détail par board (équipe) ; vide si repli sur le projet. */
+  byTeam: Array<{ id: number; name: string } & ClaudeUsCounts>;
+}
+
+/** US Claude (label / filtre Jira) vs non Claude sur la période (issue #39). */
+export interface ClaudeUsStats {
+  year: number;
+  quarter: ClaudeUsQuarter;
+  from: string;
+  toExclusive: string;
+  criterion: { kind: 'label' | 'filter'; value: string };
+  /** US passées à Done sur la période. */
+  done: ClaudeUsSection;
+  /** US créées sur la période, quel que soit leur statut. */
+  created: ClaudeUsSection;
+}
 
 export interface JiraBoard {
   id: number;

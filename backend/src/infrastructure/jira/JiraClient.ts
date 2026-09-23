@@ -346,6 +346,33 @@ export class JiraClient {
   }
 
   /**
+   * Historique d'un champ pour plusieurs tickets en un appel (POST /rest/api/3/changelog/bulkfetch,
+   * 1000 tickets max par requête, pagination par nextPageToken). Clé du résultat : id du ticket.
+   */
+  async getFieldChangelogs(issueIds: string[], fieldId: string): Promise<Map<string, JiraChangeHistory[]>> {
+    const out = new Map<string, JiraChangeHistory[]>();
+    for (let i = 0; i < issueIds.length; i += 1000) {
+      const chunk = issueIds.slice(i, i + 1000);
+      let nextPageToken: string | undefined;
+      for (let page = 0; page < 1000; page++) {
+        const response = await this.client.post<JiraBulkChangelogResponse>('/rest/api/3/changelog/bulkfetch', {
+          issueIdsOrKeys: chunk,
+          fieldIds: [fieldId],
+          maxResults: 1000,
+          ...(nextPageToken ? { nextPageToken } : {})
+        });
+        for (const log of response.data.issueChangeLogs ?? []) {
+          const id = String(log.issueId);
+          out.set(id, [...(out.get(id) ?? []), ...(log.changeHistories ?? [])]);
+        }
+        nextPageToken = response.data.nextPageToken?.trim() || undefined;
+        if (!nextPageToken) break;
+      }
+    }
+    return out;
+  }
+
+  /**
    * Get all worklogs for a specific issue (paginated: Jira returns max 100 per page).
    * Fetches all pages so no hours are missing for issues with many worklogs.
    */
@@ -545,6 +572,17 @@ export interface JiraSearchResponse {
   maxResults: number;
   total: number;
   issues: JiraIssue[];
+}
+
+/** Entrée d'historique Jira (changelog) : date + champs modifiés. */
+export interface JiraChangeHistory {
+  created: string;
+  items: Array<{ field?: string; fieldId?: string; fromString?: string | null; toString?: string | null }>;
+}
+
+interface JiraBulkChangelogResponse {
+  issueChangeLogs?: Array<{ issueId: string; changeHistories?: JiraChangeHistory[] }>;
+  nextPageToken?: string;
 }
 
 export interface JiraIssue {

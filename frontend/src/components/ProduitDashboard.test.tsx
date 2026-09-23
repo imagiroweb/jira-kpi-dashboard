@@ -21,6 +21,9 @@ vi.mock('../services/api', () => ({
     getBoard: vi.fn(),
     getBoardViews: vi.fn(),
   },
+  jiraApi: {
+    getClaudeUsStats: vi.fn(() => new Promise(() => {})),
+  },
 }));
 
 vi.mock('../services/authApi', () => ({ authApi: createAuthApiMock() }));

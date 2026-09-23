@@ -213,4 +213,30 @@ describe('JiraClient', () => {
     const res = await p;
     expect(res.issues.length).toBe(1);
   });
+
+  describe('getFieldChangelogs', () => {
+    it('agrège les historiques par ticket en suivant nextPageToken', async () => {
+      mockPost
+        .mockResolvedValueOnce({
+          data: {
+            issueChangeLogs: [{ issueId: '1', changeHistories: [{ created: '2026-07-02', items: [] }] }],
+            nextPageToken: 'next'
+          }
+        })
+        .mockResolvedValueOnce({
+          data: { issueChangeLogs: [{ issueId: '1', changeHistories: [{ created: '2026-08-01', items: [] }] }] }
+        });
+
+      const client = new JiraClient();
+      const result = await client.getFieldChangelogs(['1'], 'labels');
+
+      expect(result.get('1')?.map((h) => h.created)).toEqual(['2026-07-02', '2026-08-01']);
+      expect(mockPost).toHaveBeenNthCalledWith(1, '/rest/api/3/changelog/bulkfetch', {
+        issueIdsOrKeys: ['1'],
+        fieldIds: ['labels'],
+        maxResults: 1000
+      });
+      expect(mockPost).toHaveBeenNthCalledWith(2, '/rest/api/3/changelog/bulkfetch', expect.objectContaining({ nextPageToken: 'next' }));
+    });
+  });
 });
