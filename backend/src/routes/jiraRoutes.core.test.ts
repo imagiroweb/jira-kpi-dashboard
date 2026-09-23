@@ -461,6 +461,88 @@ describe('jiraRoutes — core (TI)', () => {
     });
   });
 
+  describe('GET /api/jira/claude-us-stats', () => {
+    it('retourne 200 avec les compteurs Claude / non Claude', async () => {
+      mockWorklogAppService.getClaudeUsStats.mockResolvedValue({
+        year: 2026,
+        quarter: 'Q3',
+        done: { claudeCount: 4, nonClaudeCount: 6, totalCount: 10, claudePercent: 40, byTeam: [] },
+        created: { claudeCount: 2, nonClaudeCount: 8, totalCount: 10, claudePercent: 20, byTeam: [] },
+      });
+
+      const res = await request(app).get('/api/jira/claude-us-stats').query({ quarter: 'q3', year: '2026' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.done.claudeCount).toBe(4);
+      expect(res.body.created.claudePercent).toBe(20);
+      expect(mockWorklogAppService.getClaudeUsStats).toHaveBeenCalledWith(2026, 'Q3');
+    });
+
+    it("utilise l'année en cours et 'all' par défaut", async () => {
+      mockWorklogAppService.getClaudeUsStats.mockResolvedValue({ done: {}, created: {} });
+
+      await request(app).get('/api/jira/claude-us-stats');
+
+      expect(mockWorklogAppService.getClaudeUsStats).toHaveBeenCalledWith(new Date().getFullYear(), 'all');
+    });
+
+    it('retourne 400 pour un trimestre invalide', async () => {
+      const res = await request(app).get('/api/jira/claude-us-stats').query({ quarter: 'Q5' });
+
+      expect(res.status).toBe(400);
+      expect(mockWorklogAppService.getClaudeUsStats).not.toHaveBeenCalled();
+    });
+
+    it('retourne 500 si getClaudeUsStats échoue', async () => {
+      mockWorklogAppService.getClaudeUsStats.mockRejectedValue(new Error('jira fail'));
+
+      const res = await request(app).get('/api/jira/claude-us-stats').query({ quarter: 'Q4' });
+
+      expect(res.status).toBe(500);
+      expect(res.body.success).toBe(false);
+    });
+  });
+
+  describe('GET /api/jira/claude-us-issues', () => {
+    it('transmet les paramètres au service et renvoie les tickets', async () => {
+      mockWorklogAppService.getClaudeUsIssues.mockResolvedValue({
+        jql: 'x',
+        label: 'claude-us',
+        issues: [{ key: 'AD-1', created: '2026-01-15', resolved: null, isClaude: true, labelAddedAt: '2026-07-10' }],
+      });
+
+      const res = await request(app)
+        .get('/api/jira/claude-us-issues')
+        .query({ quarter: 'Q1', year: '2026', basis: 'created', kind: 'claude', boardId: '810' });
+
+      expect(res.status).toBe(200);
+      expect(res.body.issues[0].labelAddedAt).toBe('2026-07-10');
+      expect(mockWorklogAppService.getClaudeUsIssues).toHaveBeenCalledWith({
+        year: 2026,
+        quarter: 'Q1',
+        basis: 'created',
+        kind: 'claude',
+        boardId: 810,
+      });
+    });
+
+    it('retourne 400 pour un paramètre invalide', async () => {
+      const res = await request(app).get('/api/jira/claude-us-issues').query({ kind: 'autre' });
+
+      expect(res.status).toBe(400);
+      expect(mockWorklogAppService.getClaudeUsIssues).not.toHaveBeenCalled();
+    });
+
+    it('retourne 500 si le service échoue', async () => {
+      mockWorklogAppService.getClaudeUsIssues.mockRejectedValue(new Error('jira fail'));
+
+      const res = await request(app).get('/api/jira/claude-us-issues');
+
+      expect(res.status).toBe(500);
+    });
+  });
+
   describe('GET /api/jira/test', () => {
     it('retourne 200 si la connexion Jira réussit', async () => {
       const res = await request(app).get('/api/jira/test');

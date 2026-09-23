@@ -17,6 +17,8 @@ export function createWorklogAppServiceMock() {
     searchEpicsByTitle: jest.fn(),
     getEpicDetails: jest.fn(),
     getTimeTrackingConfig: jest.fn(),
+    getClaudeUsStats: jest.fn(),
+    getClaudeUsIssues: jest.fn(),
     testConnection: jest.fn(),
     getWorklogsForIssue: jest.fn(),
     getWorklogsForUser: jest.fn(),

@@ -8,11 +8,44 @@ import { globalCache } from '../../infrastructure/cache/CacheDecorator';
 import { worklogHoursDailyService, bucketHoursByCalendarDate } from './WorklogHoursDailyService';
 import { logger } from '../../utils/logger';
 import { getWorklogCalendarDate } from '../../utils/worklogDate';
-import { stripOrderBy } from '../../infrastructure/jira/jql';
+import { stripOrderBy, quarterDateRange, buildClaudeUsJql, combineBoardFiltersJql, ClaudeUsBasis, QuarterKey } from '../../infrastructure/jira/jql';
+import {
+  aggregateClaudeUsByBoard,
+  claudeUsCounts,
+  ClaudeUsCounts,
+  ClaudeUsIssueRow,
+  findLabelAddedDate,
+  toClaudeUsIssueRow,
+} from '../../domain/kpi/claudeUsStats';
 
 function cacheTtlMinutes(envKey: string, defaultMinutes: number): number {
   const n = parseInt(process.env[envKey] || '', 10);
   return Number.isFinite(n) && n > 0 ? n : defaultMinutes;
+}
+
+/** Indicateur US Claude / non Claude sur une période (issue #39). */
+export interface ClaudeUsJqls {
+  claudeJql: string;
+  nonClaudeJql: string;
+  allJql: string;
+}
+
+/** Une série d'indicateurs (US terminées ou US créées sur la période). */
+export interface ClaudeUsSection extends ClaudeUsCounts, ClaudeUsJqls {
+  /** Détail par board (équipe) ; vide si repli sur le projet faute de filtre de board lisible. */
+  byTeam: Array<{ id: number; name: string } & ClaudeUsCounts & ClaudeUsJqls>;
+}
+
+export interface ClaudeUsStats {
+  year: number;
+  quarter: QuarterKey | 'all';
+  from: string;
+  toExclusive: string;
+  criterion: { kind: 'label' | 'filter'; value: string };
+  /** US passées à Done sur la période. */
+  done: ClaudeUsSection;
+  /** US créées sur la période, quel que soit leur statut. */
+  created: ClaudeUsSection;
 }
 
 /** Clé cache résultat agrégé Support Board (issue #37). */
@@ -751,6 +784,158 @@ export class WorklogApplicationService {
   async getTimeTrackingConfig(): Promise<{ workingHoursPerDay: number; workingDaysPerWeek: number }> {
     const jiraClient = container().jiraClient;
     return jiraClient.getTimeTrackingConfig();
+  }
+
+  /**
+   * US passées à Done et US créées sur la période : nombre Claude (label ou filtre Jira) vs non Claude.
+   * Périmètre : union des filtres des boards configurés (JIRA_BOARD_ID + JIRA_QA_BOARD_ID), et non tout
+   * l'espace ; repli sur JIRA_CLAUDE_US_PROJECT (sinon JIRA_RESOLVED_BY_DAY_PROJECT, sinon projets configurés)
+   * si aucun filtre de board n'est lisible. Types JIRA_CLAUDE_US_ISSUE_TYPES (défaut US), label
+   * JIRA_CLAUDE_US_LABEL (défaut claude-us) ou filtre JIRA_CLAUDE_US_FILTER_ID (prioritaire).
+   */
+  async getClaudeUsStats(year: number, quarter: QuarterKey | 'all'): Promise<ClaudeUsStats> {
+    const cacheKey = `claude-us-stats:${year}:${quarter}`;
+    const cached = globalCache.get<ClaudeUsStats>(cacheKey);
+    if (cached) return cached;
+
+    const { projectKeys, label, filterId, ...config } = this.getClaudeUsConfig();
+    const { from, toExclusive } = quarterDateRange(year, quarter);
+    const baseOpts = { projectKeys, label, filterId, ...config, from, toExclusive };
+    const boards = await this.getConfiguredBoardFilters();
+    if (boards.length === 0) {
+      logger.warn(`getClaudeUsStats: aucun filtre de board lisible, repli sur les projets [${projectKeys.join(', ')}]`);
+    }
+    const [done, created] = await Promise.all([
+      this.computeClaudeUsSection({ ...baseOpts, basis: 'done' }, boards),
+      this.computeClaudeUsSection({ ...baseOpts, basis: 'created' }, boards),
+    ]);
+
+    const result: ClaudeUsStats = {
+      year,
+      quarter,
+      from,
+      toExclusive,
+      criterion: filterId ? { kind: 'filter', value: filterId } : { kind: 'label', value: label },
+      done,
+      created,
+    };
+    globalCache.set(cacheKey, result, cacheTtlMinutes('CLAUDE_US_STATS_CACHE_TTL_MINUTES', 15));
+    return result;
+  }
+
+  /**
+   * Détail d'un encart US Claude : tickets avec dates de création, de résolution et d'ajout du label
+   * (lue dans l'historique Jira). boardId restreint au filtre d'un board, sinon union des boards.
+   */
+  async getClaudeUsIssues(params: {
+    year: number;
+    quarter: QuarterKey | 'all';
+    basis: ClaudeUsBasis;
+    kind: 'claude' | 'nonClaude' | 'all';
+    boardId?: number;
+  }): Promise<{ jql: string; label: string; issues: ClaudeUsIssueRow[] }> {
+    const jiraClient = container().jiraClient;
+    const cfg = this.getClaudeUsConfig();
+    const { from, toExclusive } = quarterDateRange(params.year, params.quarter);
+    const boards = (await this.getConfiguredBoardFilters()).filter(
+      (b) => params.boardId === undefined || b.id === params.boardId
+    );
+    if (params.boardId !== undefined && boards.length === 0) throw new Error(`Board ${params.boardId} inconnu ou sans filtre`);
+    const jqls = buildClaudeUsJql({
+      ...cfg,
+      basis: params.basis,
+      scopeJql: combineBoardFiltersJql(boards.map((b) => b.filterJql)),
+      from,
+      toExclusive,
+    });
+    const jql = params.kind === 'claude' ? jqls.claudeJql : params.kind === 'nonClaude' ? jqls.nonClaudeJql : jqls.allJql;
+
+    const fields = 'key,summary,status,created,resolutiondate,statuscategorychangedate,labels';
+    const [issues, claudeKeys] = await Promise.all([
+      jiraClient.searchAllIssuesByJql(jql, fields),
+      params.kind === 'all'
+        ? jiraClient.searchAllIssuesByJql(jqls.claudeJql, 'key').then((r) => new Set(r.map((i) => i.key)))
+        : Promise.resolve(null),
+    ]);
+    const isClaude = (key: string) => (claudeKeys ? claudeKeys.has(key) : params.kind === 'claude');
+
+    // Historique du champ labels, uniquement pour les tickets qui portent le label.
+    const labelled = issues.filter((i) => Array.isArray(i.fields.labels) && (i.fields.labels as string[]).includes(cfg.label));
+    let changelogs = new Map<string, Parameters<typeof findLabelAddedDate>[0]>();
+    if (labelled.length > 0) {
+      try {
+        changelogs = await jiraClient.getFieldChangelogs(labelled.map((i) => i.id), 'labels');
+      } catch (err) {
+        logger.warn(`getClaudeUsIssues: historique des labels indisponible: ${err}`);
+      }
+    }
+
+    const rows = issues
+      .map((i) =>
+        toClaudeUsIssueRow(i, isClaude(i.key), findLabelAddedDate(changelogs.get(String(i.id)) ?? [], cfg.label))
+      )
+      .sort((a, b) => (a.created ?? '').localeCompare(b.created ?? ''));
+    return { jql, label: cfg.label, issues: rows };
+  }
+
+  /** Configuration de l'indicateur US Claude (variables JIRA_CLAUDE_US_*). */
+  private getClaudeUsConfig(): { projectKeys: string[]; issueTypes: string[]; label: string; filterId: string | null } {
+    const project = (process.env.JIRA_CLAUDE_US_PROJECT || process.env.JIRA_RESOLVED_BY_DAY_PROJECT || '').trim();
+    return {
+      projectKeys: project ? [project] : container().jiraClient.configuredProjectKeys,
+      issueTypes: this.parseResolvedByDayTypes((process.env.JIRA_CLAUDE_US_ISSUE_TYPES || 'US').trim()),
+      label: (process.env.JIRA_CLAUDE_US_LABEL || 'claude-us').trim(),
+      filterId: (process.env.JIRA_CLAUDE_US_FILTER_ID || '').trim() || null,
+    };
+  }
+
+  /**
+   * Une série d'indicateurs US Claude : requêtes par board (détail par équipe, totaux dédoublonnés
+   * sur les clés), ou sur le périmètre projet si aucun filtre de board n'est disponible.
+   */
+  private async computeClaudeUsSection(
+    opts: Omit<Parameters<typeof buildClaudeUsJql>[0], 'scopeJql'> & { basis: ClaudeUsBasis },
+    boards: Array<{ id: number; name: string; filterJql: string }>
+  ): Promise<ClaudeUsSection> {
+    const jiraClient = container().jiraClient;
+    const searchKeys = async (jql: string) => (await jiraClient.searchAllIssuesByJql(jql, 'key')).map((i) => i.key);
+    const union = buildClaudeUsJql({ ...opts, scopeJql: combineBoardFiltersJql(boards.map((b) => b.filterJql)) });
+
+    if (boards.length === 0) {
+      const [allKeys, claudeKeys] = await Promise.all([searchKeys(union.allJql), searchKeys(union.claudeJql)]);
+      return { ...claudeUsCounts(allKeys.length, claudeKeys.length), ...union, byTeam: [] };
+    }
+
+    const perBoard = await Promise.all(
+      boards.map(async (b) => {
+        const jqls = buildClaudeUsJql({ ...opts, scopeJql: combineBoardFiltersJql([b.filterJql]) });
+        const [allKeys, claudeKeys] = await Promise.all([searchKeys(jqls.allJql), searchKeys(jqls.claudeJql)]);
+        return { id: b.id, name: b.name, allKeys, claudeKeys, jqls };
+      })
+    );
+    const { totals, byTeam } = aggregateClaudeUsByBoard(perBoard);
+    return { ...totals, ...union, byTeam: byTeam.map((t, i) => ({ ...t, ...perBoard[i].jqls })) };
+  }
+
+  /**
+   * Filtres Jira des boards configurés (JIRA_BOARD_ID + JIRA_QA_BOARD_ID).
+   * Les boards sans filtre lisible sont ignorés.
+   */
+  private async getConfiguredBoardFilters(): Promise<Array<{ id: number; name: string; filterJql: string }>> {
+    const jiraClient = container().jiraClient;
+    const allBoards = [...(await this.getConfiguredBoards()), ...(await this.getQaBoards())];
+    const scoped = await Promise.all(
+      allBoards.map(async (board) => {
+        const config = await jiraClient.getBoardConfiguration(board.id);
+        const filterJql = config?.filter?.id ? await jiraClient.getFilterJql(config.filter.id) : null;
+        if (!filterJql || !stripOrderBy(filterJql).base) {
+          logger.warn(`getClaudeUsStats: board ${board.id} sans filtre exploitable, ignoré`);
+          return null;
+        }
+        return { id: board.id, name: board.name, filterJql };
+      })
+    );
+    return scoped.filter((s): s is NonNullable<typeof s> => s !== null);
   }
 
   /**

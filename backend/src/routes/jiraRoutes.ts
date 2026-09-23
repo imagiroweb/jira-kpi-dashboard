@@ -357,6 +357,76 @@ router.get('/time-config', async (req: Request, res: Response) => {
 });
 
 /**
+ * US passées à Done et US créées sur un trimestre (ou l'année) : Claude vs non Claude (issue #39)
+ * GET /api/jira/claude-us-stats?quarter=Q1|Q2|Q3|Q4|all&year=YYYY
+ */
+router.get('/claude-us-stats', async (req: Request, res: Response) => {
+  try {
+    const quarterRaw = ((req.query.quarter as string) || 'all').toUpperCase();
+    const quarter = quarterRaw === 'ALL' ? 'all' : quarterRaw;
+    if (quarter !== 'all' && !['Q1', 'Q2', 'Q3', 'Q4'].includes(quarter)) {
+      return res.status(400).json({ success: false, message: 'quarter must be Q1, Q2, Q3, Q4 or all' });
+    }
+    const year = req.query.year ? parseInt(req.query.year as string, 10) : new Date().getFullYear();
+    if (!Number.isInteger(year) || year < 2000 || year > 2100) {
+      return res.status(400).json({ success: false, message: 'Invalid year' });
+    }
+
+    const stats = await worklogAppService.getClaudeUsStats(year, quarter as 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'all');
+    res.json({ success: true, ...stats });
+  } catch (error) {
+    logger.error('Error fetching Claude US stats:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch Claude US stats',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * Détail d'un encart US Claude (issue #39) : tickets avec dates de création, résolution et ajout du label
+ * GET /api/jira/claude-us-issues?quarter=Q3&year=2026&basis=done|created&kind=claude|nonClaude|all&boardId=810
+ */
+router.get('/claude-us-issues', async (req: Request, res: Response) => {
+  try {
+    const quarterRaw = ((req.query.quarter as string) || 'all').toUpperCase();
+    const quarter = quarterRaw === 'ALL' ? 'all' : quarterRaw;
+    const basis = (req.query.basis as string) || 'done';
+    const kind = (req.query.kind as string) || 'claude';
+    const year = req.query.year ? parseInt(req.query.year as string, 10) : new Date().getFullYear();
+    const boardId = req.query.boardId ? parseInt(req.query.boardId as string, 10) : undefined;
+    if (
+      (quarter !== 'all' && !['Q1', 'Q2', 'Q3', 'Q4'].includes(quarter)) ||
+      !['done', 'created'].includes(basis) ||
+      !['claude', 'nonClaude', 'all'].includes(kind) ||
+      !Number.isInteger(year) ||
+      year < 2000 ||
+      year > 2100 ||
+      (boardId !== undefined && Number.isNaN(boardId))
+    ) {
+      return res.status(400).json({ success: false, message: 'Invalid quarter, year, basis, kind or boardId' });
+    }
+
+    const result = await worklogAppService.getClaudeUsIssues({
+      year,
+      quarter: quarter as 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'all',
+      basis: basis as 'done' | 'created',
+      kind: kind as 'claude' | 'nonClaude' | 'all',
+      boardId,
+    });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    logger.error('Error fetching Claude US issues:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch Claude US issues',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
  * Test Jira connection
  * GET /api/jira/test
  */

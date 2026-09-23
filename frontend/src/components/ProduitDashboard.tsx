@@ -126,6 +126,7 @@ import {
   type RoadmapAdoriaQuarterFilter,
 } from '../services/authApi';
 import { useSocketOptional } from '../hooks/useSocketContext';
+import { ClaudeUsKpiPanel } from './ClaudeUsKpiPanel';
 
 /** Board ID Roadmap Adoria 2026 (chargé par défaut dans la section KPI Roadmap). */
 const ROADMAP_ADORIA_2026_BOARD_ID = '5191064770';
@@ -1521,6 +1522,9 @@ export function ProduitDashboard() {
                   )}
                 </div>
               </div>
+
+              {/* US réalisées avec Claude (Jira) — suit le filtre trimestre (issue #39) */}
+              <ClaudeUsKpiPanel quarter={roadmapQuarterFilter} />
 
               {/* Macro chiffrage vs estimation — replié par défaut (comme « Projets par colonne ») */}
               {roadmapData && (
