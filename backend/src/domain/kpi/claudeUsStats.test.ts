@@ -77,21 +77,20 @@ describe('toClaudeUsIssueRow', () => {
     const done = { name: 'Terminé', statusCategory: { key: 'done' } };
 
     expect(
-      toClaudeUsIssueRow({ key: 'AD-1', fields: { ...base, status: done, resolutiondate: '2026-08-01T09:00:00.000+0200' } }, true, null)
+      toClaudeUsIssueRow({ key: 'AD-1', fields: { ...base, status: done, resolutiondate: '2026-08-01T09:00:00.000+0200' } }, null)
     ).toEqual({
       key: 'AD-1',
       summary: 'Titre',
       status: 'Terminé',
       created: '2026-01-15T09:00:00.000+0100',
       resolved: '2026-08-01T09:00:00.000+0200',
-      isClaude: true,
       labelAddedAt: null,
     });
-    expect(toClaudeUsIssueRow({ key: 'AD-2', fields: { ...base, status: done } }, false, null).resolved).toBe(
+    expect(toClaudeUsIssueRow({ key: 'AD-2', fields: { ...base, status: done } }, null).resolved).toBe(
       '2026-08-02T09:00:00.000+0200'
     );
     expect(
-      toClaudeUsIssueRow({ key: 'AD-3', fields: { ...base, status: { name: 'En cours', statusCategory: { key: 'indeterminate' } } } }, false, null)
+      toClaudeUsIssueRow({ key: 'AD-3', fields: { ...base, status: { name: 'En cours', statusCategory: { key: 'indeterminate' } } } }, null)
         .resolved
     ).toBeNull();
   });

@@ -80,7 +80,6 @@ export interface ClaudeUsIssueRow {
   created: string | null;
   /** Date de résolution Jira, sinon date de passage dans la catégorie Done. */
   resolved: string | null;
-  isClaude: boolean;
   /** Date d'ajout du label Claude (null si absent ou non trouvé dans l'historique). */
   labelAddedAt: string | null;
 }
@@ -88,7 +87,6 @@ export interface ClaudeUsIssueRow {
 /** Transforme un ticket Jira brut (champs de recherche) en ligne de détail. */
 export function toClaudeUsIssueRow(
   issue: { key: string; fields: Record<string, unknown> },
-  isClaude: boolean,
   labelAddedAt: string | null
 ): ClaudeUsIssueRow {
   const f = issue.fields;
@@ -101,7 +99,6 @@ export function toClaudeUsIssueRow(
     status: status?.name ?? '',
     created: str(f.created),
     resolved: str(f.resolutiondate) ?? (isDone ? str(f.statuscategorychangedate) : null),
-    isClaude,
     labelAddedAt,
   };
 }

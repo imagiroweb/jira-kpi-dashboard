@@ -509,12 +509,12 @@ describe('jiraRoutes — core (TI)', () => {
       mockWorklogAppService.getClaudeUsIssues.mockResolvedValue({
         jql: 'x',
         label: 'claude-us',
-        issues: [{ key: 'AD-1', created: '2026-01-15', resolved: null, isClaude: true, labelAddedAt: '2026-07-10' }],
+        issues: [{ key: 'AD-1', created: '2026-01-15', resolved: null, labelAddedAt: '2026-07-10' }],
       });
 
       const res = await request(app)
         .get('/api/jira/claude-us-issues')
-        .query({ quarter: 'Q1', year: '2026', basis: 'created', kind: 'claude', boardId: '810' });
+        .query({ quarter: 'Q1', year: '2026', basis: 'created', boardId: '810' });
 
       expect(res.status).toBe(200);
       expect(res.body.issues[0].labelAddedAt).toBe('2026-07-10');
@@ -522,13 +522,12 @@ describe('jiraRoutes — core (TI)', () => {
         year: 2026,
         quarter: 'Q1',
         basis: 'created',
-        kind: 'claude',
         boardId: 810,
       });
     });
 
     it('retourne 400 pour un paramètre invalide', async () => {
-      const res = await request(app).get('/api/jira/claude-us-issues').query({ kind: 'autre' });
+      const res = await request(app).get('/api/jira/claude-us-issues').query({ basis: 'autre' });
 
       expect(res.status).toBe(400);
       expect(mockWorklogAppService.getClaudeUsIssues).not.toHaveBeenCalled();

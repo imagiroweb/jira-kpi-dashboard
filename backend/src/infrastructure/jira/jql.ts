@@ -85,10 +85,10 @@ export interface ClaudeUsJqlOptions {
 const quoteJql = (v: string) => `"${v.replace(/"/g, '')}"`;
 
 /**
- * JQL des US passées à Done (ou créées) sur la période : toutes, celles identifiées « Claude »
- * (label ou filtre Jira) et les autres. Le nombre d'US non Claude est calculé comme total − claude.
+ * JQL des US passées à Done (ou créées) sur la période : toutes, et celles identifiées « Claude »
+ * (label ou filtre Jira). Le nombre d'US non Claude est calculé comme total − claude.
  */
-export function buildClaudeUsJql(opts: ClaudeUsJqlOptions): { allJql: string; claudeJql: string; nonClaudeJql: string } {
+export function buildClaudeUsJql(opts: ClaudeUsJqlOptions): { allJql: string; claudeJql: string } {
   const conditions: string[] = [];
   if (opts.scopeJql) conditions.push(opts.scopeJql);
   else if (opts.projectKeys.length > 0) conditions.push(`project in (${opts.projectKeys.map(quoteJql).join(', ')})`);
@@ -100,9 +100,5 @@ export function buildClaudeUsJql(opts: ClaudeUsJqlOptions): { allJql: string; cl
   const allJql = conditions.join(' AND ');
   const filterId = (opts.filterId ?? '').trim();
   const claudeCondition = filterId ? `filter = ${quoteJql(filterId)}` : `labels = ${quoteJql(opts.label)}`;
-  // `labels != x` exclut les tickets sans label : on les réintègre explicitement.
-  const nonClaudeCondition = filterId
-    ? `filter != ${quoteJql(filterId)}`
-    : `(labels is EMPTY OR labels != ${quoteJql(opts.label)})`;
-  return { allJql, claudeJql: `${allJql} AND ${claudeCondition}`, nonClaudeJql: `${allJql} AND ${nonClaudeCondition}` };
+  return { allJql, claudeJql: `${allJql} AND ${claudeCondition}` };
 }

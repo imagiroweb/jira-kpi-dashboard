@@ -12,8 +12,6 @@ import { ClaudeUsKpiPanel } from './ClaudeUsKpiPanel';
 const mockGetClaudeUsStats = vi.mocked(jiraApi.getClaudeUsStats);
 const mockGetClaudeUsIssues = vi.mocked(jiraApi.getClaudeUsIssues);
 
-const jqls = (p: string) => ({ claudeJql: `${p}-c`, nonClaudeJql: `${p}-n`, allJql: `${p}-a` });
-
 const STATS = {
   success: true,
   year: 2026,
@@ -26,10 +24,9 @@ const STATS = {
     nonClaudeCount: 6,
     totalCount: 10,
     claudePercent: 40,
-    ...jqls('done'),
     byTeam: [
-      { id: 810, name: 'Calson', claudeCount: 3, nonClaudeCount: 2, totalCount: 5, claudePercent: 60, ...jqls('d1') },
-      { id: 843, name: 'Choco', claudeCount: 1, nonClaudeCount: 4, totalCount: 5, claudePercent: 20, ...jqls('d2') },
+      { id: 810, name: 'Calson', claudeCount: 3, nonClaudeCount: 2, totalCount: 5, claudePercent: 60 },
+      { id: 843, name: 'Choco', claudeCount: 1, nonClaudeCount: 4, totalCount: 5, claudePercent: 20 },
     ],
   },
   created: {
@@ -37,10 +34,9 @@ const STATS = {
     nonClaudeCount: 13,
     totalCount: 20,
     claudePercent: 35,
-    ...jqls('created'),
     byTeam: [
-      { id: 810, name: 'Calson', claudeCount: 5, nonClaudeCount: 5, totalCount: 10, claudePercent: 50, ...jqls('c1') },
-      { id: 843, name: 'Choco', claudeCount: 2, nonClaudeCount: 8, totalCount: 10, claudePercent: 20, ...jqls('c2') },
+      { id: 810, name: 'Calson', claudeCount: 5, nonClaudeCount: 5, totalCount: 10, claudePercent: 50 },
+      { id: 843, name: 'Choco', claudeCount: 2, nonClaudeCount: 8, totalCount: 10, claudePercent: 20 },
     ],
   },
 };
@@ -107,23 +103,31 @@ describe('ClaudeUsKpiPanel', () => {
       quarter: 'Q1',
       year: new Date().getFullYear(),
       basis: 'created',
-      kind: 'claude',
       boardId: 810,
     });
   });
 
-  it('ouvre le détail global (toutes équipes) au clic sur la valeur principale', async () => {
+  it('ouvre le détail global (toutes équipes) au clic sur la valeur US Claude', async () => {
     mockGetClaudeUsStats.mockResolvedValue(STATS);
     mockGetClaudeUsIssues.mockResolvedValue({ success: true, jql: 'x', label: 'claude-us', issues: [] });
 
     renderWithProviders(<ClaudeUsKpiPanel quarter="Q3" />);
 
-    fireEvent.click(await screen.findByText('40.0 %'));
+    fireEvent.click(await screen.findByTitle('US Claude terminées — voir le détail'));
 
     await screen.findByRole('dialog');
-    expect(mockGetClaudeUsIssues).toHaveBeenCalledWith(
-      expect.objectContaining({ basis: 'done', kind: 'all', boardId: undefined })
-    );
+    expect(mockGetClaudeUsIssues).toHaveBeenCalledWith(expect.objectContaining({ basis: 'done', boardId: undefined }));
+  });
+
+  it("ne rend pas cliquables les encarts non Claude et %", async () => {
+    mockGetClaudeUsStats.mockResolvedValue(STATS);
+
+    renderWithProviders(<ClaudeUsKpiPanel quarter="Q3" />);
+
+    await screen.findByText('40.0 %');
+    expect(screen.queryByTitle(/US non Claude .*voir le détail/)).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/% US IA .*voir le détail/)).not.toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: /./ }).every((b) => /US Claude/.test(b.title))).toBe(true);
   });
 
   it('recharge quand le trimestre change', async () => {

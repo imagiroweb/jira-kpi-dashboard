@@ -96,18 +96,17 @@ export const jiraApi = {
 };
 
 export type ClaudeUsBasis = 'done' | 'created';
-export type ClaudeUsKind = 'claude' | 'nonClaude' | 'all';
 
+/** Détail des US Claude d'une série. */
 export interface ClaudeUsIssuesParams {
   quarter: ClaudeUsQuarter;
   year: number;
   basis: ClaudeUsBasis;
-  kind: ClaudeUsKind;
   /** Restreint au board (équipe) ; absent = tous les boards. */
   boardId?: number;
 }
 
-/** Ligne du détail d'un encart US Claude. */
+/** Ligne du détail des US Claude. */
 export interface ClaudeUsIssueRow {
   key: string;
   summary: string;
@@ -115,7 +114,6 @@ export interface ClaudeUsIssueRow {
   created: string | null;
   /** Date de résolution Jira, sinon date de passage à Done. */
   resolved: string | null;
-  isClaude: boolean;
   /** Date d'ajout du label Claude, lue dans l'historique Jira. */
   labelAddedAt: string | null;
 }
@@ -135,16 +133,10 @@ export interface ClaudeUsCounts {
   claudePercent: number;
 }
 
-export interface ClaudeUsJqls {
-  claudeJql: string;
-  nonClaudeJql: string;
-  allJql: string;
-}
-
 /** Une série d'indicateurs US Claude (US terminées ou US créées sur la période). */
-export interface ClaudeUsSection extends ClaudeUsCounts, ClaudeUsJqls {
+export interface ClaudeUsSection extends ClaudeUsCounts {
   /** Détail par board (équipe) ; vide si repli sur le projet. */
-  byTeam: Array<{ id: number; name: string } & ClaudeUsCounts & ClaudeUsJqls>;
+  byTeam: Array<{ id: number; name: string } & ClaudeUsCounts>;
 }
 
 /** US Claude (label / filtre Jira) vs non Claude sur la période (issue #39). */

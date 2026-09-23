@@ -11,7 +11,7 @@ import { ClaudeUsDetailModal } from './ClaudeUsDetailModal';
 
 const mockGetClaudeUsIssues = vi.mocked(jiraApi.getClaudeUsIssues);
 
-const PARAMS = { quarter: 'Q1' as const, year: 2026, basis: 'created' as const, kind: 'claude' as const };
+const PARAMS = { quarter: 'Q1' as const, year: 2026, basis: 'created' as const };
 
 describe('ClaudeUsDetailModal', () => {
   beforeEach(() => {
@@ -30,7 +30,6 @@ describe('ClaudeUsDetailModal', () => {
           status: 'Terminé',
           created: '2026-01-15T10:00:00.000+0100',
           resolved: '2026-02-20T10:00:00.000+0100',
-          isClaude: true,
           labelAddedAt: '2026-07-10T10:00:00.000+0200',
         },
       ],
@@ -51,8 +50,8 @@ describe('ClaudeUsDetailModal', () => {
       jql: 'x',
       label: 'claude-us',
       issues: [
-        { key: 'AD-2', summary: 'A', status: 'En cours', created: '2026-02-01', resolved: null, isClaude: true, labelAddedAt: '2026-02-03' },
-        { key: 'AD-3', summary: 'B', status: 'En cours', created: '2026-02-01', resolved: null, isClaude: true, labelAddedAt: null },
+        { key: 'AD-2', summary: 'A', status: 'En cours', created: '2026-02-01', resolved: null, labelAddedAt: '2026-02-03' },
+        { key: 'AD-3', summary: 'B', status: 'En cours', created: '2026-02-01', resolved: null, labelAddedAt: null },
       ],
     });
 

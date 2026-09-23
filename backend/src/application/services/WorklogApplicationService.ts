@@ -24,16 +24,10 @@ function cacheTtlMinutes(envKey: string, defaultMinutes: number): number {
 }
 
 /** Indicateur US Claude / non Claude sur une période (issue #39). */
-export interface ClaudeUsJqls {
-  claudeJql: string;
-  nonClaudeJql: string;
-  allJql: string;
-}
-
 /** Une série d'indicateurs (US terminées ou US créées sur la période). */
-export interface ClaudeUsSection extends ClaudeUsCounts, ClaudeUsJqls {
+export interface ClaudeUsSection extends ClaudeUsCounts {
   /** Détail par board (équipe) ; vide si repli sur le projet faute de filtre de board lisible. */
-  byTeam: Array<{ id: number; name: string } & ClaudeUsCounts & ClaudeUsJqls>;
+  byTeam: Array<{ id: number; name: string } & ClaudeUsCounts>;
 }
 
 export interface ClaudeUsStats {
@@ -824,14 +818,13 @@ export class WorklogApplicationService {
   }
 
   /**
-   * Détail d'un encart US Claude : tickets avec dates de création, de résolution et d'ajout du label
+   * Détail des US Claude d'une série : dates de création, de résolution et d'ajout du label
    * (lue dans l'historique Jira). boardId restreint au filtre d'un board, sinon union des boards.
    */
   async getClaudeUsIssues(params: {
     year: number;
     quarter: QuarterKey | 'all';
     basis: ClaudeUsBasis;
-    kind: 'claude' | 'nonClaude' | 'all';
     boardId?: number;
   }): Promise<{ jql: string; label: string; issues: ClaudeUsIssueRow[] }> {
     const jiraClient = container().jiraClient;
@@ -841,23 +834,16 @@ export class WorklogApplicationService {
       (b) => params.boardId === undefined || b.id === params.boardId
     );
     if (params.boardId !== undefined && boards.length === 0) throw new Error(`Board ${params.boardId} inconnu ou sans filtre`);
-    const jqls = buildClaudeUsJql({
+    const { claudeJql: jql } = buildClaudeUsJql({
       ...cfg,
       basis: params.basis,
       scopeJql: combineBoardFiltersJql(boards.map((b) => b.filterJql)),
       from,
       toExclusive,
     });
-    const jql = params.kind === 'claude' ? jqls.claudeJql : params.kind === 'nonClaude' ? jqls.nonClaudeJql : jqls.allJql;
 
     const fields = 'key,summary,status,created,resolutiondate,statuscategorychangedate,labels';
-    const [issues, claudeKeys] = await Promise.all([
-      jiraClient.searchAllIssuesByJql(jql, fields),
-      params.kind === 'all'
-        ? jiraClient.searchAllIssuesByJql(jqls.claudeJql, 'key').then((r) => new Set(r.map((i) => i.key)))
-        : Promise.resolve(null),
-    ]);
-    const isClaude = (key: string) => (claudeKeys ? claudeKeys.has(key) : params.kind === 'claude');
+    const issues = await jiraClient.searchAllIssuesByJql(jql, fields);
 
     // Historique du champ labels, uniquement pour les tickets qui portent le label.
     const labelled = issues.filter((i) => Array.isArray(i.fields.labels) && (i.fields.labels as string[]).includes(cfg.label));
@@ -871,9 +857,7 @@ export class WorklogApplicationService {
     }
 
     const rows = issues
-      .map((i) =>
-        toClaudeUsIssueRow(i, isClaude(i.key), findLabelAddedDate(changelogs.get(String(i.id)) ?? [], cfg.label))
-      )
+      .map((i) => toClaudeUsIssueRow(i, findLabelAddedDate(changelogs.get(String(i.id)) ?? [], cfg.label)))
       .sort((a, b) => (a.created ?? '').localeCompare(b.created ?? ''));
     return { jql, label: cfg.label, issues: rows };
   }
@@ -899,22 +883,22 @@ export class WorklogApplicationService {
   ): Promise<ClaudeUsSection> {
     const jiraClient = container().jiraClient;
     const searchKeys = async (jql: string) => (await jiraClient.searchAllIssuesByJql(jql, 'key')).map((i) => i.key);
-    const union = buildClaudeUsJql({ ...opts, scopeJql: combineBoardFiltersJql(boards.map((b) => b.filterJql)) });
+    const countKeys = async (scopeJql: string | null) => {
+      const { allJql, claudeJql } = buildClaudeUsJql({ ...opts, scopeJql });
+      const [allKeys, claudeKeys] = await Promise.all([searchKeys(allJql), searchKeys(claudeJql)]);
+      return { allKeys, claudeKeys };
+    };
 
     if (boards.length === 0) {
-      const [allKeys, claudeKeys] = await Promise.all([searchKeys(union.allJql), searchKeys(union.claudeJql)]);
-      return { ...claudeUsCounts(allKeys.length, claudeKeys.length), ...union, byTeam: [] };
+      const { allKeys, claudeKeys } = await countKeys(null);
+      return { ...claudeUsCounts(allKeys.length, claudeKeys.length), byTeam: [] };
     }
 
     const perBoard = await Promise.all(
-      boards.map(async (b) => {
-        const jqls = buildClaudeUsJql({ ...opts, scopeJql: combineBoardFiltersJql([b.filterJql]) });
-        const [allKeys, claudeKeys] = await Promise.all([searchKeys(jqls.allJql), searchKeys(jqls.claudeJql)]);
-        return { id: b.id, name: b.name, allKeys, claudeKeys, jqls };
-      })
+      boards.map(async (b) => ({ id: b.id, name: b.name, ...(await countKeys(combineBoardFiltersJql([b.filterJql]))) }))
     );
     const { totals, byTeam } = aggregateClaudeUsByBoard(perBoard);
-    return { ...totals, ...union, byTeam: byTeam.map((t, i) => ({ ...t, ...perBoard[i].jqls })) };
+    return { ...totals, byTeam };
   }
 
   /**

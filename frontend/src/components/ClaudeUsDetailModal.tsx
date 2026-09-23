@@ -23,7 +23,7 @@ function isLabelledAfterPeriod(row: ClaudeUsIssueRow, periodEnd: string): boolea
   return !!row.labelAddedAt && new Date(row.labelAddedAt).getTime() >= new Date(`${periodEnd}T00:00:00`).getTime();
 }
 
-/** Détail d'un encart US Claude : dates de création, de résolution et d'ajout du label (issue #39). */
+/** Détail des US Claude d'une série : dates de création, de résolution et d'ajout du label (issue #39). */
 export function ClaudeUsDetailModal({
   title,
   params,
@@ -40,14 +40,14 @@ export function ClaudeUsDetailModal({
   const [jql, setJql] = useState<string | null>(null);
   const [label, setLabel] = useState('claude-us');
   const [error, setError] = useState<string | null>(null);
-  const { quarter, year, basis, kind, boardId } = params;
+  const { quarter, year, basis, boardId } = params;
 
   useEffect(() => {
     let cancelled = false;
     setRows(null);
     setError(null);
     jiraApi
-      .getClaudeUsIssues({ quarter, year, basis, kind, boardId })
+      .getClaudeUsIssues({ quarter, year, basis, boardId })
       .then((res) => {
         if (cancelled) return;
         setRows(res.issues);
@@ -60,7 +60,7 @@ export function ClaudeUsDetailModal({
     return () => {
       cancelled = true;
     };
-  }, [quarter, year, basis, kind, boardId]);
+  }, [quarter, year, basis, boardId]);
 
   const lateCount = rows ? rows.filter((r) => isLabelledAfterPeriod(r, periodEnd)).length : 0;
   const searchUrl = jql ? jiraSearchUrl(jql) : null;
@@ -152,11 +152,7 @@ export function ClaudeUsDetailModal({
                           className={`py-2 px-3 align-top tabular-nums ${late ? 'text-amber-300 font-medium' : 'text-surface-300'}`}
                           title={late ? 'Label ajouté après la fin de la période' : undefined}
                         >
-                          {row.labelAddedAt
-                            ? formatDate(row.labelAddedAt)
-                            : row.isClaude
-                              ? 'Non trouvé'
-                              : '—'}
+                          {row.labelAddedAt ? formatDate(row.labelAddedAt) : 'Non trouvé'}
                         </td>
                       </tr>
                     );

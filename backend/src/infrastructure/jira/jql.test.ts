@@ -57,13 +57,12 @@ describe('buildClaudeUsJql', () => {
   };
 
   it('restreint aux US passées à Done sur la période et ajoute le label Claude', () => {
-    const { allJql, claudeJql, nonClaudeJql } = buildClaudeUsJql(base);
+    const { allJql, claudeJql } = buildClaudeUsJql(base);
     expect(allJql).toBe(
       'project in ("ADORIA26") AND issuetype in ("US") AND statusCategory = Done ' +
         'AND statusCategoryChangedDate >= "2026/07/01" AND statusCategoryChangedDate < "2026/10/01"'
     );
     expect(claudeJql).toBe(`${allJql} AND labels = "claude-us"`);
-    expect(nonClaudeJql).toBe(`${allJql} AND (labels is EMPTY OR labels != "claude-us")`);
   });
 
   it("porte sur la date de création, sans condition de statut, pour basis = 'created'", () => {
@@ -75,9 +74,8 @@ describe('buildClaudeUsJql', () => {
   });
 
   it('utilise le filtre Jira à la place du label quand il est fourni', () => {
-    const { allJql, claudeJql, nonClaudeJql } = buildClaudeUsJql({ ...base, filterId: ' 12345 ' });
+    const { allJql, claudeJql } = buildClaudeUsJql({ ...base, filterId: ' 12345 ' });
     expect(claudeJql).toBe(`${allJql} AND filter = "12345"`);
-    expect(nonClaudeJql).toBe(`${allJql} AND filter != "12345"`);
   });
 
   it('omet la restriction projet si aucune clé', () => {

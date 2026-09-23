@@ -385,34 +385,31 @@ router.get('/claude-us-stats', async (req: Request, res: Response) => {
 });
 
 /**
- * Détail d'un encart US Claude (issue #39) : tickets avec dates de création, résolution et ajout du label
- * GET /api/jira/claude-us-issues?quarter=Q3&year=2026&basis=done|created&kind=claude|nonClaude|all&boardId=810
+ * Détail des US Claude d'une série (issue #39) : dates de création, résolution et ajout du label
+ * GET /api/jira/claude-us-issues?quarter=Q3&year=2026&basis=done|created&boardId=810
  */
 router.get('/claude-us-issues', async (req: Request, res: Response) => {
   try {
     const quarterRaw = ((req.query.quarter as string) || 'all').toUpperCase();
     const quarter = quarterRaw === 'ALL' ? 'all' : quarterRaw;
     const basis = (req.query.basis as string) || 'done';
-    const kind = (req.query.kind as string) || 'claude';
     const year = req.query.year ? parseInt(req.query.year as string, 10) : new Date().getFullYear();
     const boardId = req.query.boardId ? parseInt(req.query.boardId as string, 10) : undefined;
     if (
       (quarter !== 'all' && !['Q1', 'Q2', 'Q3', 'Q4'].includes(quarter)) ||
       !['done', 'created'].includes(basis) ||
-      !['claude', 'nonClaude', 'all'].includes(kind) ||
       !Number.isInteger(year) ||
       year < 2000 ||
       year > 2100 ||
       (boardId !== undefined && Number.isNaN(boardId))
     ) {
-      return res.status(400).json({ success: false, message: 'Invalid quarter, year, basis, kind or boardId' });
+      return res.status(400).json({ success: false, message: 'Invalid quarter, year, basis or boardId' });
     }
 
     const result = await worklogAppService.getClaudeUsIssues({
       year,
       quarter: quarter as 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'all',
       basis: basis as 'done' | 'created',
-      kind: kind as 'claude' | 'nonClaude' | 'all',
       boardId,
     });
     res.json({ success: true, ...result });
