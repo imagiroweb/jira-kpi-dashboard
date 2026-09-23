@@ -24,6 +24,7 @@ import { mondayRoutes } from './routes/mondayRoutes';
 import { meetingRoutes } from './routes/meetingRoutes';
 import { performanceRoutes } from './routes/performanceRoutes';
 import { teamRoutes } from './routes/teamRoutes';
+import { costRoutes } from './routes/costRoutes';
 import { setupSocketHandlers } from './websocket/socketHandler';
 import { swaggerSpec } from './config/swagger';
 import { schedulerService } from './services/schedulerService';
@@ -51,7 +52,8 @@ const connectMongoDB = async () => {
           pointHebdo: false,
           gestionUtilisateurs: false,
           performance: true,
-          performanceDashboard: false
+          performanceDashboard: false,
+          couts: false
         }
       },
       {
@@ -66,7 +68,8 @@ const connectMongoDB = async () => {
           pointHebdo: true,
           gestionUtilisateurs: false,
           performance: true,
-          performanceDashboard: false
+          performanceDashboard: false,
+          couts: false
         }
       },
       {
@@ -81,7 +84,8 @@ const connectMongoDB = async () => {
           pointHebdo: true,
           gestionUtilisateurs: false,
           performance: true,
-          performanceDashboard: false
+          performanceDashboard: false,
+          couts: false
         }
       },
       {
@@ -96,7 +100,8 @@ const connectMongoDB = async () => {
           pointHebdo: true,
           gestionUtilisateurs: false,
           performance: true,
-          performanceDashboard: false
+          performanceDashboard: false,
+          couts: false
         }
       },
       {
@@ -111,7 +116,8 @@ const connectMongoDB = async () => {
           pointHebdo: false,
           gestionUtilisateurs: false,
           performance: true,
-          performanceDashboard: false
+          performanceDashboard: false,
+          couts: false
         }
       }
     ];
@@ -198,6 +204,7 @@ app.use('/api/monday', mondayRoutes);
 app.use('/api/meetings', meetingRoutes);
 app.use('/api/performance', performanceRoutes);
 app.use('/api/teams', teamRoutes);
+app.use('/api/costs', costRoutes);
 
 // Setup WebSocket handlers
 setupSocketHandlers(io);

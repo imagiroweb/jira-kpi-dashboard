@@ -20,14 +20,10 @@ import {
   countLeafTicketsByStatus,
   ticketStatusPercents,
 } from '../domain/epicProgress';
+import { formatEuros, formatHoursOnly } from '../utils/timeFormat';
+import { useEpicTimeByUser } from '../hooks/useEpicTimeByUser';
+import { EpicTimeByUserPanel } from './EpicTimeByUserPanel';
 
-/** Affiche toujours en heures (et minutes si < 1h), sans jours */
-function formatHoursOnly(seconds: number): string {
-  if (!seconds || seconds <= 0) return '0h';
-  const hours = seconds / 3600;
-  if (hours < 1) return `${Math.round(hours * 60)}min`;
-  return `${hours.toFixed(1)}h`;
-}
 
 function getStatusLabel(statusCategoryKey: string | null): string {
   switch (statusCategoryKey) {
@@ -397,6 +393,9 @@ function EpicDetailModal({ epicKey, onClose }: { epicKey: string; onClose: () =>
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [storyPointsDetailOpen, setStoryPointsDetailOpen] = useState(false);
+  // Chargé en parallèle du détail : temps par personne, et coûts si l'utilisateur y a accès.
+  const timeByUser = useEpicTimeByUser(epicKey);
+  const projectCost = timeByUser.data?.totalCost;
 
   useEffect(() => {
     const loadDetails = async () => {
@@ -530,7 +529,7 @@ function EpicDetailModal({ epicKey, onClose }: { epicKey: string; onClose: () =>
               </div>
 
               {/* Ligne 2 : autres indicateurs */}
-              <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 w-full">
+              <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 w-full">
                 <div className="rounded-xl bg-surface-800/60 border border-surface-700/60 p-4">
                   <div className="text-xs text-surface-500 uppercase tracking-wide">Estimation</div>
                   <div className="text-xl font-semibold text-surface-100 mt-1">
@@ -568,7 +567,26 @@ function EpicDetailModal({ epicKey, onClose }: { epicKey: string; onClose: () =>
                     {(details.children ?? []).length}
                   </div>
                 </div>
+                {/* Visible seulement si le serveur renvoie les coûts (super admin / rôle avec accès aux coûts) */}
+                {projectCost !== undefined && (
+                  <div className="rounded-xl bg-amber-500/10 border border-amber-500/40 p-4">
+                    <div className="text-xs text-amber-200/80 uppercase tracking-wide">Coût du projet</div>
+                    <div className="text-xl font-semibold text-amber-100 mt-1 tabular-nums">{formatEuros(projectCost)}</div>
+                    {!!timeByUser.data?.peopleWithoutCost && (
+                      <div className="text-xs text-surface-500 mt-1">
+                        hors {timeByUser.data.peopleWithoutCost} personne(s) sans coût horaire
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
+
+              {/* Temps passé par personne (worklogs de tous les tickets) — issue #44 */}
+              <EpicTimeByUserPanel
+                data={timeByUser.data}
+                error={timeByUser.error}
+                ticketTimeSpentSeconds={details.timeSpentSeconds}
+              />
 
               {/* Children table */}
               <div className="rounded-xl border border-surface-700/60 overflow-hidden">

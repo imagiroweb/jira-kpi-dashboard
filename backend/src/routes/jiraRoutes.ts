@@ -2,7 +2,8 @@ import { Router, Request, Response } from 'express';
 import { worklogAppService } from '../application/services/WorklogApplicationService';
 import { logger } from '../utils/logger';
 import { DashboardSprintSnapshot } from '../domain/sprint/entities/DashboardSprintSnapshot';
-import { authenticate } from '../middleware/authMiddleware';
+import { authenticate, optionalAuth } from '../middleware/authMiddleware';
+import { userHasCostAccess } from '../application/services/appUserDirectory';
 
 const router = Router();
 
@@ -330,6 +331,26 @@ router.get('/epic/:epicKey/details', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch epic details',
+      error: error instanceof Error ? error.message : 'Unknown error'
+    });
+  }
+});
+
+/**
+ * Temps passé par personne et par rôle sur tous les tickets d'une épic / légende (issue #44).
+ * Les coûts ne sont renvoyés qu'au super admin et aux rôles ayant la page « Coûts horaires » (ex. Finance).
+ * GET /api/jira/epic/:epicKey/time-by-user
+ */
+router.get('/epic/:epicKey/time-by-user', optionalAuth, async (req: Request, res: Response) => {
+  try {
+    const withCosts = req.user ? await userHasCostAccess(req.user.userId) : false;
+    const result = await worklogAppService.getEpicTimeByUser(req.params.epicKey, { withCosts });
+    res.json({ success: true, ...result });
+  } catch (error) {
+    logger.error(`Error fetching time by user for epic ${req.params.epicKey}:`, error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch epic time by user',
       error: error instanceof Error ? error.message : 'Unknown error'
     });
   }

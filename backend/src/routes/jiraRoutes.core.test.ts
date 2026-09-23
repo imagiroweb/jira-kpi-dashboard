@@ -16,6 +16,7 @@ import {
   TEST_TIME_TRACKING_CONFIG,
 } from '../test/fixtures/jira';
 import { TEST_SPRINT_ISSUES_RESULT } from '../test/fixtures/worklogs';
+import { TEST_USER } from '../test/fixtures/users';
 import { createWorklogAppServiceMock } from '../test/mocks/worklogAppService';
 
 jest.mock('../utils/logger', () =>
@@ -26,6 +27,24 @@ const mockWorklogAppService = createWorklogAppServiceMock();
 jest.mock('../application/services/WorklogApplicationService', () => ({
   worklogAppService: mockWorklogAppService,
 }));
+
+const mockUserHasCostAccess = jest.fn();
+jest.mock('../application/services/appUserDirectory', () => ({
+  userHasCostAccess: (...args: unknown[]) => mockUserHasCostAccess(...args),
+}));
+
+// optionalAuth : un utilisateur n'est attaché que si un token est envoyé.
+jest.mock('../middleware/authMiddleware', () => {
+  const actual = jest.requireActual('../middleware/authMiddleware');
+  const { TEST_USER } = jest.requireActual('../test/fixtures/users');
+  return {
+    ...actual,
+    optionalAuth: (req: { headers: Record<string, string>; user?: unknown }, _res: unknown, next: () => void) => {
+      if (req.headers.authorization) req.user = TEST_USER;
+      next();
+    },
+  };
+});
 
 import { jiraRoutes } from './jiraRoutes';
 
@@ -416,6 +435,50 @@ describe('jiraRoutes — core (TI)', () => {
 
       expect(res.status).toBe(500);
       expect(res.body.success).toBe(false);
+    });
+  });
+
+  describe('GET /api/jira/epic/:epicKey/time-by-user', () => {
+    const RESULT = { epicKey: 'PROJ-100', issueCount: 3, totalSeconds: 7200, people: [], byRole: [] };
+
+    it('ne demande pas les coûts sans utilisateur authentifié', async () => {
+      mockWorklogAppService.getEpicTimeByUser.mockResolvedValue(RESULT);
+
+      const res = await request(app).get('/api/jira/epic/PROJ-100/time-by-user');
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(mockUserHasCostAccess).not.toHaveBeenCalled();
+      expect(mockWorklogAppService.getEpicTimeByUser).toHaveBeenCalledWith('PROJ-100', { withCosts: false });
+    });
+
+    it("demande les coûts si l'utilisateur y a accès (super admin / rôle finance)", async () => {
+      mockUserHasCostAccess.mockResolvedValue(true);
+      mockWorklogAppService.getEpicTimeByUser.mockResolvedValue({ ...RESULT, totalCost: 525 });
+
+      const res = await request(app).get('/api/jira/epic/PROJ-100/time-by-user').set('Authorization', 'Bearer t');
+
+      expect(res.body.totalCost).toBe(525);
+      expect(mockUserHasCostAccess).toHaveBeenCalledWith(TEST_USER.userId);
+      expect(mockWorklogAppService.getEpicTimeByUser).toHaveBeenCalledWith('PROJ-100', { withCosts: true });
+    });
+
+    it("ne demande pas les coûts si le rôle de l'utilisateur n'y a pas accès", async () => {
+      mockUserHasCostAccess.mockResolvedValue(false);
+      mockWorklogAppService.getEpicTimeByUser.mockResolvedValue(RESULT);
+
+      await request(app).get('/api/jira/epic/PROJ-100/time-by-user').set('Authorization', 'Bearer t');
+
+      expect(mockWorklogAppService.getEpicTimeByUser).toHaveBeenCalledWith('PROJ-100', { withCosts: false });
+    });
+
+    it('retourne 500 si le service échoue', async () => {
+      mockWorklogAppService.getEpicTimeByUser.mockRejectedValue(new Error('Epic PROJ-404 not found'));
+
+      const res = await request(app).get('/api/jira/epic/PROJ-404/time-by-user');
+
+      expect(res.status).toBe(500);
+      expect(res.body.error).toBe('Epic PROJ-404 not found');
     });
   });
 

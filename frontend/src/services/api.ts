@@ -25,6 +25,7 @@ import {
   type RoleProfile
 } from '../domain/performance';
 import type { Team, CreateTeamInput, UpdateTeamInput, RosterUser } from '../domain/team';
+import type { HourlyRate } from '../domain/hourlyRates';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -268,8 +269,53 @@ export const epicApi = {
   getDetails: async (epicKey: string): Promise<{ success: boolean } & EpicDetailsResponse> => {
     const { data } = await api.get(`/jira/epic/${epicKey}/details`);
     return data;
+  },
+
+  getTimeByUser: async (epicKey: string): Promise<{ success: boolean } & EpicTimeByUserResponse> => {
+    const { data } = await api.get(`/jira/epic/${epicKey}/time-by-user`);
+    return data;
   }
 };
+
+/** Temps passé par une personne sur l'ensemble des tickets d'une épic (issue #44). */
+export interface EpicTimeByUserRow {
+  accountId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  /** Poste = nom du rôle de l'utilisateur de l'app (null si non retrouvé). */
+  role: string | null;
+  timeSpentSeconds: number;
+  percent: number;
+  worklogCount: number;
+  issueCount: number;
+  firstWorklogAt: string | null;
+  lastWorklogAt: string | null;
+  /** Présents seulement pour le super admin et les rôles avec accès aux coûts. */
+  hourlyRates?: HourlyRate[];
+  cost?: number | null;
+}
+
+/** Temps passé par rôle (poste) sur une épic ; role null = poste non renseigné. */
+export interface EpicTimeByRoleRow {
+  role: string | null;
+  timeSpentSeconds: number;
+  percent: number;
+  peopleCount: number;
+  /** Présents seulement avec l'accès aux coûts. */
+  cost?: number | null;
+  peopleWithoutCost?: number;
+}
+
+export interface EpicTimeByUserResponse {
+  epicKey: string;
+  issueCount: number;
+  totalSeconds: number;
+  people: EpicTimeByUserRow[];
+  byRole: EpicTimeByRoleRow[];
+  /** Présents seulement avec l'accès aux coûts. */
+  totalCost?: number;
+  peopleWithoutCost?: number;
+}
 
 // Sync API
 export const syncApi = {
@@ -942,3 +988,47 @@ export const teamApi = {
 };
 
 export default api;
+
+/** Utilisateur de la page « Coûts horaires » (issue #44). */
+export interface CostUser {
+  id: string;
+  email: string;
+  firstName?: string;
+  lastName?: string;
+  provider: string;
+  isActive: boolean;
+  roleName: string | null;
+  /** Coût initial puis changements datés (vide si aucun coût). */
+  hourlyRates: HourlyRate[];
+  /** Compte non SSO ajouté manuellement par un super admin. */
+  manual: boolean;
+}
+
+// Coûts horaires : comptes SSO + comptes non SSO ajoutés par un super admin (issue #44)
+export const costsApi = {
+  /** Liste des coûts ; `canManage` = l'appelant (super admin) peut ajouter / retirer des comptes non SSO. */
+  getUsers: async (): Promise<{ success: boolean; users: CostUser[]; canManage: boolean }> => {
+    const { data } = await api.get('/costs/users');
+    return data;
+  },
+  /** Remplace les coûts horaires (€) : coût initial puis jusqu'à deux changements datés ; [] pour effacer. */
+  updateHourlyRates: async (userId: string, hourlyRates: HourlyRate[]): Promise<{ success: boolean; hourlyRates: HourlyRate[] }> => {
+    const { data } = await api.patch(`/costs/users/${userId}`, { hourlyRates });
+    return data;
+  },
+  /** Comptes non SSO pas encore dans la liste (super admin). */
+  getCandidates: async (): Promise<{ success: boolean; users: CostUser[] }> => {
+    const { data } = await api.get('/costs/candidates');
+    return data;
+  },
+  /** Ajoute un compte non SSO à la liste (super admin). */
+  addUser: async (userId: string): Promise<{ success: boolean }> => {
+    const { data } = await api.post(`/costs/users/${userId}`);
+    return data;
+  },
+  /** Retire un compte non SSO ajouté ; son coût horaire est effacé (super admin). */
+  removeUser: async (userId: string): Promise<{ success: boolean }> => {
+    const { data } = await api.delete(`/costs/users/${userId}`);
+    return data;
+  },
+};

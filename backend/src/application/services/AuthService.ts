@@ -525,7 +525,8 @@ export class AuthService {
       pointHebdo: true,
       gestionUtilisateurs: false,
       performance: true,
-      performanceDashboard: false
+      performanceDashboard: false,
+      couts: false
     };
   }
 

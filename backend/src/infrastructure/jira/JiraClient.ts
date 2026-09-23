@@ -596,6 +596,8 @@ export interface JiraWorklog {
   author: {
     accountId: string;
     displayName: string;
+    /** Absent si le profil Atlassian masque l'email. */
+    emailAddress?: string;
     avatarUrls?: Record<string, string>;
   };
   timeSpentSeconds: number;

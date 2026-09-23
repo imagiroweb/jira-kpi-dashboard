@@ -20,6 +20,7 @@ import { useStore, type PageId } from './store/useStore';
 import { authApi } from './services/authApi';
 import { Loader2 } from 'lucide-react';
 import { SocketProvider } from './contexts/SocketContext';
+import { CostsPage } from './components/CostsPage';
 
 function App() {
   const currentPage = useStore((state) => state.currentPage);
@@ -127,6 +128,8 @@ function AuthenticatedApp({
         return <MyPerformancePage />;
       case 'performanceDashboard':
         return <TeamPerformancePage />;
+      case 'couts':
+        return <CostsPage />;
       default:
         return <SprintDashboard />;
     }

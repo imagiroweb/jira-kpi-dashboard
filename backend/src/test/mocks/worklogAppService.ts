@@ -16,6 +16,7 @@ export function createWorklogAppServiceMock() {
     getEpicProgressByBoard: jest.fn(),
     searchEpicsByTitle: jest.fn(),
     getEpicDetails: jest.fn(),
+    getEpicTimeByUser: jest.fn(),
     getTimeTrackingConfig: jest.fn(),
     getClaudeUsStats: jest.fn(),
     getClaudeUsIssues: jest.fn(),

@@ -22,8 +22,15 @@ const PAGE_LABELS: Record<keyof VisiblePages, string> = {
   pointHebdo: 'Point hebdo',
   gestionUtilisateurs: 'Gestion des utilisateurs',
   performance: 'Ma performance',
-  performanceDashboard: 'Performance équipe'
+  performanceDashboard: 'Performance équipe',
+  couts: 'Coûts horaires'
 };
+
+/** Complète les pages absentes d'un rôle ancien (ex. `couts`, ajoutée après sa création) : non visibles. */
+function withAllPages(pageVisibilities: Partial<VisiblePages>): VisiblePages {
+  const all = Object.fromEntries(Object.keys(PAGE_LABELS).map((id) => [id, false])) as unknown as VisiblePages;
+  return { ...all, ...pageVisibilities };
+}
 
 export function UserManagementPage() {
   const user = useStore((state) => state.user);
@@ -171,7 +178,8 @@ export function UserManagementPage() {
         pointHebdo: true,
         gestionUtilisateurs: false,
         performance: true,
-        performanceDashboard: false
+        performanceDashboard: false,
+        couts: false
       };
       const created = await authApi.createRole(newRoleName.trim(), defaultPages);
       setRoles((prev) => [...prev, created]);
@@ -309,7 +317,7 @@ export function UserManagementPage() {
                     <div>
                       <span className="font-medium text-surface-200">{role.name}</span>
                       <div className="flex flex-wrap gap-2 mt-1">
-                        {(Object.keys(role.pageVisibilities) as (keyof VisiblePages)[]).map((pageId) => (
+                        {(Object.keys(withAllPages(role.pageVisibilities)) as (keyof VisiblePages)[]).map((pageId) => (
                           <span
                             key={pageId}
                             className={`text-xs px-2 py-0.5 rounded ${
@@ -678,7 +686,7 @@ function RoleEditor({
   onCancel: () => void;
 }) {
   const [name, setName] = useState(role.name);
-  const [pages, setPages] = useState<VisiblePages>({ ...role.pageVisibilities });
+  const [pages, setPages] = useState<VisiblePages>(withAllPages(role.pageVisibilities));
 
   return (
     <div className="space-y-4">

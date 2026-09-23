@@ -252,6 +252,29 @@ describe('UserManagementPage', () => {
     });
   });
 
+  it('propose la page Coûts horaires sur un rôle créé avant son ajout (non visible par défaut)', async () => {
+    const pagesWithoutCouts: Partial<typeof TEST_VISIBLE_PAGES_ALL> = { ...TEST_VISIBLE_PAGES_ALL };
+    delete pagesWithoutCouts.couts;
+    mockGetUsersAndRoles.mockResolvedValue({
+      users: [],
+      roles: [{ id: 'role-1', name: 'Finance', pageVisibilities: pagesWithoutCouts as typeof TEST_VISIBLE_PAGES_ALL }],
+    });
+    renderWithProviders(<UserManagementPage />, { user: SUPER_ADMIN });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Modifier/i }));
+    const checkbox = screen.getByRole('checkbox', { name: 'Coûts horaires' });
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole('button', { name: /Enregistrer/i }));
+
+    await waitFor(() => {
+      expect(mockUpdateRole).toHaveBeenCalledWith('role-1', {
+        name: 'Finance',
+        pageVisibilities: { ...TEST_VISIBLE_PAGES_ALL, couts: true },
+      });
+    });
+  });
+
   it('crée un nouveau rôle', async () => {
     renderWithProviders(<UserManagementPage />, { user: SUPER_ADMIN });
 

@@ -13,10 +13,10 @@ function getDefaultDateRange() {
 }
 
 // Page ids for permissions (must match backend PAGE_IDS)
-export type PageId = 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'pointHebdo' | 'gestionUtilisateurs' | 'performance' | 'performanceDashboard';
+export type PageId = 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'pointHebdo' | 'gestionUtilisateurs' | 'performance' | 'performanceDashboard' | 'couts';
 
 /** Order used for "first visible page" (dashboard first if visible, else first in list) */
-const PAGE_ORDER: PageId[] = ['dashboard', 'users', 'support', 'epics', 'marketing', 'produit', 'pointHebdo', 'gestionUtilisateurs', 'performance', 'performanceDashboard'];
+const PAGE_ORDER: PageId[] = ['dashboard', 'users', 'support', 'epics', 'marketing', 'produit', 'pointHebdo', 'gestionUtilisateurs', 'performance', 'performanceDashboard', 'couts'];
 
 export interface VisiblePages {
   dashboard: boolean;
@@ -29,6 +29,8 @@ export interface VisiblePages {
   gestionUtilisateurs: boolean;
   performance: boolean;
   performanceDashboard: boolean;
+  /** Page « Coûts horaires » ; donne aussi l'affichage des coûts dans le Suivi épic. */
+  couts: boolean;
 }
 
 /** First page the user is allowed to see; default 'dashboard' if none or no visiblePages */

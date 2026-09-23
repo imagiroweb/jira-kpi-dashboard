@@ -27,6 +27,7 @@ jest.mock('../middleware/authMiddleware', () => {
       }
       return auth.mockAuthenticate()(req, res, next);
     },
+    optionalAuth: auth.bypassAuth,
     requireSuperAdmin: auth.mockRequireSuperAdmin,
   };
 });
