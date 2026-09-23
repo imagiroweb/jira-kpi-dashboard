@@ -10,6 +10,15 @@ import { logger } from '../../utils/logger';
 import { getWorklogCalendarDate } from '../../utils/worklogDate';
 import { stripOrderBy, quarterDateRange, buildClaudeUsJql, combineBoardFiltersJql, ClaudeUsBasis, QuarterKey } from '../../infrastructure/jira/jql';
 import {
+  aggregateWorklogsByAuthor,
+  AuthorTime,
+  buildEpicTimeByUser,
+  collectIssueKeys,
+  EpicTimeByRoleRow,
+  EpicTimeByUserRow,
+} from '../../domain/kpi/epicTimeByUser';
+import { loadAppUsersForMatching } from './appUserDirectory';
+import {
   aggregateClaudeUsByBoard,
   claudeUsCounts,
   ClaudeUsCounts,
@@ -2362,6 +2371,36 @@ export class WorklogApplicationService {
   /**
    * Get Epic/Legend details with hierarchical children
    */
+  /**
+   * Temps passé par personne et par rôle sur l'ensemble des tickets d'une épic (ou légende : épics,
+   * US et sous-tâches), d'après les worklogs Jira, sans filtre de date. Poste = rôle de l'utilisateur
+   * de l'app retrouvé par email ou par nom ; coûts (coût horaire × temps) seulement si `withCosts`
+   * (issue #44).
+   */
+  async getEpicTimeByUser(epicKey: string, { withCosts }: { withCosts: boolean }): Promise<EpicTimeByUserResult> {
+    // Seule la lecture des worklogs est mise en cache : postes et coûts horaires sont relus à chaque appel.
+    const cacheKey = `epic-time-by-user:${epicKey}`;
+    let aggregate = globalCache.get<EpicWorklogAggregate>(cacheKey);
+    if (!aggregate) {
+      const details = await this.getEpicDetails(epicKey);
+      const issueKeys = collectIssueKeys(details.epicKey, details.children);
+      const worklogsByIssue = await container().jiraClient.getIssueWorklogsForMany(issueKeys);
+      aggregate = { epicKey: details.epicKey, issueCount: issueKeys.length, ...aggregateWorklogsByAuthor(worklogsByIssue) };
+      globalCache.set(cacheKey, aggregate, cacheTtlMinutes('EPIC_TIME_BY_USER_CACHE_TTL_MINUTES', 15));
+    }
+
+    const users = await loadAppUsersForMatching().catch((err) => {
+      logger.warn(`getEpicTimeByUser: utilisateurs de l'app indisponibles, postes et coûts non renseignés: ${err}`);
+      return [];
+    });
+    return {
+      epicKey: aggregate.epicKey,
+      issueCount: aggregate.issueCount,
+      totalSeconds: aggregate.totalSeconds,
+      ...buildEpicTimeByUser(aggregate, users, { withCosts }),
+    };
+  }
+
   async getEpicDetails(epicKey: string): Promise<EpicDetailsResult> {
     const jiraClient = container().jiraClient;
     
@@ -2993,6 +3032,27 @@ export interface EpicChildIssue {
   parentKey: string | null;
   hierarchyLevel: number;
   children?: EpicChildIssue[];
+}
+
+/** Worklogs d'une épic agrégés par auteur Jira (mis en cache). */
+interface EpicWorklogAggregate {
+  epicKey: string;
+  issueCount: number;
+  totalSeconds: number;
+  authors: AuthorTime[];
+}
+
+/** Temps passé (et coût, si autorisé) par personne et par rôle sur une épic (issue #44). */
+export interface EpicTimeByUserResult {
+  epicKey: string;
+  /** Nombre de tickets dont les worklogs ont été lus (épic incluse). */
+  issueCount: number;
+  totalSeconds: number;
+  people: EpicTimeByUserRow[];
+  byRole: EpicTimeByRoleRow[];
+  /** Présents seulement avec l'accès aux coûts. */
+  totalCost?: number;
+  peopleWithoutCost?: number;
 }
 
 export interface EpicDetailsResult {

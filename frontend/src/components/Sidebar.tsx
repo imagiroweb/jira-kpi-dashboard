@@ -1,11 +1,12 @@
-import { LayoutDashboard, Users, Headphones, ChevronLeft, ChevronRight, LogOut, User, Wifi, WifiOff, RefreshCw, Flag, Megaphone, Package, ShieldCheck, CalendarClock, Target, Users2 } from 'lucide-react';
-import { useState } from 'react';
+import { LayoutDashboard, Users, Headphones, ChevronLeft, ChevronRight, ChevronDown, LogOut, User, Wifi, WifiOff, RefreshCw, Flag, Megaphone, Package, ShieldCheck, CalendarClock, Target, Users2, Euro, TrendingUp, Settings } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { groupOfPage, resolveNav, type NavEntry } from '../domain/sidebarNav';
 import { useStore } from '../store/useStore';
 import { useSocketOptional } from '../hooks/useSocketContext';
 import { syncApi } from '../services/api';
 
 // PageType is defined in the store, we just use the same type here
-export type PageType = 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'pointHebdo' | 'gestionUtilisateurs' | 'performance' | 'performanceDashboard';
+export type PageType = 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'pointHebdo' | 'gestionUtilisateurs' | 'performance' | 'performanceDashboard' | 'couts';
 
 interface SidebarProps {
   currentPage: PageType;
@@ -19,7 +20,7 @@ interface NavItem {
   description: string;
 }
 
-const navItems: NavItem[] = [
+const pageItems: NavItem[] = [
   {
     id: 'dashboard',
     label: 'Dashboard',
@@ -79,7 +80,47 @@ const navItems: NavItem[] = [
     label: 'Performance équipe',
     icon: <Users2 className="w-5 h-5" />,
     description: 'Suivi lead/CTO par équipe'
+  },
+  {
+    id: 'couts',
+    label: 'Coûts horaires',
+    icon: <Euro className="w-5 h-5" />,
+    description: 'Coût horaire des utilisateurs'
   }
+];
+
+const PAGE_ITEMS = new Map(pageItems.map((item) => [item.id, item]));
+
+interface NavGroup {
+  label: string;
+  icon: React.ReactNode;
+  description: string;
+}
+
+const NAV_GROUPS: Record<string, NavGroup> = {
+  suiviPerformance: {
+    label: 'Suivi performance',
+    icon: <TrendingUp className="w-5 h-5" />,
+    description: 'Objectifs OKR, suivi par équipe'
+  },
+  parametres: {
+    label: 'Paramètres',
+    icon: <Settings className="w-5 h-5" />,
+    description: 'Utilisateurs, droits et coûts'
+  }
+};
+
+/** Menu : pages seules et groupes (un groupe à une seule page visible s'affiche comme cette page). */
+const NAV: NavEntry<PageType>[] = [
+  { kind: 'page', id: 'dashboard' },
+  { kind: 'page', id: 'support' },
+  { kind: 'page', id: 'users' },
+  { kind: 'page', id: 'epics' },
+  { kind: 'page', id: 'marketing' },
+  { kind: 'page', id: 'produit' },
+  { kind: 'page', id: 'pointHebdo' },
+  { kind: 'group', id: 'suiviPerformance', pages: ['performance', 'performanceDashboard'] },
+  { kind: 'group', id: 'parametres', pages: ['gestionUtilisateurs', 'couts'] }
 ];
 
 export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
@@ -91,10 +132,61 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
 
   const visiblePages = user?.visiblePages;
   const canSee = (pageId: PageType) => {
-    if (!visiblePages) return pageId !== 'gestionUtilisateurs' && pageId !== 'performanceDashboard';
+    if (!visiblePages) return pageId !== 'gestionUtilisateurs' && pageId !== 'performanceDashboard' && pageId !== 'couts';
     return visiblePages[pageId] === true;
   };
-  const filteredNavItems = navItems.filter((item) => canSee(item.id));
+  const nav = resolveNav(NAV, canSee);
+
+  // Groupes ouverts : celui de la page courante est ouvert d'office.
+  const [openGroups, setOpenGroups] = useState<Set<string>>(() => {
+    const current = groupOfPage(NAV, currentPage);
+    return new Set(current ? [current] : []);
+  });
+  useEffect(() => {
+    const current = groupOfPage(NAV, currentPage);
+    if (current) setOpenGroups((prev) => (prev.has(current) ? prev : new Set(prev).add(current)));
+  }, [currentPage]);
+  const toggleGroup = (id: string) =>
+    setOpenGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const renderPageLink = (id: PageType, nested = false) => {
+    const item = PAGE_ITEMS.get(id);
+    if (!item) return null;
+    const isActive = currentPage === item.id;
+    return (
+      <button
+        key={item.id}
+        onClick={() => onNavigate(item.id)}
+        className={`w-full flex items-center gap-3 px-3 ${nested ? 'py-2' : 'py-3'} rounded-xl transition-all duration-200 group ${
+          isActive
+            ? 'bg-primary-500/20 text-primary-300 shadow-lg shadow-primary-500/10'
+            : 'text-surface-400 hover:bg-surface-800 hover:text-surface-200'
+        }`}
+        title={isCollapsed ? item.label : undefined}
+        aria-current={isActive ? 'page' : undefined}
+      >
+        <div className={`flex-shrink-0 ${isActive ? 'text-primary-400' : 'text-surface-500 group-hover:text-surface-300'}`}>
+          {item.icon}
+        </div>
+        {!isCollapsed && (
+          <div className="flex-1 min-w-0 text-left">
+            <div className="font-medium text-sm truncate">{item.label}</div>
+            <div className={`text-xs truncate ${isActive ? 'text-primary-400/70' : 'text-surface-600'}`}>
+              {item.description}
+            </div>
+          </div>
+        )}
+        {isActive && !isCollapsed && (
+          <div className="w-1.5 h-8 bg-primary-500 rounded-full" />
+        )}
+      </button>
+    );
+  };
 
   const handleLogout = () => {
     if (window.confirm('Êtes-vous sûr de vouloir vous déconnecter ?')) {
@@ -127,12 +219,12 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
 
   return (
     <aside 
-      className={`fixed left-0 top-0 h-full bg-surface-900/95 backdrop-blur-xl border-r border-surface-700/50 z-50 transition-all duration-300 ${
+      className={`fixed left-0 top-0 h-full flex flex-col bg-surface-900/95 backdrop-blur-xl border-r border-surface-700/50 z-50 transition-all duration-300 ${
         isCollapsed ? 'w-16' : 'w-64'
       }`}
     >
       {/* Header */}
-      <div className="h-16 flex items-center justify-between px-4 border-b border-surface-700/50">
+      <div className="h-16 shrink-0 flex items-center justify-between px-4 border-b border-surface-700/50">
         {!isCollapsed && (
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-primary-500 to-accent-500 flex items-center justify-center">
@@ -150,42 +242,54 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
         </button>
       </div>
 
-      {/* Navigation */}
-      <nav className="p-3 space-y-1">
-        {filteredNavItems.map((item) => {
-          const isActive = currentPage === item.id;
-          return (
-            <button
-              key={item.id}
-              onClick={() => onNavigate(item.id)}
-              className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 group ${
-                isActive
-                  ? 'bg-primary-500/20 text-primary-300 shadow-lg shadow-primary-500/10'
-                  : 'text-surface-400 hover:bg-surface-800 hover:text-surface-200'
-              }`}
-              title={isCollapsed ? item.label : undefined}
-            >
-              <div className={`flex-shrink-0 ${isActive ? 'text-primary-400' : 'text-surface-500 group-hover:text-surface-300'}`}>
-                {item.icon}
+      {/* Navigation : seule zone qui défile quand la hauteur manque (en-tête et pied restent fixes) */}
+      <nav className="flex-1 min-h-0 overflow-y-auto overscroll-contain p-3 space-y-1" aria-label="Navigation principale">
+        {nav.map((entry) => {
+          if (entry.kind === 'page') return renderPageLink(entry.id);
+          // Barre réduite : pas de libellés, les pages du groupe s'affichent directement (icônes).
+          if (isCollapsed) {
+            return (
+              <div key={entry.id} className="space-y-1 border-t border-surface-700/50 pt-1">
+                {entry.pages.map((id) => renderPageLink(id))}
               </div>
-              {!isCollapsed && (
-                <div className="flex-1 text-left">
-                  <div className="font-medium text-sm">{item.label}</div>
-                  <div className={`text-xs ${isActive ? 'text-primary-400/70' : 'text-surface-600'}`}>
-                    {item.description}
-                  </div>
+            );
+          }
+          const group = NAV_GROUPS[entry.id];
+          const isOpen = openGroups.has(entry.id);
+          const containsActive = entry.pages.includes(currentPage);
+          return (
+            <div key={entry.id}>
+              <button
+                onClick={() => toggleGroup(entry.id)}
+                aria-expanded={isOpen}
+                aria-controls={`nav-group-${entry.id}`}
+                className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl transition-all duration-200 group ${
+                  containsActive && !isOpen
+                    ? 'bg-primary-500/10 text-primary-300'
+                    : 'text-surface-400 hover:bg-surface-800 hover:text-surface-200'
+                }`}
+              >
+                <div className={`flex-shrink-0 ${containsActive ? 'text-primary-400' : 'text-surface-500 group-hover:text-surface-300'}`}>
+                  {group.icon}
+                </div>
+                <div className="flex-1 min-w-0 text-left">
+                  <div className="font-medium text-sm truncate">{group.label}</div>
+                  <div className="text-xs text-surface-600 truncate">{group.description}</div>
+                </div>
+                <ChevronDown className={`w-4 h-4 shrink-0 transition-transform ${isOpen ? '' : '-rotate-90'}`} aria-hidden />
+              </button>
+              {isOpen && (
+                <div id={`nav-group-${entry.id}`} role="group" aria-label={group.label} className="ml-4 pl-2 border-l border-surface-700/60 space-y-1 mt-1">
+                  {entry.pages.map((id) => renderPageLink(id, true))}
                 </div>
               )}
-              {isActive && !isCollapsed && (
-                <div className="w-1.5 h-8 bg-primary-500 rounded-full" />
-              )}
-            </button>
+            </div>
           );
         })}
       </nav>
 
       {/* User Section & Footer */}
-      <div className={`absolute bottom-4 ${isCollapsed ? 'left-2 right-2' : 'left-4 right-4'}`}>
+      <div className={`shrink-0 border-t border-surface-700/50 ${isCollapsed ? 'p-2' : 'p-4'}`}>
         {/* Sync Button */}
         <button
           onClick={handleSync}

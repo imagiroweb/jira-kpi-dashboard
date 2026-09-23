@@ -16,6 +16,7 @@ vi.mock('../services/api', () => ({
     getProgress: vi.fn(),
     search: vi.fn(),
     getDetails: vi.fn(),
+    getTimeByUser: vi.fn(() => new Promise(() => {})),
   },
 }));
 
@@ -25,6 +26,7 @@ const mockGetConfiguredBoards = vi.mocked(jiraApi.getConfiguredBoards);
 const mockGetProgress = vi.mocked(epicApi.getProgress);
 const mockSearch = vi.mocked(epicApi.search);
 const mockGetDetails = vi.mocked(epicApi.getDetails);
+const mockGetTimeByUser = vi.mocked(epicApi.getTimeByUser);
 
 const BOARD_ID = 12;
 const EPICS_PAGE_SIZE = 20;
@@ -297,6 +299,45 @@ describe('EpicProgressPage', () => {
 
     await waitFor(() => {
       expect(screen.getByText('Erreur lors du chargement des détails')).toBeInTheDocument();
+    });
+  });
+
+  describe('tuile « Coût du projet »', () => {
+    const TIME_BY_USER = { success: true, epicKey: 'EPIC-C', issueCount: 3, totalSeconds: 3600, people: [], byRole: [] };
+
+    const openEpic = async () => {
+      mockGetProgress.mockResolvedValue(
+        makeProgressResponse({ epics: [makeEpic({ epicKey: 'EPIC-C', summary: 'Epic coût', progressPercent: 10 })], total: 1 })
+      );
+      mockGetDetails.mockResolvedValue({ success: true, ...TEST_EPIC_DETAILS_RESPONSE, epicKey: 'EPIC-C' });
+
+      render(<EpicProgressPage />);
+      fireEvent.click(
+        await screen.findByRole('button', { name: (n) => typeof n === 'string' && n.includes('EPIC-C') })
+      );
+      await screen.findByText('Tickets enfants');
+    };
+
+    it("affiche le coût total quand l'utilisateur a accès aux coûts", async () => {
+      mockGetTimeByUser.mockResolvedValueOnce({ ...TIME_BY_USER, totalCost: 1525.4, peopleWithoutCost: 2 });
+
+      await openEpic();
+
+      const label = await screen.findByText('Coût du projet');
+      const tile = label.parentElement as HTMLElement;
+      expect(tile.textContent?.replace(/\s/g, ' ')).toContain('1 525 €');
+      expect(tile).toHaveTextContent('hors 2 personne(s) sans coût horaire');
+      expect(mockGetTimeByUser).toHaveBeenCalledWith('EPIC-C');
+    });
+
+    it("masque la tuile quand le serveur ne renvoie pas de coût", async () => {
+      mockGetTimeByUser.mockResolvedValueOnce(TIME_BY_USER);
+
+      await openEpic();
+
+      // Données chargées (aucun worklog) : la tuile reste absente.
+      await screen.findByText('Aucun temps saisi sur cette épic.');
+      expect(screen.queryByText('Coût du projet')).not.toBeInTheDocument();
     });
   });
 });

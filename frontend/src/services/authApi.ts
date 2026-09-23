@@ -36,6 +36,8 @@ export interface VisiblePages {
   gestionUtilisateurs: boolean;
   performance: boolean;
   performanceDashboard: boolean;
+  /** Page « Coûts horaires » ; donne aussi l'affichage des coûts dans le Suivi épic. */
+  couts: boolean;
 }
 
 /** Filtres par défaut Roadmap Adoria 2026 (préférences utilisateur) */

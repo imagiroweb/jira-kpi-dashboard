@@ -32,6 +32,12 @@ export interface IUser extends Document {
    * équipe (jamais d'en faire sortir un lead, ni de toucher aux autres équipes). Sans effet si
    * l'utilisateur n'est lead d'aucune équipe. */
   canManageTeamAssignment?: boolean;
+  /** Coûts horaires (€) par période, saisis dans la page « Coûts horaires » : coût initial (sans date)
+   * puis jusqu'à deux changements datés — voir domain/user/hourlyRates. Valorisent le temps passé sur
+   * les épics. Donnée réservée : visible seulement du super admin et des rôles ayant la page `couts`. */
+  hourlyRates?: Array<{ startDate: string | null; rate: number }>;
+  /** Compte non SSO ajouté manuellement par un super admin à la page « Coûts horaires ». */
+  includedInCosts?: boolean;
   lastLogin?: Date;
   /** Préférences UI personnelles (filtres par défaut, etc.) */
   preferences?: IUserPreferences;
@@ -115,6 +121,22 @@ const UserSchema = new Schema<IUser>(
       default: null
     },
     canManageTeamAssignment: {
+      type: Boolean,
+      default: false
+    },
+    hourlyRates: {
+      type: [
+        new Schema(
+          {
+            startDate: { type: String, default: null },
+            rate: { type: Number, required: true, min: 0 }
+          },
+          { _id: false }
+        )
+      ],
+      default: undefined
+    },
+    includedInCosts: {
       type: Boolean,
       default: false
     },

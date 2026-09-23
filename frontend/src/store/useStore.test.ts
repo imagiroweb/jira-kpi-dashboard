@@ -21,6 +21,7 @@ describe('getFirstVisiblePage', () => {
       gestionUtilisateurs: false,
       performance: false,
       performanceDashboard: false,
+      couts: false,
     };
     expect(getFirstVisiblePage(visible)).toBe('dashboard');
   });
@@ -37,6 +38,7 @@ describe('getFirstVisiblePage', () => {
       gestionUtilisateurs: false,
       performance: false,
       performanceDashboard: false,
+      couts: false,
     };
     expect(getFirstVisiblePage(visible)).toBe('users');
   });
@@ -53,6 +55,7 @@ describe('getFirstVisiblePage', () => {
       gestionUtilisateurs: false,
       performance: false,
       performanceDashboard: false,
+      couts: false,
     };
     expect(getFirstVisiblePage(visible)).toBeNull();
   });
@@ -69,6 +72,7 @@ describe('getFirstVisiblePage', () => {
       gestionUtilisateurs: false,
       performance: false,
       performanceDashboard: false,
+      couts: false,
     };
     expect(getFirstVisiblePage(visible)).toBe('support');
   });
@@ -191,6 +195,7 @@ describe('useStore (auth)', () => {
         gestionUtilisateurs: false,
         performance: false,
         performanceDashboard: false,
+        couts: false,
       },
     });
     useStore.getState().setCurrentPage('support');
@@ -208,6 +213,7 @@ describe('useStore (auth)', () => {
         gestionUtilisateurs: false,
         performance: false,
         performanceDashboard: false,
+        couts: false,
       },
     });
 

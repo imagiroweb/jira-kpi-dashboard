@@ -10,7 +10,8 @@ export const PAGE_IDS = [
   'pointHebdo',
   'gestionUtilisateurs',
   'performance',
-  'performanceDashboard'
+  'performanceDashboard',
+  'couts'
 ] as const;
 
 export type PageId = (typeof PAGE_IDS)[number];
@@ -28,6 +29,8 @@ export interface IPageVisibilities {
   performance: boolean;
   /** "Performance équipe" — vue lead/CTO, voir aussi `performanceGlobalAccess` pour la portée. */
   performanceDashboard: boolean;
+  /** Page « Coûts horaires » : saisie des coûts horaires, et affichage des coûts dans le Suivi épic (ex. Finance). */
+  couts: boolean;
 }
 
 export interface IRole extends Document {
@@ -54,7 +57,8 @@ const defaultPageVisibilities: IPageVisibilities = {
   pointHebdo: true,
   gestionUtilisateurs: false,
   performance: true,
-  performanceDashboard: false
+  performanceDashboard: false,
+  couts: false
 };
 
 const PageVisibilitiesSchema = new Schema<IPageVisibilities>(
@@ -68,7 +72,8 @@ const PageVisibilitiesSchema = new Schema<IPageVisibilities>(
     pointHebdo: { type: Boolean, default: true },
     gestionUtilisateurs: { type: Boolean, default: false },
     performance: { type: Boolean, default: true },
-    performanceDashboard: { type: Boolean, default: false }
+    performanceDashboard: { type: Boolean, default: false },
+    couts: { type: Boolean, default: false }
   },
   { _id: false }
 );

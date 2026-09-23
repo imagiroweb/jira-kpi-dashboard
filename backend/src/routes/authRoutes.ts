@@ -1072,7 +1072,8 @@ router.post(
           pointHebdo: true,
           gestionUtilisateurs: false,
           performance: true,
-          performanceDashboard: false
+          performanceDashboard: false,
+          couts: false
         }
       });
       res.status(201).json({

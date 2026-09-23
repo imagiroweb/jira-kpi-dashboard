@@ -14,6 +14,7 @@ export const TEST_VISIBLE_PAGES_ALL: VisiblePages = {
   gestionUtilisateurs: true,
   performance: true,
   performanceDashboard: true,
+  couts: true,
 };
 
 export const TEST_VISIBLE_PAGES_DASHBOARD_ONLY: VisiblePages = {
@@ -27,6 +28,7 @@ export const TEST_VISIBLE_PAGES_DASHBOARD_ONLY: VisiblePages = {
   gestionUtilisateurs: false,
   performance: false,
   performanceDashboard: false,
+  couts: false,
 };
 
 /** Utilisateur connecté par défaut (toutes les pages visibles) */
