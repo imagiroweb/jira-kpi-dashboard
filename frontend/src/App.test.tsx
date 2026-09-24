@@ -65,7 +65,6 @@ import App from './App';
 const mockVerifyToken = vi.mocked(authApi.verifyToken);
 const mockGetCurrentUser = vi.mocked(authApi.getCurrentUser);
 const mockGetMicrosoftConfig = vi.mocked(authApi.getMicrosoftConfig);
-const mockGetRolesForSignup = vi.mocked(authApi.getRolesForSignup);
 const mockRecordPageView = vi.mocked(authApi.recordPageView);
 
 function stubWindowLocation(pathname: string, search = '') {
@@ -89,7 +88,6 @@ describe('App', () => {
       tenantId: '',
       redirectUri: '',
     });
-    mockGetRolesForSignup.mockResolvedValue([]);
     mockVerifyToken.mockResolvedValue(true);
     mockGetCurrentUser.mockResolvedValue(TEST_USER);
   });

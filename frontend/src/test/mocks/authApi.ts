@@ -4,13 +4,12 @@ import { vi } from 'vitest';
 export function createAuthApiMock() {
   return {
     login: vi.fn(),
-    register: vi.fn(),
+    inviteLocalUser: vi.fn(),
     validatePassword: vi.fn(),
     verifyToken: vi.fn(),
     getCurrentUser: vi.fn(),
     getMicrosoftConfig: vi.fn(),
     microsoftCallback: vi.fn(),
-    getRolesForSignup: vi.fn(),
     getUsersAndRoles: vi.fn(),
     updateUserRole: vi.fn(),
     getRoles: vi.fn(),

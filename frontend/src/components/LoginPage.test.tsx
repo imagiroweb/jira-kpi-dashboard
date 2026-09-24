@@ -12,9 +12,7 @@ import { authApi } from '../services/authApi';
 import { LoginPage } from './LoginPage';
 
 const mockLogin = vi.mocked(authApi.login);
-const mockRegister = vi.mocked(authApi.register);
 const mockGetMicrosoftConfig = vi.mocked(authApi.getMicrosoftConfig);
-const mockGetRolesForSignup = vi.mocked(authApi.getRolesForSignup);
 
 describe('LoginPage', () => {
   beforeEach(() => {
@@ -26,7 +24,6 @@ describe('LoginPage', () => {
       tenantId: '',
       redirectUri: '',
     });
-    mockGetRolesForSignup.mockResolvedValue([]);
   });
 
   afterEach(() => {
@@ -83,25 +80,15 @@ describe('LoginPage', () => {
     expect(useStore.getState().isAuthenticated).toBe(false);
   });
 
-  it('bascule vers le mode inscription via le lien Créer un compte', async () => {
-    mockGetRolesForSignup.mockResolvedValue([
-      { id: 'role-1', name: 'Développeur' },
-    ]);
-
+  it('ne propose plus d’inscription libre (SSO ou compte créé par un administrateur)', async () => {
     renderWithProviders(<LoginPage />, { user: null });
 
     await waitFor(() => {
       expect(screen.getByText(/connectez-vous à votre compte/i)).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: /créer un compte/i }));
-
-    await waitFor(() => {
-      expect(screen.getByText(/créez votre compte/i)).toBeInTheDocument();
-      expect(screen.getByPlaceholderText('Jean')).toBeInTheDocument();
-      expect(screen.getByPlaceholderText('Dupont')).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /créer mon compte/i })).toBeInTheDocument();
-    });
+    expect(screen.queryByRole('button', { name: /créer un compte/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/demandez un accès à votre administrateur/i)).toBeInTheDocument();
   });
 
   it('n’affiche pas le bouton Microsoft quand le SSO est désactivé', async () => {
@@ -180,76 +167,5 @@ describe('LoginPage', () => {
 
     expect(capturedHref).toContain('login.microsoftonline.com/ms-tenant-id/oauth2/v2.0/authorize');
     expect(capturedHref).toContain(`redirect_uri=${encodeURIComponent(redirectUri)}`);
-  });
-
-  it('affiche une erreur lors de l’inscription échouée', async () => {
-    mockGetRolesForSignup.mockResolvedValue([{ id: 'role-1', name: 'Développeur' }]);
-    mockRegister.mockResolvedValue({ success: false, error: 'Email déjà utilisé' });
-
-    renderWithProviders(<LoginPage />, { user: null });
-
-    await waitFor(() => {
-      expect(screen.getByText(/connectez-vous à votre compte/i)).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: /créer un compte/i }));
-
-    await waitFor(() => {
-      expect(screen.getByPlaceholderText('Jean')).toBeInTheDocument();
-    });
-
-    fireEvent.change(screen.getByPlaceholderText('Jean'), { target: { value: 'Jean' } });
-    fireEvent.change(screen.getByPlaceholderText('Dupont'), { target: { value: 'Dupont' } });
-    fireEvent.change(screen.getByPlaceholderText('votre@email.com'), {
-      target: { value: 'new@test.com' },
-    });
-    fireEvent.change(screen.getByPlaceholderText('Min. 12 caractères'), {
-      target: { value: 'ValidPass123!' },
-    });
-    fireEvent.change(screen.getByPlaceholderText('Confirmer le mot de passe'), {
-      target: { value: 'ValidPass123!' },
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: /créer mon compte/i }));
-
-    await waitFor(() => {
-      expect(screen.getByText('Email déjà utilisé')).toBeInTheDocument();
-    });
-    expect(useStore.getState().isAuthenticated).toBe(false);
-  });
-
-  it('refuse un mot de passe faible à l’inscription', async () => {
-    mockGetRolesForSignup.mockResolvedValue([{ id: 'role-1', name: 'Développeur' }]);
-
-    renderWithProviders(<LoginPage />, { user: null });
-
-    await waitFor(() => {
-      expect(screen.getByText(/connectez-vous à votre compte/i)).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: /créer un compte/i }));
-
-    await waitFor(() => {
-      expect(screen.getByPlaceholderText('Min. 12 caractères')).toBeInTheDocument();
-    });
-
-    fireEvent.change(screen.getByPlaceholderText('Jean'), { target: { value: 'Jean' } });
-    fireEvent.change(screen.getByPlaceholderText('Dupont'), { target: { value: 'Dupont' } });
-    fireEvent.change(screen.getByPlaceholderText('votre@email.com'), {
-      target: { value: 'new@test.com' },
-    });
-    fireEvent.change(screen.getByPlaceholderText('Min. 12 caractères'), {
-      target: { value: 'short' },
-    });
-    fireEvent.change(screen.getByPlaceholderText('Confirmer le mot de passe'), {
-      target: { value: 'short' },
-    });
-
-    const submitBtn = screen.getByRole('button', { name: /créer mon compte/i });
-    expect(submitBtn).toBeDisabled();
-
-    fireEvent.click(submitBtn);
-
-    expect(mockRegister).not.toHaveBeenCalled();
   });
 });

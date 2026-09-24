@@ -26,7 +26,6 @@ jest.mock('mongoose', () => {
 jest.mock('../application/services/AuthService', () => ({
   authService: {
     handleMicrosoftSSO: (...args: unknown[]) => mockHandleMicrosoftSSO(...args),
-    register: jest.fn(),
     login: jest.fn(),
     validatePassword: jest.fn(),
     getUserById: jest.fn(),

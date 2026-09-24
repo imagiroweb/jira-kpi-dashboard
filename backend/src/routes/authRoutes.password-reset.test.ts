@@ -21,7 +21,6 @@ jest.mock('../application/services/AuthService', () => ({
     requestPasswordReset: (...args: unknown[]) => mockRequestPasswordReset(...args),
     resetPassword: (...args: unknown[]) => mockResetPassword(...args),
     login: jest.fn(),
-    register: jest.fn(),
     handleMicrosoftSSO: jest.fn(),
     verifyToken: jest.fn(),
     getUserById: jest.fn(),

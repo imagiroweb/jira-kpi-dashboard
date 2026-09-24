@@ -99,101 +99,6 @@ router.use(requireMongo);
 
 /**
  * @swagger
- * /api/auth/register:
- *   post:
- *     summary: Register a new user
- *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - email
- *               - password
- *             properties:
- *               email:
- *                 type: string
- *                 format: email
- *               password:
- *                 type: string
- *                 minLength: 12
- *               firstName:
- *                 type: string
- *               lastName:
- *                 type: string
- *     responses:
- *       201:
- *         description: User created successfully
- *       400:
- *         description: Validation error
- */
-router.post(
-  '/register',
-  [
-    body('email')
-      .isEmail()
-      .withMessage('Email invalide')
-      .normalizeEmail({ gmail_remove_dots: false }),
-    body('password')
-      .isLength({ min: 12 })
-      .withMessage('Le mot de passe doit contenir au moins 12 caractères'),
-    body('firstName')
-      .optional()
-      .trim()
-      .isLength({ min: 1, max: 50 })
-      .withMessage('Le prénom doit contenir entre 1 et 50 caractères'),
-    body('lastName')
-      .optional()
-      .trim()
-      .isLength({ min: 1, max: 50 })
-      .withMessage('Le nom doit contenir entre 1 et 50 caractères'),
-    body('roleId')
-      .optional()
-      .isString()
-      .withMessage('roleId invalide')
-  ],
-  async (req: Request, res: Response) => {
-    try {
-      // Check validation errors
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          errors: errors.array().map((e: { msg?: string }) => e.msg)
-        });
-      }
-
-      const { email, password, firstName, lastName, roleId } = req.body;
-
-      const result = await authService.register(email, password, firstName, lastName, roleId);
-
-      if (!result.success) {
-        return res.status(400).json({
-          success: false,
-          error: result.error
-        });
-      }
-
-      res.status(201).json({
-        success: true,
-        token: result.token,
-        user: result.user,
-        firstLogin: result.firstLogin
-      });
-    } catch (error) {
-      logger.error('Registration route error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Erreur serveur lors de la création du compte'
-      });
-    }
-  }
-);
-
-/**
- * @swagger
  * /api/auth/login:
  *   post:
  *     summary: Login with email and password
@@ -766,6 +671,42 @@ router.get('/users', authenticate, requireSuperAdmin, async (req: Request, res: 
     res.status(500).json({ success: false, error: 'Erreur serveur' });
   }
 });
+
+/**
+ * @swagger
+ * /api/auth/users:
+ *   post:
+ *     summary: Créer un compte local dans l'organisation de l'administrateur et envoyer une invitation (super admin)
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     description: >
+ *       Remplace l'inscription libre. Refusé si l'organisation n'autorise pas les comptes locaux
+ *       ou si le domaine de l'email n'est pas autorisé.
+ */
+router.post(
+  '/users',
+  authenticate,
+  requireSuperAdmin,
+  [
+    body('email').isEmail().withMessage('Email invalide').normalizeEmail({ gmail_remove_dots: false }),
+    body('firstName').optional().trim().isLength({ min: 1, max: 50 }).withMessage('Prénom invalide'),
+    body('lastName').optional().trim().isLength({ min: 1, max: 50 }).withMessage('Nom invalide'),
+    body('roleId').optional().isMongoId().withMessage('roleId invalide')
+  ],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array().map((e: { msg?: string }) => e.msg) });
+    }
+    const { email, firstName, lastName, roleId } = req.body;
+    const result = await authService.inviteLocalUser(req.user!.userId, { email, firstName, lastName, roleId });
+    if (!result.success) {
+      return res.status(result.status ?? 400).json({ success: false, error: result.error });
+    }
+    res.status(201).json({ success: true, userId: result.userId, emailSent: result.emailSent });
+  }
+);
 
 /**
  * @swagger

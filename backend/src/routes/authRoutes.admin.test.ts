@@ -6,6 +6,7 @@ import { createTestApp } from '../test/createTestApp';
 import { TEST_USER_ID } from '../test/fixtures/users';
 
 const mockBuildUserWithPermissions = jest.fn();
+const mockInviteLocalUser = jest.fn();
 const mockUserFindById = jest.fn();
 const mockUserFind = jest.fn();
 const mockRoleFind = jest.fn();
@@ -32,7 +33,7 @@ jest.mock('mongoose', () =>
 jest.mock('../application/services/AuthService', () => ({
   authService: {
     buildUserWithPermissions: (...args: unknown[]) => mockBuildUserWithPermissions(...args),
-    register: jest.fn(),
+    inviteLocalUser: (...args: unknown[]) => mockInviteLocalUser(...args),
     login: jest.fn(),
     validatePassword: jest.fn(),
     getUserById: jest.fn(),
@@ -149,6 +150,50 @@ describe('authRoutes — admin (TI)', () => {
       role: null,
       roleName: 'Développeur',
       visiblePages: defaultPageVisibilities,
+    });
+  });
+
+  describe('POST /api/auth/users (invitation d’un compte local)', () => {
+    it('crée le compte dans l’organisation de l’admin et renvoie 201', async () => {
+      mockInviteLocalUser.mockResolvedValue({ success: true, userId: 'u-new', emailSent: true });
+
+      const res = await request(app)
+        .post('/api/auth/users')
+        .send({ email: 'Nouveau@Adoria.com', firstName: 'Nou', lastName: 'Veau' });
+
+      expect(res.status).toBe(201);
+      expect(res.body).toEqual({ success: true, userId: 'u-new', emailSent: true });
+      expect(mockInviteLocalUser).toHaveBeenCalledWith(TEST_USER_ID, {
+        email: 'nouveau@adoria.com',
+        firstName: 'Nou',
+        lastName: 'Veau',
+        roleId: undefined,
+      });
+    });
+
+    it('propage le statut métier (409 email existant)', async () => {
+      mockInviteLocalUser.mockResolvedValue({ success: false, status: 409, error: 'Un compte existe déjà avec cet email' });
+
+      const res = await request(app).post('/api/auth/users').send({ email: 'x@adoria.com' });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatch(/existe déjà/);
+    });
+
+    it('retourne 400 si l’email ou le roleId sont invalides', async () => {
+      const res = await request(app).post('/api/auth/users').send({ email: 'pas-un-email', roleId: 'x' });
+
+      expect(res.status).toBe(400);
+      expect(mockInviteLocalUser).not.toHaveBeenCalled();
+    });
+
+    it('retourne 403 si l’utilisateur n’est pas super_admin', async () => {
+      isSuperAdmin = false;
+
+      const res = await request(app).post('/api/auth/users').send({ email: 'x@adoria.com' });
+
+      expect(res.status).toBe(403);
+      expect(mockInviteLocalUser).not.toHaveBeenCalled();
     });
   });
 

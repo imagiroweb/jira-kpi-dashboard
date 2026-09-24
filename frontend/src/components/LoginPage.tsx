@@ -1,22 +1,20 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { 
   Mail, 
   Lock, 
   Eye, 
   EyeOff, 
   LogIn, 
-  UserPlus,
   AlertCircle,
   Loader2,
-  ArrowRight,
-  ShieldCheck
+  ArrowRight
 } from 'lucide-react';
-import { PasswordStrengthIndicator } from './PasswordStrengthIndicator';
 import { ForgotPasswordPage } from './ForgotPasswordPage';
 import { useStore } from '../store/useStore';
-import { authApi, MicrosoftConfig, RoleForSignup } from '../services/authApi';
+import { authApi, MicrosoftConfig } from '../services/authApi';
 
-type AuthMode = 'login' | 'register' | 'forgot-password';
+/** Pas de mode « inscription » : un compte est créé par SSO ou par un administrateur (sécurité). */
+type AuthMode = 'login' | 'forgot-password';
 
 // Microsoft Icon Component
 function MicrosoftIcon({ className = '' }: { className?: string }) {
@@ -36,17 +34,11 @@ export function LoginPage() {
   );
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [firstName, setFirstName] = useState('');
-  const [lastName, setLastName] = useState('');
   const [showPassword, setShowPassword] = useState(false);
-  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [microsoftConfig, setMicrosoftConfig] = useState<MicrosoftConfig | null>(null);
   const [loadingMicrosoftConfig, setLoadingMicrosoftConfig] = useState(true);
-  const [rolesForSignup, setRolesForSignup] = useState<RoleForSignup[]>([]);
-  const [selectedRoleId, setSelectedRoleId] = useState('');
 
   const login = useStore((state) => state.login);
 
@@ -67,74 +59,17 @@ export function LoginPage() {
     loadMicrosoftConfig();
   }, []);
 
-  // Load roles for signup when in register mode
-  useEffect(() => {
-    if (mode !== 'register') return;
-    let cancelled = false;
-    authApi
-      .getRolesForSignup()
-      .then((list) => {
-        if (!cancelled) {
-          setRolesForSignup(list);
-          if (list.length > 0 && !selectedRoleId) setSelectedRoleId(list[0].id);
-        }
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
-  }, [mode, selectedRoleId]);
-
-  // Password validation for registration
-  const isPasswordValid = useCallback(() => {
-    if (mode !== 'register') return true;
-    
-    const hasMinLength = password.length >= 12;
-    const hasUppercase = /[A-Z]/.test(password);
-    const hasLowercase = /[a-z]/.test(password);
-    const hasNumber = /[0-9]/.test(password);
-    const hasSpecial = /[!@#$%^&*()_+\-=[\]{}|;:,.<>?]/.test(password);
-    
-    return hasMinLength && hasUppercase && hasLowercase && hasNumber && hasSpecial;
-  }, [password, mode]);
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
 
     try {
-      if (mode === 'register') {
-        // Validate password
-        if (!isPasswordValid()) {
-          setError('Le mot de passe ne respecte pas tous les critères de sécurité');
-          setLoading(false);
-          return;
-        }
-
-        // Confirm password check
-        if (password !== confirmPassword) {
-          setError('Les mots de passe ne correspondent pas');
-          setLoading(false);
-          return;
-        }
-
-        if (!selectedRoleId) {
-          setError('Veuillez sélectionner votre fonction');
-          setLoading(false);
-          return;
-        }
-        const result = await authApi.register(email, password, firstName, lastName, selectedRoleId);
-        if (result.success && result.token && result.user) {
-          login(result.token, result.user);
-        } else {
-          setError(result.error || 'Erreur lors de la création du compte');
-        }
+      const result = await authApi.login(email, password);
+      if (result.success && result.token && result.user) {
+        login(result.token, result.user);
       } else {
-        const result = await authApi.login(email, password);
-        if (result.success && result.token && result.user) {
-          login(result.token, result.user);
-        } else {
-          setError(result.error || 'Email ou mot de passe incorrect');
-        }
+        setError(result.error || 'Email ou mot de passe incorrect');
       }
     } catch (err) {
       setError('Erreur de connexion au serveur');
@@ -163,14 +98,6 @@ export function LoginPage() {
 
     const authUrl = `https://login.microsoftonline.com/${microsoftConfig.tenantId}/oauth2/v2.0/authorize?${params.toString()}`;
     window.location.href = authUrl;
-  };
-
-  const toggleMode = () => {
-    setMode(mode === 'login' ? 'register' : 'login');
-    setError(null);
-    setPassword('');
-    setConfirmPassword('');
-    setSelectedRoleId('');
   };
 
   if (mode === 'forgot-password') {
@@ -206,7 +133,7 @@ export function LoginPage() {
             Jira KPI Dashboard
           </h1>
           <p className="text-surface-400 mt-2">
-            {mode === 'login' ? 'Connectez-vous à votre compte' : 'Créez votre compte'}
+            Connectez-vous à votre compte
           </p>
         </div>
 
@@ -222,61 +149,6 @@ export function LoginPage() {
 
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Name fields (register only) */}
-            {mode === 'register' && (
-              <div className="grid grid-cols-2 gap-4 animate-fade-in">
-                <div>
-                  <label className="block text-sm font-medium text-surface-300 mb-1.5">
-                    Prénom
-                  </label>
-                  <input
-                    type="text"
-                    value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
-                    className="input"
-                    placeholder="Jean"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-surface-300 mb-1.5">
-                    Nom
-                  </label>
-                  <input
-                    type="text"
-                    value={lastName}
-                    onChange={(e) => setLastName(e.target.value)}
-                    className="input"
-                    placeholder="Dupont"
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* Role (register only) - required for first-time signup */}
-            {mode === 'register' && (
-              <div className="animate-fade-in">
-                <label className="block text-sm font-medium text-surface-300 mb-1.5">
-                  Ma fonction <span className="text-red-400">*</span>
-                </label>
-                <div className="relative">
-                  <ShieldCheck className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-surface-500" />
-                  <select
-                    value={selectedRoleId}
-                    onChange={(e) => setSelectedRoleId(e.target.value)}
-                    required
-                    className="input pl-10 w-full bg-surface-800 border-surface-600"
-                  >
-                    <option value="">Sélectionnez votre fonction...</option>
-                    {rolesForSignup.map((r) => (
-                      <option key={r.id} value={r.id}>
-                        {r.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            )}
-
             {/* Email */}
             <div>
               <label className="block text-sm font-medium text-surface-300 mb-1.5">
@@ -308,9 +180,9 @@ export function LoginPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="input pl-10 pr-10"
-                  placeholder={mode === 'register' ? 'Min. 12 caractères' : '••••••••••••'}
+                  placeholder="••••••••••••"
                   required
-                  autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+                  autoComplete="current-password"
                 />
                 <button
                   type="button"
@@ -322,81 +194,29 @@ export function LoginPage() {
               </div>
             </div>
 
-            {/* Forgot password link — login mode only */}
-            {mode === 'login' && (
-              <div className="flex justify-end -mt-1">
-                <button
-                  type="button"
-                  onClick={() => setMode('forgot-password')}
-                  className="text-sm text-surface-500 hover:text-accent-400 transition-colors"
-                >
-                  Mot de passe oublié ?
-                </button>
-              </div>
-            )}
-
-            {/* Password Strength Indicator (register only) */}
-            {mode === 'register' && (
-              <PasswordStrengthIndicator 
-                password={password} 
-                className="animate-fade-in" 
-              />
-            )}
-
-            {/* Confirm Password (register only) */}
-            {mode === 'register' && (
-              <div className="animate-fade-in">
-                <label className="block text-sm font-medium text-surface-300 mb-1.5">
-                  Confirmer le mot de passe
-                </label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-surface-500" />
-                  <input
-                    type={showConfirmPassword ? 'text' : 'password'}
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className={`input pl-10 pr-10 ${
-                      confirmPassword && password !== confirmPassword 
-                        ? 'border-danger-500 focus:ring-danger-500/50' 
-                        : confirmPassword && password === confirmPassword
-                          ? 'border-success-500 focus:ring-success-500/50'
-                          : ''
-                    }`}
-                    placeholder="Confirmer le mot de passe"
-                    required
-                    autoComplete="new-password"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-surface-500 hover:text-surface-300 transition-colors"
-                  >
-                    {showConfirmPassword ? <EyeOff className="w-5 h-5" /> : <Eye className="w-5 h-5" />}
-                  </button>
-                </div>
-                {confirmPassword && password !== confirmPassword && (
-                  <p className="text-danger-400 text-xs mt-1">Les mots de passe ne correspondent pas</p>
-                )}
-              </div>
-            )}
+            {/* Forgot password link */}
+            <div className="flex justify-end -mt-1">
+              <button
+                type="button"
+                onClick={() => setMode('forgot-password')}
+                className="text-sm text-surface-500 hover:text-accent-400 transition-colors"
+              >
+                Mot de passe oublié ?
+              </button>
+            </div>
 
             {/* Submit Button */}
             <button
               type="submit"
-              disabled={loading || (mode === 'register' && (!isPasswordValid() || !selectedRoleId))}
+              disabled={loading}
               className="btn-primary w-full py-3 text-base font-semibold disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:shadow-none"
             >
               {loading ? (
                 <Loader2 className="w-5 h-5 animate-spin" />
-              ) : mode === 'login' ? (
+              ) : (
                 <>
                   <LogIn className="w-5 h-5" />
                   Se connecter
-                </>
-              ) : (
-                <>
-                  <UserPlus className="w-5 h-5" />
-                  Créer mon compte
                 </>
               )}
             </button>
@@ -435,31 +255,8 @@ export function LoginPage() {
             </div>
           )}
 
-          {/* Toggle Mode */}
-          <p className="text-center text-surface-400 mt-6">
-            {mode === 'login' ? (
-              <>
-                Pas encore de compte ?{' '}
-                <button
-                  type="button"
-                  onClick={toggleMode}
-                  className="text-accent-400 hover:text-accent-300 font-medium transition-colors"
-                >
-                  Créer un compte
-                </button>
-              </>
-            ) : (
-              <>
-                Déjà un compte ?{' '}
-                <button
-                  type="button"
-                  onClick={toggleMode}
-                  className="text-accent-400 hover:text-accent-300 font-medium transition-colors"
-                >
-                  Se connecter
-                </button>
-              </>
-            )}
+          <p className="text-center text-surface-500 text-sm mt-6">
+            Pas encore de compte ? Connectez-vous avec le SSO de votre entreprise ou demandez un accès à votre administrateur.
           </p>
         </div>
 

@@ -16,6 +16,15 @@ function logSmtpFailure(label: string, error: unknown): void {
   }
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 export class NodemailerEmailService {
   private transporter: Transporter | null = null;
 
@@ -187,6 +196,79 @@ Conformément au RGPD, vos données ne sont pas partagées avec des tiers.`;
       return true;
     } catch (error) {
       logSmtpFailure('Échec envoi email SMTP', error);
+      return false;
+    }
+  }
+
+  /**
+   * Invitation à définir son mot de passe (compte local créé par un administrateur).
+   */
+  async sendAccountInvitationEmail(
+    to: { email: string; firstName?: string },
+    setPasswordUrl: string,
+    validityHours: number
+  ): Promise<boolean> {
+    if (!this.transporter) {
+      if (process.env.NODE_ENV !== 'production') {
+        logger.warn('SMTP non configuré — MODE DÉVELOPPEMENT : lien d’invitation');
+        logger.warn(setPasswordUrl);
+        return true;
+      }
+      logger.error('SMTP non configuré en production — impossible d\'envoyer l\'invitation');
+      return false;
+    }
+
+    const fromName = process.env.EMAIL_FROM_NAME || 'Jira KPI Dashboard';
+    const fromAddress = (process.env.EMAIL_FROM || process.env.SMTP_USER || '').trim();
+    if (!fromAddress) {
+      logger.error('SMTP : adresse expéditeur vide (EMAIL_FROM / SMTP_USER) — envoi annulé');
+      return false;
+    }
+    const recipientName = escapeHtml(to.firstName || 'Utilisateur');
+    const safeUrl = escapeHtml(setPasswordUrl);
+
+    const html = `<!DOCTYPE html>
+<html lang="fr">
+<head><meta charset="UTF-8"/><title>Activez votre compte</title></head>
+<body style="margin:0;padding:40px 20px;background-color:#0f172a;font-family:Arial,sans-serif;">
+  <table width="560" align="center" cellpadding="0" cellspacing="0" style="background-color:#1e293b;border-radius:12px;border:1px solid #334155;">
+    <tr><td style="background:linear-gradient(135deg,#06b6d4,#6366f1);padding:32px;text-align:center;">
+      <p style="margin:0;font-size:12px;color:rgba(255,255,255,0.8);letter-spacing:2px;text-transform:uppercase;">${escapeHtml(fromName)}</p>
+      <h1 style="margin:8px 0 0;font-size:22px;color:#ffffff;">Activez votre compte</h1>
+    </td></tr>
+    <tr><td style="padding:36px 40px;color:#94a3b8;font-size:15px;line-height:1.6;">
+      <p style="margin:0 0 16px;">Bonjour <strong style="color:#e2e8f0;">${recipientName}</strong>,</p>
+      <p style="margin:0 0 24px;">Un administrateur vous a créé un compte. Cliquez sur le bouton ci-dessous pour définir votre mot de passe.</p>
+      <p style="text-align:center;margin:0 0 24px;">
+        <a href="${safeUrl}" target="_blank" style="display:inline-block;background:linear-gradient(135deg,#06b6d4,#6366f1);color:#ffffff;font-weight:700;text-decoration:none;padding:14px 36px;border-radius:8px;">Définir mon mot de passe</a>
+      </p>
+      <p style="margin:0;font-size:13px;color:#64748b;">Ce lien est valide ${validityHours} heures et ne peut être utilisé qu'une seule fois. Si vous n'attendiez pas cette invitation, ignorez cet email.</p>
+      <p style="margin:16px 0 0;font-size:12px;color:#475569;word-break:break-all;">${safeUrl}</p>
+    </td></tr>
+  </table>
+</body>
+</html>`;
+
+    const text = `Bonjour ${to.firstName || 'Utilisateur'},
+
+Un administrateur vous a créé un compte ${fromName}.
+Pour définir votre mot de passe, rendez-vous sur :
+${setPasswordUrl}
+
+Ce lien est valide ${validityHours} heures et ne peut être utilisé qu'une seule fois.
+Si vous n'attendiez pas cette invitation, ignorez cet email.`;
+
+    try {
+      await this.transporter.sendMail({
+        from: `"${fromName}" <${fromAddress}>`,
+        to: to.email,
+        subject: `Activez votre compte — ${fromName}`,
+        html,
+        text
+      });
+      return true;
+    } catch (error) {
+      logSmtpFailure('Échec envoi invitation SMTP', error);
       return false;
     }
   }

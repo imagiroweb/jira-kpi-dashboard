@@ -1,12 +1,12 @@
 /**
- * TI — Routes auth (core) : register, login, validate-password, roles/for-signup, me, verify, requireMongo
+ * TI — Routes auth (core) : login, validate-password, me, verify, requireMongo ;
+ * routes supprimées pour raisons de sécurité : register, roles/for-signup, me/role
  */
 import request from 'supertest';
 import { Request } from 'express';
 import { createTestApp } from '../test/createTestApp';
 import { TEST_USER, TEST_USER_ID } from '../test/fixtures/users';
 
-const mockRegister = jest.fn();
 const mockLogin = jest.fn();
 const mockValidatePassword = jest.fn();
 const mockGetUserById = jest.fn();
@@ -34,7 +34,6 @@ jest.mock('express-rate-limit', () =>
 
 jest.mock('../application/services/AuthService', () => ({
   authService: {
-    register: (...args: unknown[]) => mockRegister(...args),
     login: (...args: unknown[]) => mockLogin(...args),
     validatePassword: (...args: unknown[]) => mockValidatePassword(...args),
     getUserById: (...args: unknown[]) => mockGetUserById(...args),
@@ -138,62 +137,13 @@ describe('authRoutes — core (TI)', () => {
     });
   });
 
-  describe('POST /api/auth/register', () => {
-    it('retourne 400 si la validation échoue (email ou mot de passe invalide)', async () => {
+  describe('POST /api/auth/register (supprimée — sécurité)', () => {
+    it('retourne 404 : l’inscription libre n’existe plus', async () => {
       const res = await request(app)
         .post('/api/auth/register')
-        .send({ email: 'invalid', password: 'short' });
+        .send({ email: 'new@test.com', password: 'MonMotDePasse123!' });
 
-      expect(res.status).toBe(400);
-      expect(res.body.success).toBe(false);
-      expect(Array.isArray(res.body.errors)).toBe(true);
-      expect(mockRegister).not.toHaveBeenCalled();
-    });
-
-    it('retourne 201 avec token et user si inscription réussie', async () => {
-      mockRegister.mockResolvedValue({
-        success: true,
-        token: 'jwt-token',
-        user: { id: TEST_USER_ID, email: 'new@test.com' },
-        firstLogin: true,
-      });
-
-      const res = await request(app)
-        .post('/api/auth/register')
-        .send({
-          email: 'new@test.com',
-          password: 'MonMotDePasse123!',
-          firstName: 'New',
-          lastName: 'User',
-        });
-
-      expect(res.status).toBe(201);
-      expect(res.body.success).toBe(true);
-      expect(res.body.token).toBe('jwt-token');
-      expect(res.body.user).toEqual({ id: TEST_USER_ID, email: 'new@test.com' });
-      expect(res.body.firstLogin).toBe(true);
-      expect(mockRegister).toHaveBeenCalledWith(
-        'new@test.com',
-        'MonMotDePasse123!',
-        'New',
-        'User',
-        undefined
-      );
-    });
-
-    it('retourne 400 si l’email est déjà utilisé', async () => {
-      mockRegister.mockResolvedValue({
-        success: false,
-        error: 'Un compte existe déjà avec cet email',
-      });
-
-      const res = await request(app)
-        .post('/api/auth/register')
-        .send({ email: 'existing@test.com', password: 'MonMotDePasse123!' });
-
-      expect(res.status).toBe(400);
-      expect(res.body.success).toBe(false);
-      expect(res.body.error).toContain('existe déjà');
+      expect(res.status).toBe(404);
     });
   });
 

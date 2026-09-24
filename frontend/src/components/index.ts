@@ -25,3 +25,4 @@ export { MicrosoftCallback } from './MicrosoftCallback';
 export { PasswordStrengthIndicator } from './PasswordStrengthIndicator';
 export { ForgotPasswordPage } from './ForgotPasswordPage';
 export { ResetPasswordPage } from './ResetPasswordPage';
+export { InviteLocalUserForm } from './InviteLocalUserForm';

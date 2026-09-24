@@ -4,11 +4,16 @@ import jwt, { SignOptions } from 'jsonwebtoken';
 import { User, IUser } from '../../domain/user/entities/User';
 import { Role, IPageVisibilities, PAGE_IDS } from '../../domain/user/entities/Role';
 import { Team } from '../../domain/team/entities/Team';
+import { Organization } from '../../domain/organization/entities/Organization';
+import { isEmailDomainAllowed } from '../../domain/organization/emailDomain';
 import { UserActivityLog } from '../../domain/user/entities/UserActivityLog';
 import { emailService } from '../../infrastructure/email/NodemailerEmailService';
 import { logger } from '../../utils/logger';
 
 const SUPER_ADMIN_EMAIL = 'bdeguil-robin@adoria.com';
+
+/** Validité du lien d'invitation d'un compte local (72 h). */
+const INVITATION_TOKEN_TTL_MS = 72 * 60 * 60 * 1000;
 
 const ALL_PAGES_TRUE: IPageVisibilities = PAGE_IDS.reduce((acc, id) => ({ ...acc, [id]: true }), {} as IPageVisibilities);
 
@@ -184,89 +189,107 @@ export class AuthService {
   }
 
   /**
-   * Register a new user with email/password. roleId optional: if provided, user gets that role; else default "Utilisateur".
+   * Crée un compte local (email / mot de passe) dans l'organisation de l'administrateur, puis
+   * envoie une invitation : lien de définition du mot de passe à usage unique (72 h).
+   * Remplace l'inscription libre, supprimée pour raisons de sécurité : un compte n'existe que
+   * rattaché à une organisation, via son SSO ou créé par l'un de ses administrateurs.
    */
-  async register(
-    email: string,
-    password: string,
-    firstName?: string,
-    lastName?: string,
-    roleId?: string
-  ): Promise<LoginResult> {
+  async inviteLocalUser(
+    adminUserId: string,
+    input: { email: string; firstName?: string; lastName?: string; roleId?: string }
+  ): Promise<{ success: boolean; userId?: string; emailSent?: boolean; error?: string; status?: number }> {
     try {
-      // Validate password
-      const validation = this.validatePassword(password);
-      if (!validation.isValid) {
+      const admin = await User.findById(adminUserId).select('organizationId').lean();
+      if (!admin?.organizationId) {
+        return { success: false, status: 400, error: 'Administrateur sans organisation' };
+      }
+      const organization = await Organization.findById(admin.organizationId).lean();
+      if (!organization || !organization.isActive) {
+        return { success: false, status: 400, error: 'Organisation introuvable ou inactive' };
+      }
+      if (!organization.allowLocalAccounts) {
         return {
           success: false,
-          error: validation.errors.join('. ')
+          status: 400,
+          error: 'Les comptes locaux ne sont pas autorisés pour cette organisation (connexion SSO uniquement)'
         };
       }
 
-      // Check if user already exists
-      const existingUser = await User.findOne({ email: email.toLowerCase() });
-      if (existingUser) {
-        return {
-          success: false,
-          error: 'Un compte existe déjà avec cet email'
-        };
+      const email = input.email.trim().toLowerCase();
+      if (!isEmailDomainAllowed(email, organization.allowedEmailDomains)) {
+        return { success: false, status: 400, error: 'Domaine d’email non autorisé pour cette organisation' };
+      }
+      if (await User.exists({ email })) {
+        return { success: false, status: 409, error: 'Un compte existe déjà avec cet email' };
       }
 
-      // Hash password and create user
-      const hashedPassword = await this.hashPassword(password);
+      let roleId: IUser['roleId'] | undefined;
+      if (input.roleId) {
+        const role = await Role.findById(input.roleId).select('_id').lean();
+        if (!role) return { success: false, status: 400, error: 'Rôle invalide' };
+        roleId = role._id as IUser['roleId'];
+      }
+
+      // Mot de passe aléatoire inutilisable : l'utilisateur définit le sien via le lien d'invitation.
+      const unusablePassword = await this.hashPassword(crypto.randomBytes(32).toString('base64url'));
       const user = await User.create({
-        email: email.toLowerCase(),
-        password: hashedPassword,
-        firstName,
-        lastName,
+        email,
+        password: unusablePassword,
+        firstName: input.firstName,
+        lastName: input.lastName,
         provider: 'local',
-        isActive: true
+        isActive: true,
+        organizationId: organization._id
       });
-
-      await this.ensureSuperAdmin(user.email);
       if (roleId) {
-        const role = await Role.findById(roleId);
-        if (role) await User.findByIdAndUpdate(user._id, { $set: { roleId: role._id }, $unset: { role: 1 } });
+        await User.updateOne({ _id: user._id }, { $set: { roleId } });
       } else {
         await this.assignDefaultRoleIfNeeded(user);
       }
-      const refreshed = await User.findById(user._id).select('-password');
-      if (!refreshed) throw new Error('User not found after create');
 
-      const token = this.generateToken({
-        userId: refreshed._id.toString(),
-        email: refreshed.email,
-        provider: 'local'
-      });
-      const userWithPerms = await this.buildUserWithPermissions(refreshed);
+      const { plainToken } = await this.issuePasswordToken(user._id, INVITATION_TOKEN_TTL_MS);
+      const emailSent = await emailService.sendAccountInvitationEmail(
+        { email: user.email, firstName: user.firstName },
+        this.passwordLinkUrl(plainToken),
+        INVITATION_TOKEN_TTL_MS / 3_600_000
+      );
 
-      logger.info(`New user registered: ${email}`);
-
-      return {
-        success: true,
-        token,
-        user: {
-          id: userWithPerms.id,
-          email: userWithPerms.email,
-          firstName: userWithPerms.firstName,
-          lastName: userWithPerms.lastName,
-          provider: userWithPerms.provider,
-          role: userWithPerms.role ?? undefined,
-          roleName: userWithPerms.roleName,
-          visiblePages: userWithPerms.visiblePages,
-          performanceGlobalAccess: userWithPerms.performanceGlobalAccess,
-          teamId: userWithPerms.teamId,
-          leadTeamIds: userWithPerms.leadTeamIds,
-          canManageTeamAssignment: userWithPerms.canManageTeamAssignment
-        }
-      };
+      logger.info(`Compte local créé par invitation : ${user._id} (organisation ${organization.slug})`);
+      return { success: true, userId: String(user._id), emailSent };
     } catch (error) {
-      logger.error('Registration error:', error);
-      return {
-        success: false,
-        error: 'Erreur lors de la création du compte'
-      };
+      logger.error('inviteLocalUser error:', error);
+      return { success: false, status: 500, error: 'Erreur lors de la création du compte' };
     }
+  }
+
+  /** Génère un jeton de (ré)initialisation du mot de passe ; seul son hash SHA-256 est stocké. */
+  private async issuePasswordToken(
+    userId: IUser['_id'],
+    ttlMs: number
+  ): Promise<{ plainToken: string }> {
+    const plainToken = crypto.randomBytes(32).toString('hex');
+    const tokenHash = crypto.createHash('sha256').update(plainToken).digest('hex');
+    await User.updateOne(
+      { _id: userId },
+      { $set: { passwordResetToken: tokenHash, passwordResetExpires: new Date(Date.now() + ttlMs) } }
+    );
+    return { plainToken };
+  }
+
+  private passwordLinkUrl(plainToken: string): string {
+    const appBaseUrl = (process.env.APP_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
+    return `${appBaseUrl}/reset-password?token=${plainToken}`;
+  }
+
+  /**
+   * La connexion par mot de passe est-elle autorisée pour l'organisation de cet utilisateur ?
+   */
+  private async isLocalLoginAllowed(user: IUser): Promise<boolean> {
+    if (!user.organizationId) return false;
+    const organization = await Organization.findById(user.organizationId)
+      .select('isActive allowLocalAccounts')
+      .lean();
+    return Boolean(organization?.isActive && organization.allowLocalAccounts);
   }
 
   /**
@@ -307,6 +330,13 @@ export class AuthService {
         return {
           success: false,
           error: 'Email ou mot de passe incorrect'
+        };
+      }
+
+      if (!(await this.isLocalLoginAllowed(user))) {
+        return {
+          success: false,
+          error: 'La connexion par mot de passe n’est pas autorisée pour votre organisation : utilisez la connexion SSO'
         };
       }
 
@@ -605,21 +635,9 @@ export class AuthService {
         return { success: true };
       }
 
-      // Token aléatoire 32 octets (64 caractères hex) — jamais stocké en clair
-      const plainToken = crypto.randomBytes(32).toString('hex');
-      const tokenHash = crypto.createHash('sha256').update(plainToken).digest('hex');
-
-      const resetExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 heure
-
-      // Utiliser updateOne pour éviter les problèmes de dirty tracking Mongoose
-      // sur les champs select: false
-      await User.updateOne(
-        { _id: user._id },
-        { $set: { passwordResetToken: tokenHash, passwordResetExpires: resetExpires } }
-      );
-
-      const appBaseUrl = (process.env.APP_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
-      const resetUrl = `${appBaseUrl}/reset-password?token=${plainToken}`;
+      // Token aléatoire 32 octets (64 caractères hex) — seul son hash est stocké, valide 1 heure
+      const { plainToken } = await this.issuePasswordToken(user._id, 60 * 60 * 1000);
+      const resetUrl = this.passwordLinkUrl(plainToken);
 
       const sent = await emailService.sendPasswordResetEmail(
         { email: user.email, firstName: user.firstName },
