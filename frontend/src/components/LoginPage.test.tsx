@@ -167,5 +167,11 @@ describe('LoginPage', () => {
 
     expect(capturedHref).toContain('login.microsoftonline.com/ms-tenant-id/oauth2/v2.0/authorize');
     expect(capturedHref).toContain(`redirect_uri=${encodeURIComponent(redirectUri)}`);
+    // OpenID Connect : id_token + nonce/state mémorisés pour la vérification du retour
+    const params = new URL(capturedHref).searchParams;
+    expect(params.get('response_type')).toBe('id_token');
+    expect(params.get('scope')).toBe('openid profile email');
+    expect(params.get('nonce')).toBe(sessionStorage.getItem('ms_oauth_nonce'));
+    expect(params.get('state')).toBe(sessionStorage.getItem('ms_oauth_state'));
   });
 });

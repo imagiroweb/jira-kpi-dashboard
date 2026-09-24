@@ -12,6 +12,7 @@ import {
 import { ForgotPasswordPage } from './ForgotPasswordPage';
 import { useStore } from '../store/useStore';
 import { authApi, MicrosoftConfig } from '../services/authApi';
+import { createOAuthRequestState } from '../utils/microsoftOAuth';
 
 /** Pas de mode « inscription » : un compte est créé par SSO ou par un administrateur (sécurité). */
 type AuthMode = 'login' | 'forgot-password';
@@ -86,14 +87,16 @@ export function LoginPage() {
     const redirectUri =
       microsoftConfig.redirectUri?.trim() ||
       `${window.location.origin}/auth/microsoft/callback`;
+    // id_token OpenID Connect : le backend vérifie signature, audience, tenant et nonce.
+    const { state, nonce } = createOAuthRequestState();
     const params = new URLSearchParams({
       client_id: microsoftConfig.clientId,
-      response_type: 'token',
+      response_type: 'id_token',
       redirect_uri: redirectUri,
-      scope: 'openid profile email User.Read',
+      scope: 'openid profile email',
       response_mode: 'fragment',
-      state: crypto.randomUUID(),
-      nonce: crypto.randomUUID(),
+      state,
+      nonce,
     });
 
     const authUrl = `https://login.microsoftonline.com/${microsoftConfig.tenantId}/oauth2/v2.0/authorize?${params.toString()}`;

@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { isSafeMicrosoftAccessToken, parseOAuthFragment } from './microsoftOAuth';
+import { beforeEach, describe, expect, it } from 'vitest';
+import {
+  consumeOAuthRequestState,
+  createOAuthRequestState,
+  isSafeMicrosoftAccessToken,
+  parseOAuthFragment
+} from './microsoftOAuth';
 
 describe('parseOAuthFragment', () => {
   it('parse access_token et préserve les +', () => {
@@ -36,5 +41,29 @@ describe('isSafeMicrosoftAccessToken', () => {
     expect(isSafeMicrosoftAccessToken(null)).toBe(false);
     expect(isSafeMicrosoftAccessToken(undefined)).toBe(false);
     expect(isSafeMicrosoftAccessToken({ access_token: 'x' })).toBe(false);
+  });
+});
+
+describe('createOAuthRequestState / consumeOAuthRequestState', () => {
+  beforeEach(() => sessionStorage.clear());
+
+  it('mémorise state et nonce puis les restitue une seule fois', () => {
+    const { state, nonce } = createOAuthRequestState();
+    expect(state).not.toBe(nonce);
+
+    expect(consumeOAuthRequestState(state)).toEqual({ nonce });
+    expect(consumeOAuthRequestState(state)).toBeNull();
+  });
+
+  it('refuse un state différent et efface la demande', () => {
+    createOAuthRequestState();
+
+    expect(consumeOAuthRequestState('autre')).toBeNull();
+    expect(sessionStorage.getItem('ms_oauth_nonce')).toBeNull();
+  });
+
+  it('refuse un state absent', () => {
+    createOAuthRequestState();
+    expect(consumeOAuthRequestState(undefined)).toBeNull();
   });
 });

@@ -2,7 +2,11 @@ import { useEffect, useState } from 'react';
 import { Loader2, AlertCircle, CheckCircle } from 'lucide-react';
 import { useStore } from '../store/useStore';
 import { authApi } from '../services/authApi';
-import { isSafeMicrosoftAccessToken, parseOAuthFragment } from '../utils/microsoftOAuth';
+import {
+  consumeOAuthRequestState,
+  isSafeMicrosoftAccessToken,
+  parseOAuthFragment
+} from '../utils/microsoftOAuth';
 
 /** Évite d’afficher des messages JS bruts (ex. SyntaxError Safari) à l’utilisateur. */
 function friendlySsoError(err: unknown): string {
@@ -41,16 +45,23 @@ export function MicrosoftCallback() {
           return;
         }
 
-        const accessToken = hashParams.access_token;
-        if (!accessToken) {
+        const requestState = consumeOAuthRequestState(hashParams.state);
+        if (!requestState) {
+          setError('Session de connexion expirée ou invalide. Relancez la connexion Microsoft depuis cette fenêtre.');
+          setStatus('error');
+          return;
+        }
+
+        const idToken = hashParams.id_token;
+        if (!idToken) {
           setError(
-            "Token d'accès manquant. Vérifiez que l'URI de redirection dans Azure correspond à cette page (/auth/microsoft/callback, type SPA)."
+            "Jeton d'identité manquant. Vérifiez dans Azure que l'URI de redirection correspond à cette page (/auth/microsoft/callback, type SPA) et que les jetons d'ID sont activés."
           );
           setStatus('error');
           return;
         }
 
-        if (!isSafeMicrosoftAccessToken(accessToken)) {
+        if (!isSafeMicrosoftAccessToken(idToken)) {
           setError(
             'Token Microsoft invalide ou corrompu (caractères interdits). Réessayez la connexion SSO.'
           );
@@ -65,7 +76,7 @@ export function MicrosoftCallback() {
           // ignore
         }
 
-        const result = await authApi.microsoftCallback(accessToken.trim());
+        const result = await authApi.microsoftCallback(idToken.trim(), requestState.nonce);
 
         if (result.success && result.token && result.user) {
           setStatus('success');

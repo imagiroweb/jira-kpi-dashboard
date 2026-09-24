@@ -6,6 +6,7 @@ import { createTestApp } from '../test/createTestApp';
 import { TEST_USER_ID } from '../test/fixtures/users';
 
 const mockHandleMicrosoftSSO = jest.fn();
+const mockVerifyIdToken = jest.fn();
 const originalEnv = process.env;
 
 let mongoReadyState = 1;
@@ -75,11 +76,20 @@ jest.mock('../domain/user/entities/UserActivityLog', () => ({
   },
 }));
 
+jest.mock('../infrastructure/microsoft/MicrosoftIdTokenVerifier', () => {
+  const actual = jest.requireActual('../infrastructure/microsoft/MicrosoftIdTokenVerifier');
+  return {
+    ...actual,
+    microsoftIdTokenVerifier: { verify: (...args: unknown[]) => mockVerifyIdToken(...args) },
+  };
+});
+
 jest.mock('../utils/logger', () =>
   jest.requireActual('../test/mocks/logger').loggerMockFactory()
 );
 
 import { authRoutes } from './authRoutes';
+import { MicrosoftTokenError } from '../infrastructure/microsoft/MicrosoftIdTokenVerifier';
 
 describe('authRoutes — Microsoft (TI)', () => {
   const app = createTestApp({ mountPath: '/api/auth', router: authRoutes });
@@ -122,6 +132,16 @@ describe('authRoutes — Microsoft (TI)', () => {
       expect(res.body.clientId).toBe('ms-client-id');
       expect(res.body.tenantId).toBe('tenant-123');
       expect(res.body.redirectUri).toBe('https://app.example.com/callback');
+    });
+
+    it('utilise l’autorité « organizations » par défaut (multi-entreprises, jamais les comptes perso)', async () => {
+      process.env.MICROSOFT_CLIENT_ID = 'ms-client-id';
+      delete process.env.MICROSOFT_TENANT_ID;
+      delete process.env.MICROSOFT_AUTHORITY_TENANT;
+
+      const res = await request(app).get('/api/auth/microsoft/config');
+
+      expect(res.body.tenantId).toBe('organizations');
     });
 
     it('reste accessible (200) même si MongoDB est déconnecté', async () => {
@@ -167,66 +187,80 @@ describe('authRoutes — Microsoft (TI)', () => {
   });
 
   describe('POST /api/auth/microsoft/callback', () => {
-    it('retourne 400 si accessToken est absent', async () => {
-      const res = await request(app).post('/api/auth/microsoft/callback').send({});
+    const identity = {
+      tenantId: '8f2c1d3e-1234-4abc-9def-0123456789ab',
+      objectId: 'oid-1',
+      email: 'user@company.com',
+      firstName: 'Jean',
+      lastName: 'Dupont',
+    };
+
+    beforeEach(() => {
+      process.env.MICROSOFT_CLIENT_ID = 'ms-client-id';
+    });
+
+    it('retourne 400 si idToken ou nonce est absent', async () => {
+      const res = await request(app).post('/api/auth/microsoft/callback').send({ idToken: 'a.b.c' });
 
       expect(res.status).toBe(400);
       expect(res.body.success).toBe(false);
-      expect(res.body.error).toMatch(/Token Microsoft manquant/i);
-      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockVerifyIdToken).not.toHaveBeenCalled();
     });
 
-    it('retourne 400 si accessToken contient des caractères invalides pour un header', async () => {
+    it('retourne 400 si idToken contient des caractères invalides', async () => {
       const res = await request(app)
         .post('/api/auth/microsoft/callback')
-        .send({ accessToken: 'tok\nen' });
+        .send({ idToken: 'tok\nen', nonce: 'n' });
 
       expect(res.status).toBe(400);
-      expect(res.body.error).toMatch(/invalide/i);
-      expect(mockFetch).not.toHaveBeenCalled();
+      expect(mockVerifyIdToken).not.toHaveBeenCalled();
     });
 
-    it('retourne 400 si accessToken ressemble à du JSON', async () => {
+    it('n’appelle plus Microsoft Graph et ne fait pas confiance à un access token', async () => {
       const res = await request(app)
         .post('/api/auth/microsoft/callback')
-        .send({ accessToken: '{"access_token":"x"}' });
+        .send({ accessToken: 'any-graph-token' });
 
       expect(res.status).toBe(400);
       expect(mockFetch).not.toHaveBeenCalled();
     });
 
-    it('retourne 401 si Microsoft Graph rejette le token', async () => {
-      mockFetch.mockResolvedValue({ ok: false, status: 401 });
+    it('retourne 401 si le jeton est rejeté (signature, audience, émetteur, nonce…)', async () => {
+      mockVerifyIdToken.mockRejectedValue(new MicrosoftTokenError('audience invalide'));
 
       const res = await request(app)
         .post('/api/auth/microsoft/callback')
-        .send({ accessToken: 'invalid-token' });
+        .send({ idToken: 'a.b.c', nonce: 'n1' });
 
       expect(res.status).toBe(401);
-      expect(res.body.success).toBe(false);
-      expect(res.body.error).toMatch(/Token Microsoft invalide/i);
-      expect(mockFetch).toHaveBeenCalledWith(
-        'https://graph.microsoft.com/v1.0/me',
-        expect.objectContaining({
-          headers: { Authorization: 'Bearer invalid-token' },
-        })
-      );
+      expect(res.body.error).toMatch(/Jeton Microsoft invalide/);
       expect(mockHandleMicrosoftSSO).not.toHaveBeenCalled();
     });
 
-    it('retourne 200 avec token et user si SSO réussit', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () =>
-          Promise.resolve({
-            id: 'ms-user-id',
-            mail: 'user@company.com',
-            userPrincipalName: 'user@company.com',
-            givenName: 'Jean',
-            surname: 'Dupont',
-          }),
-      });
+    it('retourne 503 si la vérification est indisponible (JWKS injoignable)', async () => {
+      mockVerifyIdToken.mockRejectedValue(new Error('JWKS Microsoft indisponible (500)'));
 
+      const res = await request(app)
+        .post('/api/auth/microsoft/callback')
+        .send({ idToken: 'a.b.c', nonce: 'n1' });
+
+      expect(res.status).toBe(503);
+    });
+
+    it('propage le refus métier (tenant non autorisé → 403)', async () => {
+      mockVerifyIdToken.mockResolvedValue(identity);
+      mockHandleMicrosoftSSO.mockResolvedValue({ success: false, status: 403, error: 'Votre organisation n’est pas autorisée' });
+
+      const res = await request(app)
+        .post('/api/auth/microsoft/callback')
+        .send({ idToken: 'a.b.c', nonce: 'n1' });
+
+      expect(res.status).toBe(403);
+      expect(res.body.error).toMatch(/pas autorisée/);
+    });
+
+    it('retourne 200 avec token et user si SSO réussit', async () => {
+      mockVerifyIdToken.mockResolvedValue(identity);
       mockHandleMicrosoftSSO.mockResolvedValue({
         success: true,
         token: 'sso-jwt',
@@ -236,20 +270,12 @@ describe('authRoutes — Microsoft (TI)', () => {
 
       const res = await request(app)
         .post('/api/auth/microsoft/callback')
-        .send({ accessToken: 'valid-ms-token' });
+        .send({ idToken: 'a.b.c', nonce: 'n1' });
 
       expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
       expect(res.body.token).toBe('sso-jwt');
-      expect(res.body.user).toEqual(
-        expect.objectContaining({ id: TEST_USER_ID, email: 'user@company.com' })
-      );
-      expect(mockHandleMicrosoftSSO).toHaveBeenCalledWith(
-        'ms-user-id',
-        'user@company.com',
-        'Jean',
-        'Dupont'
-      );
+      expect(mockVerifyIdToken).toHaveBeenCalledWith('a.b.c', { clientId: 'ms-client-id', nonce: 'n1' });
+      expect(mockHandleMicrosoftSSO).toHaveBeenCalledWith(identity);
     });
   });
 });

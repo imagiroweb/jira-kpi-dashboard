@@ -203,10 +203,11 @@ describe('authApi', () => {
         data: { success: true, token: 'ms-token', user },
       });
 
-      const result = await authApi.microsoftCallback('ms-access-token');
+      const result = await authApi.microsoftCallback('ms-id-token', 'nonce-1');
 
       expect(mockPost).toHaveBeenCalledWith('/api/auth/microsoft/callback', {
-        accessToken: 'ms-access-token',
+        idToken: 'ms-id-token',
+        nonce: 'nonce-1',
       });
       expect(result.success).toBe(true);
       expect(result.user).toEqual(user);
@@ -217,7 +218,7 @@ describe('authApi', () => {
         response: { data: { error: 'Token invalide' } },
       });
 
-      const result = await authApi.microsoftCallback('bad-token');
+      const result = await authApi.microsoftCallback('bad-token', 'n');
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Token invalide');

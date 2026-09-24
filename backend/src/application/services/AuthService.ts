@@ -8,6 +8,7 @@ import { Organization } from '../../domain/organization/entities/Organization';
 import { isEmailDomainAllowed } from '../../domain/organization/emailDomain';
 import { UserActivityLog } from '../../domain/user/entities/UserActivityLog';
 import { emailService } from '../../infrastructure/email/NodemailerEmailService';
+import type { MicrosoftIdentity } from '../../infrastructure/microsoft/MicrosoftIdTokenVerifier';
 import { logger } from '../../utils/logger';
 
 const SUPER_ADMIN_EMAIL = 'bdeguil-robin@adoria.com';
@@ -383,68 +384,87 @@ export class AuthService {
   }
 
   /**
-   * Handle Microsoft SSO callback
+   * Connexion SSO Microsoft à partir d'une identité issue d'un id_token déjà validé
+   * (signature, audience, émetteur, nonce — voir MicrosoftIdTokenVerifier).
+   *
+   * Liste blanche des tenants : le `tid` du jeton doit correspondre à une organisation active ;
+   * l'email doit appartenir à ses domaines autorisés. L'utilisateur est identifié par son `oid`
+   * (immuable), l'email ne sert qu'à rattacher un compte SSO existant de la même organisation.
    */
-  async handleMicrosoftSSO(
-    microsoftId: string,
-    email: string,
-    firstName?: string,
-    lastName?: string
-  ): Promise<LoginResult> {
+  async handleMicrosoftSSO(identity: MicrosoftIdentity): Promise<LoginResult & { status?: number }> {
     try {
-      if (!email || typeof email !== 'string') {
+      const organization = await Organization.findOne({
+        isActive: true,
+        sso: { $elemMatch: { provider: 'microsoft', tenantId: identity.tenantId } }
+      }).lean();
+      if (!organization) {
+        logger.warn(`SSO Microsoft refusé : tenant non autorisé (${identity.tenantId})`);
         return {
           success: false,
-          error: 'Email Microsoft manquant',
+          status: 403,
+          error: 'Votre organisation n’est pas autorisée à se connecter à cette application'
         };
       }
-      const normalizedEmail = email.toLowerCase();
 
-      // Find or create user
+      const normalizedEmail = identity.email;
+      if (!normalizedEmail) {
+        return { success: false, status: 401, error: 'Profil Microsoft sans adresse e-mail exploitable' };
+      }
+      if (!isEmailDomainAllowed(normalizedEmail, organization.allowedEmailDomains)) {
+        logger.warn(`SSO Microsoft refusé : domaine non autorisé pour l’organisation ${organization.slug}`);
+        return { success: false, status: 403, error: 'Domaine d’email non autorisé pour votre organisation' };
+      }
+
+      const orgId = String(organization._id);
       let user = await User.findOne({
         $or: [
-          { microsoftId },
+          { microsoftId: identity.objectId },
           { email: normalizedEmail, provider: 'microsoft' },
         ],
       });
 
+      if (user && user.organizationId && String(user.organizationId) !== orgId) {
+        logger.warn(`SSO Microsoft refusé : compte ${user._id} rattaché à une autre organisation`);
+        return { success: false, status: 403, error: 'Ce compte appartient à une autre organisation' };
+      }
+
       let firstLogin = false;
       if (!user) {
-        // Create new user from Microsoft SSO (must choose role on frontend)
+        // Nouveau compte SSO : rôle par défaut « Utilisateur », les accès sont attribués par un administrateur.
         firstLogin = true;
         const newUser = await User.create({
           email: normalizedEmail,
-          firstName,
-          lastName,
+          firstName: identity.firstName,
+          lastName: identity.lastName,
           provider: 'microsoft',
-          microsoftId,
+          microsoftId: identity.objectId,
           isActive: true,
+          organizationId: organization._id,
         });
-        await this.ensureSuperAdmin(newUser.email);
         await this.assignDefaultRoleIfNeeded(newUser);
         const refreshed = await User.findById(newUser._id).select('-password');
         if (!refreshed) throw new Error('User not found after create');
         user = refreshed;
-        logger.info(`New Microsoft SSO user created: ${normalizedEmail}`);
+        logger.info(`Nouveau compte SSO Microsoft : ${user._id} (organisation ${organization.slug})`);
       } else {
-        // Update last login and any changed info
         user.lastLogin = new Date();
-        if (firstName) user.firstName = firstName;
-        if (lastName) user.lastName = lastName;
-        if (!user.microsoftId) user.microsoftId = microsoftId;
+        if (identity.firstName) user.firstName = identity.firstName;
+        if (identity.lastName) user.lastName = identity.lastName;
+        if (!user.microsoftId) user.microsoftId = identity.objectId;
+        if (!user.organizationId) user.organizationId = organization._id as IUser['organizationId'];
         await user.save();
       }
-
-      await this.logLoginOncePerMinute(user._id);
 
       if (!user.isActive) {
         return {
           success: false,
+          status: 401,
           error: 'Ce compte a été désactivé',
         };
       }
 
-      await this.ensureSuperAdmin(user.email);
+      await this.logLoginOncePerMinute(user._id);
+
       const token = this.generateToken({
         userId: user._id.toString(),
         email: user.email,
@@ -452,7 +472,7 @@ export class AuthService {
       });
       const userWithPerms = await this.buildUserWithPermissions(user);
 
-      logger.info(`Microsoft SSO login: ${normalizedEmail}`);
+      logger.info(`Connexion SSO Microsoft : ${user._id}`);
 
       return {
         success: true,
@@ -477,6 +497,7 @@ export class AuthService {
       logger.error('Microsoft SSO error:', error);
       return {
         success: false,
+        status: 500,
         error: 'Erreur lors de la connexion Microsoft'
       };
     }

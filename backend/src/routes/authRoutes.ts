@@ -13,6 +13,7 @@ import { Role, IPageVisibilities, PAGE_IDS } from '../domain/user/entities/Role'
 import { UserActivityLog } from '../domain/user/entities/UserActivityLog';
 import { parseRoadmapAdoria2026Filters } from '../domain/user/parseRoadmapAdoria2026Filters';
 import { sanitizeMicrosoftAccessToken } from '../utils/sanitizeMicrosoftAccessToken';
+import { microsoftIdTokenVerifier, MicrosoftTokenError } from '../infrastructure/microsoft/MicrosoftIdTokenVerifier';
 
 import { logger } from '../utils/logger';
 
@@ -36,15 +37,6 @@ const requireMongo = (_req: Request, res: Response, next: () => void) => {
   next();
 };
 
-// Microsoft Graph API profile response type
-interface MicrosoftGraphProfile {
-  id: string;
-  mail?: string;
-  userPrincipalName: string;
-  givenName?: string;
-  surname?: string;
-  displayName?: string;
-}
 
 const router = Router();
 
@@ -53,7 +45,10 @@ const router = Router();
  */
 router.get('/microsoft/config', (req: Request, res: Response) => {
   const clientId = process.env.MICROSOFT_CLIENT_ID;
-  const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+  // Autorité utilisée par le navigateur : `organizations` (tout tenant professionnel, jamais les
+  // comptes personnels) pour le multi-entreprises, ou un tenant précis. Le backend n'accepte de
+  // toute façon que les tenants déclarés dans les organisations (liste blanche).
+  const tenantId = process.env.MICROSOFT_AUTHORITY_TENANT || process.env.MICROSOFT_TENANT_ID || 'organizations';
 
   if (!clientId) {
     return res.status(503).json({
@@ -235,90 +230,60 @@ router.post(
  *           schema:
  *             type: object
  *             required:
- *               - accessToken
+ *               - idToken
+ *               - nonce
  *             properties:
- *               accessToken:
+ *               idToken:
  *                 type: string
- *                 description: Microsoft access token
+ *                 description: id_token OpenID Connect émis par Microsoft Entra ID pour cette application
+ *               nonce:
+ *                 type: string
+ *                 description: nonce envoyé à l'autorisation (anti-rejeu)
  *     responses:
  *       200:
  *         description: SSO login successful
  *       401:
- *         description: Invalid token
+ *         description: Jeton invalide (signature, audience, émetteur, nonce, expiration)
+ *       403:
+ *         description: Tenant ou domaine d'email non autorisé (aucune organisation correspondante)
  */
 router.post('/microsoft/callback', async (req: Request, res: Response) => {
-  try {
-    const accessToken = sanitizeMicrosoftAccessToken(req.body?.accessToken);
+  const idToken = sanitizeMicrosoftAccessToken(req.body?.idToken);
+  const nonce = typeof req.body?.nonce === 'string' ? req.body.nonce : undefined;
 
-    if (!accessToken) {
-      return res.status(400).json({
-        success: false,
-        error:
-          'Token Microsoft manquant ou invalide (format incorrect : JSON, espaces ou caractères interdits dans le header Authorization)',
-      });
-    }
-
-    // Verify the token with Microsoft Graph API
-    const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
-
-    if (!graphResponse.ok) {
-      return res.status(401).json({
-        success: false,
-        error: 'Token Microsoft invalide',
-      });
-    }
-
-    const profile = (await graphResponse.json()) as MicrosoftGraphProfile;
-    const email = profile.mail || profile.userPrincipalName;
-    if (!email || typeof email !== 'string') {
-      return res.status(401).json({
-        success: false,
-        error: 'Profil Microsoft sans adresse e-mail exploitable',
-      });
-    }
-
-    // Handle SSO login/registration
-    const result = await authService.handleMicrosoftSSO(
-      profile.id,
-      email,
-      profile.givenName,
-      profile.surname
-    );
-
-    if (!result.success) {
-      return res.status(401).json({
-        success: false,
-        error: result.error,
-      });
-    }
-
-    res.json({
-      success: true,
-      token: result.token,
-      user: result.user,
-      firstLogin: result.firstLogin,
-    });
-  } catch (error) {
-    const err = error as { message?: string; code?: string; cause?: { message?: string } };
-    logger.error('Microsoft SSO callback error:', {
-      message: err?.message,
-      code: err?.code,
-      cause: err?.cause?.message,
-    });
-    const detail = err?.cause?.message || err?.message || '';
-    const headerIssue =
-      /invalid character in header|invalid header value|is an invalid header/i.test(detail);
-    res.status(500).json({
+  if (!idToken || !nonce) {
+    return res.status(400).json({
       success: false,
-      error: headerIssue
-        ? 'Erreur SSO : caractère invalide dans le header Authorization (token Microsoft corrompu). Réessayez la connexion.'
-        : 'Erreur lors de la connexion Microsoft',
+      error: 'Jeton Microsoft (id_token) ou nonce manquant ou invalide. Réessayez la connexion SSO.',
     });
   }
+
+  let identity;
+  try {
+    identity = await microsoftIdTokenVerifier.verify(idToken, {
+      clientId: process.env.MICROSOFT_CLIENT_ID || '',
+      nonce,
+    });
+  } catch (error) {
+    if (error instanceof MicrosoftTokenError) {
+      logger.warn(`SSO Microsoft : jeton rejeté (${error.message})`);
+      return res.status(401).json({ success: false, error: 'Jeton Microsoft invalide' });
+    }
+    logger.error('Microsoft SSO verification error:', { message: (error as Error)?.message });
+    return res.status(503).json({ success: false, error: 'Vérification Microsoft indisponible, réessayez plus tard' });
+  }
+
+  const result = await authService.handleMicrosoftSSO(identity);
+  if (!result.success) {
+    return res.status(result.status ?? 401).json({ success: false, error: result.error });
+  }
+
+  res.json({
+    success: true,
+    token: result.token,
+    user: result.user,
+    firstLogin: result.firstLogin,
+  });
 });
 
 /**

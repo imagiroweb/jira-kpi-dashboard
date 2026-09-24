@@ -46,6 +46,8 @@ describe('MicrosoftCallback', () => {
     vi.stubGlobal('history', {
       replaceState: vi.fn(),
     });
+    sessionStorage.setItem('ms_oauth_state', 'st-1');
+    sessionStorage.setItem('ms_oauth_nonce', 'nonce-1');
   });
 
   afterEach(() => {
@@ -55,7 +57,7 @@ describe('MicrosoftCallback', () => {
 
   it('affiche le loader pendant la vérification Microsoft', () => {
     mockMicrosoftCallback.mockImplementation(() => new Promise(() => {}));
-    stubLocation({ hash: '#access_token=pending-token' });
+    stubLocation({ hash: '#state=st-1&id_token=pending-token' });
 
     render(<MicrosoftCallback />);
 
@@ -86,18 +88,30 @@ describe('MicrosoftCallback', () => {
     });
   });
 
-  it('affiche une erreur si le token est absent', async () => {
-    stubLocation({ hash: '' });
+  it('affiche une erreur si l’id_token est absent', async () => {
+    stubLocation({ hash: '#state=st-1' });
 
     render(<MicrosoftCallback />);
 
     await waitFor(() => {
-      expect(screen.getByText(/Token d'accès manquant/i)).toBeInTheDocument();
+      expect(screen.getByText(/Jeton d'identité manquant/i)).toBeInTheDocument();
     });
   });
 
+  it('refuse un state qui ne correspond pas à la demande émise (anti-CSRF)', async () => {
+    stubLocation({ hash: '#state=forge&id_token=a.b.c' });
+
+    render(<MicrosoftCallback />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Session de connexion expirée ou invalide/i)).toBeInTheDocument();
+    });
+    expect(mockMicrosoftCallback).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem('ms_oauth_nonce')).toBeNull();
+  });
+
   it('affiche une erreur si le token du hash est corrompu (espace / accolade)', async () => {
-    stubLocation({ hash: '#access_token=tok%20en' });
+    stubLocation({ hash: '#state=st-1&id_token=tok%20en' });
 
     render(<MicrosoftCallback />);
 
@@ -107,8 +121,8 @@ describe('MicrosoftCallback', () => {
     expect(mockMicrosoftCallback).not.toHaveBeenCalled();
   });
 
-  it('préserve les + du access_token avant l’appel backend', async () => {
-    stubLocation({ hash: '#access_token=abc%2Bdef' });
+  it('préserve les + de l’id_token avant l’appel backend', async () => {
+    stubLocation({ hash: '#state=st-1&id_token=abc%2Bdef' });
     mockMicrosoftCallback.mockResolvedValue({
       success: true,
       token: 'jwt-token',
@@ -119,13 +133,13 @@ describe('MicrosoftCallback', () => {
     render(<MicrosoftCallback />);
 
     await waitFor(() => {
-      expect(mockMicrosoftCallback).toHaveBeenCalledWith('abc+def');
+      expect(mockMicrosoftCallback).toHaveBeenCalledWith('abc+def', 'nonce-1');
     });
   });
 
   it('connecte l’utilisateur et redirige après succès', async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
-    const location = stubLocation({ hash: '#access_token=valid-ms-token' });
+    const location = stubLocation({ hash: '#state=st-1&id_token=valid-ms-token' });
 
     mockMicrosoftCallback.mockResolvedValue({
       success: true,
@@ -140,7 +154,7 @@ describe('MicrosoftCallback', () => {
       expect(screen.getByText('Connexion réussie !')).toBeInTheDocument();
     });
 
-    expect(mockMicrosoftCallback).toHaveBeenCalledWith('valid-ms-token');
+    expect(mockMicrosoftCallback).toHaveBeenCalledWith('valid-ms-token', 'nonce-1');
 
     vi.advanceTimersByTime(1000);
 
@@ -152,7 +166,7 @@ describe('MicrosoftCallback', () => {
   });
 
   it('affiche une erreur si le backend refuse le token', async () => {
-    stubLocation({ hash: '#access_token=bad-token' });
+    stubLocation({ hash: '#state=st-1&id_token=bad-token' });
     mockMicrosoftCallback.mockResolvedValue({ success: false, error: 'Compte non autorisé' });
 
     render(<MicrosoftCallback />);
@@ -163,7 +177,7 @@ describe('MicrosoftCallback', () => {
   });
 
   it('affiche une erreur réseau en cas d’exception', async () => {
-    stubLocation({ hash: '#access_token=token' });
+    stubLocation({ hash: '#state=st-1&id_token=token' });
     mockMicrosoftCallback.mockRejectedValue(new Error('Network error'));
 
     render(<MicrosoftCallback />);
@@ -174,7 +188,7 @@ describe('MicrosoftCallback', () => {
   });
 
   it('n’affiche pas une SyntaxError brute (message technique Safari)', async () => {
-    stubLocation({ hash: '#access_token=token' });
+    stubLocation({ hash: '#state=st-1&id_token=token' });
     mockMicrosoftCallback.mockRejectedValue(
       new SyntaxError("Unexpected token '{'. Expected ')' to end a compound expression")
     );

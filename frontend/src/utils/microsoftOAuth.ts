@@ -40,3 +40,41 @@ export function isSafeMicrosoftAccessToken(token: unknown): token is string {
   if (/[\s{}]/.test(t)) return false;
   return true;
 }
+
+const OAUTH_STATE_KEY = 'ms_oauth_state';
+const OAUTH_NONCE_KEY = 'ms_oauth_nonce';
+
+/**
+ * Génère et mémorise (sessionStorage, onglet courant) le `state` (anti-CSRF) et le `nonce`
+ * (anti-rejeu, vérifié par le backend dans l'id_token) d'une demande d'autorisation Microsoft.
+ */
+export function createOAuthRequestState(): { state: string; nonce: string } {
+  const state = crypto.randomUUID();
+  const nonce = crypto.randomUUID();
+  try {
+    sessionStorage.setItem(OAUTH_STATE_KEY, state);
+    sessionStorage.setItem(OAUTH_NONCE_KEY, nonce);
+  } catch {
+    // stockage indisponible : la vérification du retour échouera proprement
+  }
+  return { state, nonce };
+}
+
+/**
+ * Récupère puis efface le `state` / `nonce` mémorisés (usage unique).
+ * Retourne null si le `state` reçu ne correspond pas à celui émis par cet onglet.
+ */
+export function consumeOAuthRequestState(receivedState: string | undefined): { nonce: string } | null {
+  let state: string | null = null;
+  let nonce: string | null = null;
+  try {
+    state = sessionStorage.getItem(OAUTH_STATE_KEY);
+    nonce = sessionStorage.getItem(OAUTH_NONCE_KEY);
+    sessionStorage.removeItem(OAUTH_STATE_KEY);
+    sessionStorage.removeItem(OAUTH_NONCE_KEY);
+  } catch {
+    return null;
+  }
+  if (!state || !nonce || !receivedState || receivedState !== state) return null;
+  return { nonce };
+}

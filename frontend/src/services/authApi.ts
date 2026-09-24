@@ -167,10 +167,11 @@ export const authApi = {
   /**
    * Handle Microsoft SSO callback
    */
-  async microsoftCallback(accessToken: string): Promise<AuthResponse> {
+  async microsoftCallback(idToken: string, nonce: string): Promise<AuthResponse> {
     try {
       const response = await api.post<AuthResponse>('/api/auth/microsoft/callback', {
-        accessToken
+        idToken,
+        nonce
       });
       return response.data;
     } catch (error: unknown) {

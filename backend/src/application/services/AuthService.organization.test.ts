@@ -10,6 +10,7 @@ const mockUserExists = jest.fn();
 const mockUserCreate = jest.fn();
 const mockUserUpdateOne = jest.fn();
 const mockOrgFindById = jest.fn();
+const mockOrgFindOne = jest.fn();
 const mockRoleFindById = jest.fn();
 const mockRoleFindOne = jest.fn();
 const mockSendInvitation = jest.fn();
@@ -17,7 +18,14 @@ const mockSendInvitation = jest.fn();
 jest.mock('../../domain/user/entities/User', () => ({
   User: {
     findOne: (...a: unknown[]) => mockUserFindOne(...a),
-    findById: (...a: unknown[]) => ({ select: () => ({ lean: () => mockUserFindById(...a) }) }),
+    // .select().lean() (admin) ou await .select('-password') (création SSO)
+    findById: (...a: unknown[]) => ({
+      select: () => {
+        const p = Promise.resolve(mockUserFindById(...a)) as Promise<unknown> & { lean?: () => unknown };
+        p.lean = () => mockUserFindById(...a);
+        return p;
+      }
+    }),
     exists: (...a: unknown[]) => mockUserExists(...a),
     create: (...a: unknown[]) => mockUserCreate(...a),
     updateOne: (...a: unknown[]) => mockUserUpdateOne(...a),
@@ -28,6 +36,7 @@ jest.mock('../../domain/user/entities/User', () => ({
 
 jest.mock('../../domain/organization/entities/Organization', () => ({
   Organization: {
+    findOne: (...a: unknown[]) => ({ lean: () => mockOrgFindOne(...a) }),
     findById: (...a: unknown[]) => {
       const lean = () => mockOrgFindById(...a);
       return { select: () => ({ lean }), lean };
@@ -204,6 +213,108 @@ describe('AuthService — organisation', () => {
 
       expect(result.success).toBe(false);
       expect(mockOrgFindById).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('handleMicrosoftSSO (liste blanche des tenants)', () => {
+    const TENANT = '8f2c1d3e-1234-4abc-9def-0123456789ab';
+    const identity = { tenantId: TENANT, objectId: 'oid-1', email: 'jean@adoria.com', firstName: 'Jean', lastName: 'Dupont' };
+
+    function ssoUser(overrides: Record<string, unknown> = {}) {
+      return {
+        _id: new mongoose.Types.ObjectId(),
+        email: 'jean@adoria.com',
+        provider: 'microsoft',
+        isActive: true,
+        organizationId: ORG_ID,
+        microsoftId: 'oid-1',
+        save: jest.fn().mockResolvedValue(undefined),
+        ...overrides
+      };
+    }
+
+    beforeEach(() => {
+      mockOrgFindOne.mockResolvedValue(activeOrg);
+      mockRoleFindOne.mockResolvedValue({ _id: new mongoose.Types.ObjectId() });
+    });
+
+    it('cherche l’organisation active correspondant au tenant du jeton', async () => {
+      mockUserFindOne.mockResolvedValue(ssoUser());
+
+      await service.handleMicrosoftSSO(identity);
+
+      expect(mockOrgFindOne).toHaveBeenCalledWith({
+        isActive: true,
+        sso: { $elemMatch: { provider: 'microsoft', tenantId: TENANT } }
+      });
+    });
+
+    it('refuse (403) un tenant qui ne correspond à aucune organisation', async () => {
+      mockOrgFindOne.mockResolvedValue(null);
+
+      const result = await service.handleMicrosoftSSO({ ...identity, tenantId: '9188040d-6c67-4c5b-b112-36a304b66dad' });
+
+      expect(result).toEqual(expect.objectContaining({ success: false, status: 403 }));
+      expect(mockUserFindOne).not.toHaveBeenCalled();
+      expect(mockUserCreate).not.toHaveBeenCalled();
+    });
+
+    it('refuse (403) un domaine d’email hors de l’organisation', async () => {
+      const result = await service.handleMicrosoftSSO({ ...identity, email: 'jean@partenaire.fr' });
+
+      expect(result).toEqual(expect.objectContaining({ success: false, status: 403 }));
+      expect(mockUserCreate).not.toHaveBeenCalled();
+    });
+
+    it('refuse un compte rattaché à une autre organisation', async () => {
+      mockUserFindOne.mockResolvedValue(ssoUser({ organizationId: new mongoose.Types.ObjectId() }));
+
+      const result = await service.handleMicrosoftSSO(identity);
+
+      expect(result).toEqual(expect.objectContaining({ success: false, status: 403 }));
+    });
+
+    it('crée un nouveau compte dans l’organisation du tenant, rôle par défaut', async () => {
+      mockUserFindOne.mockResolvedValue(null);
+      const created = ssoUser();
+      mockUserCreate.mockResolvedValue(created);
+      mockUserFindById.mockResolvedValue(created);
+
+      const result = await service.handleMicrosoftSSO(identity);
+
+      expect(result.success).toBe(true);
+      expect(result.firstLogin).toBe(true);
+      expect(mockUserCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ email: 'jean@adoria.com', microsoftId: 'oid-1', organizationId: ORG_ID, provider: 'microsoft' })
+      );
+      expect(result.user?.role).toBeUndefined();
+    });
+
+    it('rattache à l’organisation un compte existant qui n’en avait pas', async () => {
+      const user = ssoUser({ organizationId: undefined, microsoftId: undefined });
+      mockUserFindOne.mockResolvedValue(user);
+
+      const result = await service.handleMicrosoftSSO(identity);
+
+      expect(result.success).toBe(true);
+      expect(user.organizationId).toBe(ORG_ID);
+      expect(user.microsoftId).toBe('oid-1');
+      expect(user.save).toHaveBeenCalled();
+    });
+
+    it('refuse un compte désactivé sans émettre de jeton', async () => {
+      mockUserFindOne.mockResolvedValue(ssoUser({ isActive: false }));
+
+      const result = await service.handleMicrosoftSSO(identity);
+
+      expect(result.success).toBe(false);
+      expect(result.token).toBeUndefined();
+    });
+
+    it('refuse un profil sans email', async () => {
+      const result = await service.handleMicrosoftSSO({ ...identity, email: null });
+
+      expect(result).toEqual(expect.objectContaining({ success: false, status: 401 }));
     });
   });
 });
