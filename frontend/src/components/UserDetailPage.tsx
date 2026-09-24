@@ -5,6 +5,7 @@ import { UserWorkloadChart } from './UserWorkloadChart';
 import { UserTicketsChart } from './UserTicketsChart';
 import { Users, PlayCircle, CheckCircle, CalendarDays } from 'lucide-react';
 import { useStore } from '../store/useStore';
+import { authFetch } from '../services/authFetch';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -59,7 +60,7 @@ export function UserDetailPage() {
         params.append('groupBy', 'user');
         params.append('projectKeys', sp.join(','));
 
-        const response = await fetch(`${API_BASE_URL}/worklog/report?${params}`);
+        const response = await authFetch(`${API_BASE_URL}/worklog/report?${params}`);
 
         if (response.status === 429) {
           return;

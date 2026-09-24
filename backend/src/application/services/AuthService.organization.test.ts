@@ -318,3 +318,16 @@ describe('AuthService — organisation', () => {
     });
   });
 });
+
+describe('AuthService.getVisiblePages — moindre privilège', () => {
+  it('un utilisateur sans rôle ne voit que le dashboard et sa performance', async () => {
+    const service = new AuthService();
+    const pages = await service.getVisiblePages({ roleId: undefined } as never);
+
+    expect(pages.dashboard).toBe(true);
+    expect(pages.performance).toBe(true);
+    for (const page of ['users', 'support', 'epics', 'marketing', 'produit', 'pointHebdo', 'gestionUtilisateurs', 'couts'] as const) {
+      expect(pages[page]).toBe(false);
+    }
+  });
+});

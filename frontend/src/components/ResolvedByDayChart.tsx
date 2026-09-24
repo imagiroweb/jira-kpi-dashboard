@@ -10,6 +10,7 @@ import {
   ResponsiveContainer,
   BarChart
 } from 'recharts';
+import { authFetch } from '../services/authFetch';
 
 interface BoardInfo {
   id: number;
@@ -58,7 +59,7 @@ export function ResolvedByDayChart({ dateRange, boards, useActiveSprint = false 
         params.set('from', dateRange.from);
         params.set('to', dateRange.to);
       }
-      const response = await fetch(`${API_BASE_URL}/jira/resolved-by-day?${params}`);
+      const response = await authFetch(`${API_BASE_URL}/jira/resolved-by-day?${params}`);
       if (!response.ok) throw new Error(`HTTP ${response.status}`);
       const result = await response.json();
       if (result.success) {

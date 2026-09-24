@@ -3,11 +3,15 @@ import { worklogAppService } from '../application/services/WorklogApplicationSer
 import { globalCache } from '../infrastructure/cache/CacheDecorator';
 import { logger } from '../utils/logger';
 import { SupportSprintSnapshot } from '../domain/support/entities/SupportSprintSnapshot';
-import { authenticate } from '../middleware/authMiddleware';
+import { authenticate, requireSuperAdmin } from '../middleware/authMiddleware';
+import { requirePage } from '../middleware/requirePage';
 import { Server } from 'socket.io';
 import { emitKPIUpdate, emitSyncProgress, emitAlert } from '../websocket/socketHandler';
 
 const router = Router();
+
+// Toutes les routes exigent une session (données Jira nominatives : temps passé par personne…).
+router.use(authenticate);
 
 /** Parse `projectKeys` / `projectKeys` répété (Express peut renvoyer string | string[]). */
 function parseProjectKeysFromQuery(req: Request): string[] {
@@ -51,35 +55,10 @@ const getIO = (req: Request): Server | null => {
 };
 
 /**
- * Test connection
- * GET /api/worklog/test
- */
-router.get('/test', async (req: Request, res: Response) => {
-  try {
-    const result = await worklogAppService.testConnection();
-    res.json({
-      success: result.success,
-      message: result.success 
-        ? `Connection successful via ${result.endpoint}` 
-        : 'Connection failed',
-      endpoint: result.endpoint,
-      version: result.version
-    });
-  } catch (error) {
-    logger.error('Connection test error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to test connection',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
-
-/**
  * Get worklogs for a specific issue
  * GET /api/worklog/issue/:issueKey
  */
-router.get('/issue/:issueKey', async (req: Request, res: Response) => {
+router.get('/issue/:issueKey', requirePage('users'), async (req: Request, res: Response) => {
   try {
     const { issueKey } = req.params;
     const worklogs = await worklogAppService.getWorklogsForIssue(issueKey);
@@ -104,7 +83,7 @@ router.get('/issue/:issueKey', async (req: Request, res: Response) => {
  * Get worklogs for a user within a date range
  * GET /api/worklog/user/:accountId?from=YYYY-MM-DD&to=YYYY-MM-DD
  */
-router.get('/user/:accountId', async (req: Request, res: Response) => {
+router.get('/user/:accountId', requirePage('users'), async (req: Request, res: Response) => {
   try {
     const { accountId } = req.params;
     const { from, to } = req.query;
@@ -147,7 +126,7 @@ router.get('/user/:accountId', async (req: Request, res: Response) => {
  * Search worklogs with filters
  * GET /api/worklog/search
  */
-router.get('/search', async (req: Request, res: Response) => {
+router.get('/search', requirePage('users'), async (req: Request, res: Response) => {
   try {
     const { from, to, issueKey, accountId, teamName, openSprints, activeSprint } = req.query;
     const useActiveSprint = activeSprint === 'true';
@@ -218,7 +197,7 @@ router.get('/search', async (req: Request, res: Response) => {
  * Get worklogs for a project
  * GET /api/worklog/project/:projectKey?from=YYYY-MM-DD&to=YYYY-MM-DD
  */
-router.get('/project/:projectKey', async (req: Request, res: Response) => {
+router.get('/project/:projectKey', requirePage('users'), async (req: Request, res: Response) => {
   try {
     const { projectKey } = req.params;
     const { from, to } = req.query;
@@ -261,7 +240,7 @@ router.get('/project/:projectKey', async (req: Request, res: Response) => {
  * Get daily/weekly summary report
  * GET /api/worklog/report
  */
-router.get('/report', async (req: Request, res: Response) => {
+router.get('/report', requirePage('users'), async (req: Request, res: Response) => {
   try {
     const { from, to, groupBy = 'day', activeSprint } = req.query;
     const useActiveSprint = activeSprint === 'true';
@@ -339,7 +318,7 @@ router.get('/report', async (req: Request, res: Response) => {
  * Get sprint issues for a project
  * GET /api/worklog/sprint-issues/:projectKey
  */
-router.get('/sprint-issues/:projectKey', async (req: Request, res: Response) => {
+router.get('/sprint-issues/:projectKey', requirePage('dashboard', 'users'), async (req: Request, res: Response) => {
   try {
     const { projectKey } = req.params;
     const result = await worklogAppService.getSprintIssuesForProject(projectKey);
@@ -368,7 +347,7 @@ router.get('/sprint-issues/:projectKey', async (req: Request, res: Response) => 
  * Get velocity history for a project
  * GET /api/worklog/velocity-history/:projectKey
  */
-router.get('/velocity-history/:projectKey', async (req: Request, res: Response) => {
+router.get('/velocity-history/:projectKey', requirePage('dashboard', 'users'), async (req: Request, res: Response) => {
   try {
     const { projectKey } = req.params;
     const sprintCount = parseInt(req.query.sprintCount as string) || 10;
@@ -397,7 +376,7 @@ router.get('/velocity-history/:projectKey', async (req: Request, res: Response) 
  * Get Support Board KPIs
  * GET /api/worklog/support-kpi
  */
-router.get('/support-kpi', async (req: Request, res: Response) => {
+router.get('/support-kpi', requirePage('support'), async (req: Request, res: Response) => {
   try {
     const { from, to, activeSprint } = req.query;
     const useActiveSprint = activeSprint === 'true' || (!from && !to);
@@ -429,7 +408,7 @@ router.get('/support-kpi', async (req: Request, res: Response) => {
  * Get cache statistics
  * GET /api/worklog/cache/stats
  */
-router.get('/cache/stats', async (_req: Request, res: Response) => {
+router.get('/cache/stats', requireSuperAdmin, async (_req: Request, res: Response) => {
   res.json({
     success: true,
     message: 'Cache mémoire process-local (issue #37 : support-kpi + support-build-ratio)',
@@ -445,7 +424,7 @@ router.get('/cache/stats', async (_req: Request, res: Response) => {
  * Clear cache
  * DELETE /api/worklog/cache
  */
-router.delete('/cache', async (req: Request, res: Response) => {
+router.delete('/cache', requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     globalCache.clear();
     
@@ -475,7 +454,7 @@ router.delete('/cache', async (req: Request, res: Response) => {
  * Force sync all data
  * POST /api/worklog/sync
  */
-router.post('/sync', authenticate, async (req: Request, res: Response) => {
+router.post('/sync', async (req: Request, res: Response) => {
   const io = getIO(req);
   
   try {
@@ -568,7 +547,7 @@ router.post('/sync', authenticate, async (req: Request, res: Response) => {
  * Save Support Sprint Snapshot
  * POST /api/worklog/support-snapshot
  */
-router.post('/support-snapshot', authenticate, async (req: Request, res: Response) => {
+router.post('/support-snapshot', requirePage('support'), async (req: Request, res: Response) => {
   try {
     const { sprintName, notes } = req.body;
     const { from, to, activeSprint } = req.query;
@@ -646,7 +625,7 @@ router.post('/support-snapshot', authenticate, async (req: Request, res: Respons
  * Get all Support Sprint Snapshots
  * GET /api/worklog/support-snapshots
  */
-router.get('/support-snapshots', async (req: Request, res: Response) => {
+router.get('/support-snapshots', requirePage('support'), async (req: Request, res: Response) => {
   try {
     const { limit = 50 } = req.query;
     
@@ -687,7 +666,7 @@ router.get('/support-snapshots', async (req: Request, res: Response) => {
  * Get a specific Support Sprint Snapshot
  * GET /api/worklog/support-snapshot/:id
  */
-router.get('/support-snapshot/:id', async (req: Request, res: Response) => {
+router.get('/support-snapshot/:id', requirePage('support'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     
@@ -726,7 +705,7 @@ router.get('/support-snapshot/:id', async (req: Request, res: Response) => {
  * Delete a Support Sprint Snapshot
  * DELETE /api/worklog/support-snapshot/:id
  */
-router.delete('/support-snapshot/:id', authenticate, async (req: Request, res: Response) => {
+router.delete('/support-snapshot/:id', requirePage('support'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     
@@ -758,19 +737,19 @@ router.delete('/support-snapshot/:id', authenticate, async (req: Request, res: R
 /**
  * Stub endpoints for backward compatibility
  */
-router.get('/discover', async (req: Request, res: Response) => {
+router.get('/discover', requirePage('users'), async (req: Request, res: Response) => {
   res.json({ success: true, availableEndpoints: ['Jira Cloud REST API v3'] });
 });
 
-router.get('/discover-reports', async (req: Request, res: Response) => {
+router.get('/discover-reports', requirePage('users'), async (req: Request, res: Response) => {
   res.json({ success: true, availableEndpoints: [] });
 });
 
-router.get('/saved-reports', async (req: Request, res: Response) => {
+router.get('/saved-reports', requirePage('users'), async (req: Request, res: Response) => {
   res.json({ success: true, count: 0, reports: [] });
 });
 
-router.get('/attributes', async (req: Request, res: Response) => {
+router.get('/attributes', requirePage('users'), async (req: Request, res: Response) => {
   res.json({ success: true, attributes: [] });
 });
 

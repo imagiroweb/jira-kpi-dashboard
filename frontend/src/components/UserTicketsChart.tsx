@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { User, Ticket, Clock, CheckCircle, AlertCircle, ChevronDown, Search, Zap } from 'lucide-react';
+import { authFetch } from '../services/authFetch';
 
 interface TicketData {
   issueKey: string;
@@ -136,7 +137,7 @@ export function UserTicketsChart({
         params.append('accountId', selectedUser.accountId);
         params.append('projectKeys', selectedProjects.join(','));
 
-        const response = await fetch(`${API_BASE_URL}/worklog/search?${params}`);
+        const response = await authFetch(`${API_BASE_URL}/worklog/search?${params}`);
         
         // Handle rate limiting and errors
         if (response.status === 429) {

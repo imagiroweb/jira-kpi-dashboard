@@ -566,14 +566,16 @@ export class AuthService {
       const role = await Role.findById(user.roleId).lean();
       if (role?.pageVisibilities) return role.pageVisibilities as IPageVisibilities;
     }
+    // Sans rôle : moindre privilège (équivalent du rôle « Utilisateur »), jamais l'accès aux
+    // données nominatives (temps par personne, emails Brevo…) par défaut.
     return {
       dashboard: true,
-      users: true,
-      support: true,
-      epics: true,
-      marketing: true,
-      produit: true,
-      pointHebdo: true,
+      users: false,
+      support: false,
+      epics: false,
+      marketing: false,
+      produit: false,
+      pointHebdo: false,
       gestionUtilisateurs: false,
       performance: true,
       performanceDashboard: false,

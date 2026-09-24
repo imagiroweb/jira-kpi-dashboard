@@ -8,6 +8,7 @@ import { DateRangePicker } from './DateRangePicker';
 import { ResolvedByDayChart } from './ResolvedByDayChart';
 import { useStore, BoardStats } from '../store/useStore';
 import { dashboardSnapshotApi, DashboardSnapshotSummary, DashboardSnapshotFull } from '../services/api';
+import { authFetch } from '../services/authFetch';
 
 // Type pour les boards configurés
 interface ConfiguredBoard {
@@ -125,7 +126,7 @@ export function SprintDashboard() {
   useEffect(() => {
     const loadConfiguredBoards = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/jira/configured-boards`);
+        const response = await authFetch(`${API_BASE_URL}/jira/configured-boards`);
         if (response.ok) {
           const result = await response.json();
           if (result.success && Array.isArray(result.boards)) {
@@ -169,7 +170,7 @@ export function SprintDashboard() {
       let allStats: BoardStats[] = [];
 
       try {
-        const batchRes = await fetch(
+        const batchRes = await authFetch(
           `${API_BASE_URL}/jira/dashboard/sprint-issues-all${query ? `?${query}` : ''}`
         );
 
@@ -192,7 +193,7 @@ export function SprintDashboard() {
 
         if (allStats.length === 0) {
           const fetches = configuredBoards.map(async (board) => {
-            const sprintIssuesResponse = await fetch(
+            const sprintIssuesResponse = await authFetch(
               `${API_BASE_URL}/jira/board/${board.id}/sprint-issues${query ? `?${query}` : ''}`
             );
             if (sprintIssuesResponse.status === 429) {

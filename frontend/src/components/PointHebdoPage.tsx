@@ -82,6 +82,7 @@ import {
   type WeeklyMeetingSummary,
 } from '../domain/pointHebdoSprint';
 import { useStore } from '../store/useStore';
+import { authFetch } from '../services/authFetch';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -188,7 +189,7 @@ export function PointHebdoPage() {
   useEffect(() => {
     const loadBoards = async () => {
       try {
-        const res = await fetch(`${API_BASE_URL}/jira/configured-boards`);
+        const res = await authFetch(`${API_BASE_URL}/jira/configured-boards`);
         if (!res.ok) return;
         const json = await res.json();
         if (json.success && Array.isArray(json.boards)) {
@@ -373,7 +374,7 @@ export function PointHebdoPage() {
 
   /** Chiffres du sprint en cours de chaque board : périmètre, statuts, tickets. */
   const fetchSprintBoards = useCallback(async (): Promise<SprintBoardResult[]> => {
-    const res = await fetch(`${API_BASE_URL}/jira/dashboard/sprint-issues-all?includeQa=true`);
+    const res = await authFetch(`${API_BASE_URL}/jira/dashboard/sprint-issues-all?includeQa=true`);
     if (!res.ok) throw new Error('Jira indisponible');
     const json = await res.json();
     if (!json.success || !Array.isArray(json.boards)) throw new Error('Réponse Jira invalide');
@@ -389,7 +390,7 @@ export function PointHebdoPage() {
 
   /** Burndown fidèle (ajouts / retraits / résolutions) du sprint actif. */
   const fetchSprintBurndowns = useCallback(async (): Promise<Array<{ boardId: number } & TeamBurndown>> => {
-    const res = await fetch(`${API_BASE_URL}/jira/sprint-burndown?includeQa=true`);
+    const res = await authFetch(`${API_BASE_URL}/jira/sprint-burndown?includeQa=true`);
     if (!res.ok) throw new Error('Burndown indisponible');
     const json = await res.json();
     if (!json.success || !Array.isArray(json.boards)) throw new Error('Réponse Jira invalide');

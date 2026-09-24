@@ -14,6 +14,15 @@ import {
 import { createWorklogAppServiceMock } from '../test/mocks/worklogAppService';
 
 let authMode: 'pass' | 'deny' = 'pass';
+let mockIsSuperAdmin = true;
+
+// Contrôle par page testé à part (middleware/requirePage.test.ts) : ici, laisse passer
+// sauf si mockPageAccess = 'deny'.
+let mockPageAccess = 'allow' as 'allow' | 'deny';
+jest.mock('../middleware/requirePage', () => ({
+  requirePage: () => (_req: unknown, res: { status: (c: number) => { json: (b: unknown) => void } }, next: () => void) =>
+    mockPageAccess === 'deny' ? res.status(403).json({ success: false, error: 'Accès non autorisé pour votre rôle' }) : next(),
+}));
 
 jest.mock('../middleware/authMiddleware', () => {
   const auth = jest.requireActual<typeof import('../test/mocks/authMiddleware')>(
@@ -26,7 +35,8 @@ jest.mock('../middleware/authMiddleware', () => {
       }
       return auth.mockAuthenticate()(req, res, next);
     },
-    requireSuperAdmin: auth.mockRequireSuperAdmin,
+    requireSuperAdmin: (req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) =>
+      mockIsSuperAdmin ? auth.mockRequireSuperAdmin(req, res, next) : res.status(403).json({ success: false }),
   };
 });
 
@@ -66,6 +76,8 @@ describe('worklogRoutes — core (TI)', () => {
   });
 
   beforeEach(() => {
+    mockIsSuperAdmin = true;
+    mockPageAccess = 'allow';
     jest.clearAllMocks();
     authMode = 'pass';
     mockGlobalCache.clear.mockReset().mockImplementation(() => undefined);
@@ -90,38 +102,31 @@ describe('worklogRoutes — core (TI)', () => {
     mockWorklogAppService.getSupportBoardKPI.mockResolvedValue(TEST_SUPPORT_KPI_RESULT);
   });
 
-  describe('GET /api/worklog/test', () => {
-    it('retourne 200 en cas de connexion réussie', async () => {
+  describe('sécurité', () => {
+    it('la route de diagnostic /test a été supprimée', async () => {
       const res = await request(app).get('/api/worklog/test');
-
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.message).toMatch(/Connection successful/);
-      expect(res.body.endpoint).toBe('https://jira.example.com');
-      expect(mockWorklogAppService.testConnection).toHaveBeenCalled();
+      expect(res.status).toBe(404);
     });
 
-    it('retourne 200 avec success false si la connexion échoue', async () => {
-      mockWorklogAppService.testConnection.mockResolvedValue({
-        success: false,
-        endpoint: 'https://jira.example.com',
-      });
+    it.each(['/api/worklog/user/acc-1', '/api/worklog/search', '/api/worklog/report', '/api/worklog/support-kpi', '/api/worklog/saved-reports'])(
+      'GET %s → 401 sans session',
+      async (url) => {
+        authMode = 'deny';
+        const res = await request(app).get(url);
+        expect(res.status).toBe(401);
+      }
+    );
 
-      const res = await request(app).get('/api/worklog/test');
-
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(false);
-      expect(res.body.message).toBe('Connection failed');
+    it('GET /api/worklog/user/:accountId → 403 sans la page Utilisateurs', async () => {
+      mockPageAccess = 'deny';
+      const res = await request(app).get('/api/worklog/user/acc-1');
+      expect(res.status).toBe(403);
     });
 
-    it('retourne 500 si testConnection lève une erreur', async () => {
-      mockWorklogAppService.testConnection.mockRejectedValue(new Error('network'));
-
-      const res = await request(app).get('/api/worklog/test');
-
-      expect(res.status).toBe(500);
-      expect(res.body.success).toBe(false);
-      expect(res.body.error).toBe('network');
+    it('DELETE /api/worklog/cache et GET /cache/stats → 403 hors super admin', async () => {
+      mockIsSuperAdmin = false;
+      expect((await request(app).delete('/api/worklog/cache')).status).toBe(403);
+      expect((await request(app).get('/api/worklog/cache/stats')).status).toBe(403);
     });
   });
 
