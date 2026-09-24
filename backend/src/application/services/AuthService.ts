@@ -10,6 +10,7 @@ import { UserActivityLog } from '../../domain/user/entities/UserActivityLog';
 import { emailService } from '../../infrastructure/email/NodemailerEmailService';
 import type { MicrosoftIdentity } from '../../infrastructure/microsoft/MicrosoftIdTokenVerifier';
 import { logger } from '../../utils/logger';
+import { resolveJwtSecret } from '../../config/jwtSecret';
 
 /** Validité du lien d'invitation d'un compte local (72 h). */
 const INVITATION_TOKEN_TTL_MS = 72 * 60 * 60 * 1000;
@@ -71,12 +72,8 @@ export class AuthService {
   private readonly saltRounds: number = 12;
 
   constructor() {
-    this.jwtSecret = process.env.JWT_SECRET || 'your-super-secret-jwt-key-change-in-production';
+    this.jwtSecret = resolveJwtSecret();
     this.jwtExpiresIn = process.env.JWT_EXPIRES_IN || '24h';
-    
-    if (process.env.NODE_ENV === 'production' && !process.env.JWT_SECRET) {
-      logger.warn('JWT_SECRET not set in production environment!');
-    }
   }
 
   /**
