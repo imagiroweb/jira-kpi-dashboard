@@ -26,6 +26,13 @@ export interface IUser extends Document {
   /** 'super_admin' = full access + gestion utilisateurs; otherwise use roleId */
   role?: 'super_admin';
   roleId?: mongoose.Types.ObjectId;
+  /** Organisation de rattachement (voir domain/organization). Posée pour le multi-entreprises ;
+   * le cloisonnement complet des données par organisation fera l'objet d'un lot dédié. */
+  organizationId?: mongoose.Types.ObjectId;
+  /** Administrateur de la plateforme (éditeur) : gère les organisations et leur SSO.
+   * Distinct de `role: 'super_admin'`, qui administre une organisation. Jamais attribué
+   * automatiquement : uniquement via le script d'amorçage. */
+  isPlatformAdmin?: boolean;
   /** Équipe actuelle du collaborateur — modifiable (changement d'équipe) ; voir domain/team/entities/Team */
   teamId?: mongoose.Types.ObjectId;
   /** Droit délégué par le CTO/super_admin : permet à ce lead de rattacher un collaborateur à SA PROPRE
@@ -115,6 +122,15 @@ const UserSchema = new Schema<IUser>(
       ref: 'Role',
       default: null
     },
+    organizationId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Organization',
+      default: null
+    },
+    isPlatformAdmin: {
+      type: Boolean,
+      default: false
+    },
     teamId: {
       type: Schema.Types.ObjectId,
       ref: 'Team',
@@ -178,6 +194,7 @@ const UserSchema = new Schema<IUser>(
 UserSchema.index({ email: 1 });
 UserSchema.index({ microsoftId: 1 });
 UserSchema.index({ teamId: 1 });
+UserSchema.index({ organizationId: 1 });
 
 export const User = mongoose.model<IUser>('User', UserSchema);
 

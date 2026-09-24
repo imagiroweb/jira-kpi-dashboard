@@ -30,6 +30,7 @@ import { swaggerSpec } from './config/swagger';
 import { schedulerService } from './services/schedulerService';
 import { Role } from './domain/user/entities/Role';
 import { emailService } from './infrastructure/email/NodemailerEmailService';
+import { ensureDefaultOrganization } from './application/services/organizationBootstrap';
 
 // MongoDB connection
 const connectMongoDB = async () => {
@@ -129,6 +130,7 @@ const connectMongoDB = async () => {
       );
     }
     logger.info('Default roles seeded: Utilisateur, Dev, PO, Product, Marketing');
+    await ensureDefaultOrganization();
   } catch (error) {
     logger.error('MongoDB connection error:', error);
     logger.warn('Vérifiez que MongoDB tourne (ex: docker-compose -f docker-compose.dev.yml up -d) et que MONGODB_URI contient ?authSource=admin si vous utilisez un utilisateur root.');
