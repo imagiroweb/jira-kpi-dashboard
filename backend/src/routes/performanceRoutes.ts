@@ -22,6 +22,9 @@ import {
 import {
   PerformanceReview,
   IPerformanceReview,
+  IObjective,
+  IObjectiveAction,
+  IReviewAuthor,
   PERFORMANCE_REVIEW_STATUSES,
   COMPETENCY_AXES
 } from '../domain/performance/entities/PerformanceReview';
@@ -62,6 +65,13 @@ import {
   PerformanceScopeActor,
   resolveAuthorRole
 } from '../domain/performance/performanceScope';
+import {
+  ActionResult,
+  addObjectiveAction,
+  isObjectiveActionStatus,
+  removeObjectiveAction,
+  updateObjectiveAction
+} from '../domain/performance/objectiveActions';
 import { authenticate } from '../middleware/authMiddleware';
 import { User } from '../domain/user/entities/User';
 import { Role } from '../domain/user/entities/Role';
@@ -1039,6 +1049,234 @@ router.patch('/reviews/:userId/manager-assessment', authenticate, async (req: Re
     fail(res, 500, "Erreur lors de l'application de l'évaluation manager", error);
   }
 });
+
+// ---------------------------------------------------------------------------
+// Actions à mener (par objectif) — créées/modifiées/supprimées par le lead/CTO,
+// statut (à faire / en cours / terminé) mis à jour par le collaborateur.
+// Voir domain/performance/objectiveActions.ts pour la logique pure.
+// ---------------------------------------------------------------------------
+
+type ObjectiveMutation = (
+  objective: IObjective,
+  who: IReviewAuthor
+) => ActionResult<{ objective: IObjective; action?: IObjectiveAction }>;
+
+/**
+ * Charge la fiche (`reviewUserId` × cycle actif), vérifie éventuellement la portée, applique
+ * `mutate` à l'objectif ciblé et persiste avec verrou optimiste (`__v`), même schéma que
+ * les autres routes d'écriture. Répond directement en cas d'erreur.
+ */
+async function mutateReviewObjective(
+  req: Request,
+  res: Response,
+  options: {
+    reviewUserId: string;
+    objectiveId: string;
+    /** null = le collaborateur sur sa propre fiche (pas de contrôle de portée). */
+    actor: PerformanceScopeActor | null;
+    mutate: ObjectiveMutation;
+    successStatus?: number;
+  }
+) {
+  const cycle = await resolveCycle(req.body?.cycleId ?? req.query?.cycleId);
+  if (cycle === undefined) return fail(res, 400, 'Identifiant de cycle invalide');
+  if (!cycle) return fail(res, 404, req.body?.cycleId ? 'Cycle introuvable' : 'Aucun cycle de performance actif');
+  if (cycle.status !== 'active') {
+    return fail(res, 403, 'Ce cycle est clos, les actions ne peuvent plus être modifiées');
+  }
+
+  let updated: IPerformanceReview | null = null;
+  let touchedAction: IObjectiveAction | undefined;
+
+  for (let attempt = 0; attempt < REVIEW_UPDATE_RETRIES; attempt += 1) {
+    const current = await PerformanceReview.findOne({ user: options.reviewUserId, cycle: cycle._id });
+    if (!current) {
+      return fail(res, 404, "Aucune fiche de performance pour ce cycle — définissez d'abord ses objectifs");
+    }
+
+    const reviewTeamId = current.team?.toString();
+    if (options.actor && !canAccessReviewForTeam(options.actor, reviewTeamId)) {
+      return fail(res, 403, "Vous n'avez pas accès à la fiche de ce collaborateur");
+    }
+
+    const objectives = current.toObject().objectives as IObjective[];
+    const objectiveIndex = objectives.findIndex((o) => o.id === options.objectiveId);
+    if (objectiveIndex === -1) return fail(res, 404, 'Objectif introuvable');
+
+    const who: IReviewAuthor = options.actor
+      ? { ...author(req), role: resolveAuthorRole(options.actor, reviewTeamId) }
+      : author(req);
+
+    const result = options.mutate(objectives[objectiveIndex], who);
+    if (!result.ok) return fail(res, result.status, result.message);
+
+    objectives[objectiveIndex] = result.value.objective;
+    touchedAction = result.value.action;
+
+    updated = await PerformanceReview.findOneAndUpdate(
+      { _id: current._id, __v: current.__v },
+      { $set: { objectives, updatedBy: who } },
+      { new: true, runValidators: true }
+    );
+    if (updated) break;
+  }
+
+  if (!updated) {
+    return fail(res, 409, 'La fiche a été modifiée en même temps, réessayez');
+  }
+
+  return res
+    .status(options.successStatus ?? 200)
+    .json({ success: true, review: serialize(updated), ...(touchedAction ? { action: touchedAction } : {}) });
+}
+
+/** Charge l'acteur lead/CTO et refuse l'accès à sa propre fiche (les actions sont assignées par un manager). */
+async function loadActionManager(req: Request, res: Response): Promise<PerformanceScopeActor | null> {
+  const { userId } = req.params;
+  if (!mongoose.Types.ObjectId.isValid(userId)) {
+    fail(res, 400, 'Identifiant de collaborateur invalide');
+    return null;
+  }
+  const actor = await loadPerformanceActorContext(req.user!.userId);
+  if (!actor) {
+    fail(res, 404, 'Utilisateur authentifié introuvable');
+    return null;
+  }
+  if (userId === req.user!.userId && !hasGlobalPerformanceAccess(actor)) {
+    fail(res, 403, 'Vos actions sont définies par votre lead ou le CTO');
+    return null;
+  }
+  return actor;
+}
+
+function newActionId(): string {
+  return `act-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+/**
+ * Ajoute une action à mener sur un objectif d'un collaborateur (lead de son équipe / CTO).
+ * POST /api/performance/reviews/:userId/objectives/:objectiveId/actions
+ * Body : { label, dueDate?, status? }
+ */
+router.post(
+  '/reviews/:userId/objectives/:objectiveId/actions',
+  authenticate,
+  async (req: Request, res: Response) => {
+    try {
+      const actor = await loadActionManager(req, res);
+      if (!actor) return;
+      const now = new Date();
+      await mutateReviewObjective(req, res, {
+        reviewUserId: req.params.userId,
+        objectiveId: req.params.objectiveId,
+        actor,
+        successStatus: 201,
+        mutate: (objective, who) =>
+          addObjectiveAction(
+            objective,
+            { id: newActionId(), label: req.body?.label, dueDate: req.body?.dueDate, status: req.body?.status },
+            who,
+            now
+          )
+      });
+    } catch (error) {
+      logger.error('Error adding objective action:', error);
+      fail(res, 500, "Erreur lors de l'ajout de l'action", error);
+    }
+  }
+);
+
+/**
+ * Modifie une action (libellé, échéance, statut) — lead de l'équipe / CTO.
+ * PATCH /api/performance/reviews/:userId/objectives/:objectiveId/actions/:actionId
+ */
+router.patch(
+  '/reviews/:userId/objectives/:objectiveId/actions/:actionId',
+  authenticate,
+  async (req: Request, res: Response) => {
+    try {
+      const actor = await loadActionManager(req, res);
+      if (!actor) return;
+      await mutateReviewObjective(req, res, {
+        reviewUserId: req.params.userId,
+        objectiveId: req.params.objectiveId,
+        actor,
+        mutate: (objective, who) =>
+          updateObjectiveAction(
+            objective,
+            req.params.actionId,
+            { label: req.body?.label, dueDate: req.body?.dueDate, status: req.body?.status },
+            who
+          )
+      });
+    } catch (error) {
+      logger.error('Error updating objective action:', error);
+      fail(res, 500, "Erreur lors de la mise à jour de l'action", error);
+    }
+  }
+);
+
+/**
+ * Supprime une action — lead de l'équipe / CTO.
+ * DELETE /api/performance/reviews/:userId/objectives/:objectiveId/actions/:actionId
+ */
+router.delete(
+  '/reviews/:userId/objectives/:objectiveId/actions/:actionId',
+  authenticate,
+  async (req: Request, res: Response) => {
+    try {
+      const actor = await loadActionManager(req, res);
+      if (!actor) return;
+      await mutateReviewObjective(req, res, {
+        reviewUserId: req.params.userId,
+        objectiveId: req.params.objectiveId,
+        actor,
+        mutate: (objective) => {
+          const result = removeObjectiveAction(objective, req.params.actionId);
+          return result.ok ? { ok: true, value: { objective: result.value } } : result;
+        }
+      });
+    } catch (error) {
+      logger.error('Error removing objective action:', error);
+      fail(res, 500, "Erreur lors de la suppression de l'action", error);
+    }
+  }
+);
+
+/**
+ * Le collaborateur fait évoluer le statut d'une de ses actions (à faire / en cours / terminé).
+ * Il ne peut ni en créer, ni en modifier le libellé, ni en supprimer.
+ * PATCH /api/performance/reviews/me/objectives/:objectiveId/actions/:actionId/status
+ * Body : { status }
+ */
+router.patch(
+  '/reviews/me/objectives/:objectiveId/actions/:actionId/status',
+  authenticate,
+  async (req: Request, res: Response) => {
+    try {
+      if (!isObjectiveActionStatus(req.body?.status)) {
+        return fail(res, 400, "Statut d'action invalide (a_faire, en_cours ou termine)");
+      }
+      await mutateReviewObjective(req, res, {
+        reviewUserId: req.user!.userId,
+        objectiveId: req.params.objectiveId,
+        actor: null,
+        mutate: (objective, who) =>
+          updateObjectiveAction(
+            objective,
+            req.params.actionId,
+            { status: req.body.status },
+            who,
+            new Date(),
+            ['status']
+          )
+      });
+    } catch (error) {
+      logger.error('Error updating my objective action status:', error);
+      fail(res, 500, "Erreur lors de la mise à jour du statut de l'action", error);
+    }
+  }
+);
 
 /**
  * Clôture explicite du semestre (passe la fiche à "complete"). L'enregistrement de l'évaluation

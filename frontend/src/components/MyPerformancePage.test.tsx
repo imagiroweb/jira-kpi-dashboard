@@ -7,7 +7,8 @@ vi.mock('../services/api', () => ({
     getCycles: vi.fn(),
     getMyReview: vi.fn(),
     updateKeyResultProgress: vi.fn(),
-    updateSelfAssessment: vi.fn()
+    updateSelfAssessment: vi.fn(),
+    updateMyActionStatus: vi.fn()
   }
 }));
 
@@ -142,9 +143,68 @@ describe('MyPerformancePage', () => {
     expect((await screen.findAllByText('Action requise')).length).toBeGreaterThan(0);
     expect(screen.queryByText('Action à mener')).not.toBeInTheDocument();
     expect(screen.getByText(/Prioriser le KR incidents cette semaine/)).toBeInTheDocument();
-    expect(screen.getByText(/Action à suivre/)).toBeInTheDocument();
+    // L'ancien champ texte est repris comme une action "à faire" dans le suivi des actions.
+    expect(screen.getAllByText(/^Actions requises/).length).toBeGreaterThan(0);
+    expect(screen.getByText('0/1 terminée')).toBeInTheDocument();
 
     vi.useRealTimers();
+  });
+
+  it('permet au collaborateur de faire évoluer le statut de ses actions et affiche la synthèse', async () => {
+    const withActions = makeReview({
+      objectives: [
+        {
+          ...makeReview().objectives[0],
+          actions: [
+            {
+              id: 'act-1',
+              label: 'Suivre la formation observabilité',
+              status: 'a_faire',
+              createdBy: { id: 'lead', name: 'lead', role: 'lead' },
+              createdAt: '2026-09-01T00:00:00.000Z'
+            },
+            {
+              id: 'act-2',
+              label: 'Documenter les runbooks',
+              status: 'termine',
+              createdBy: { id: 'lead', name: 'lead', role: 'lead' },
+              createdAt: '2026-09-01T00:00:00.000Z'
+            }
+          ]
+        }
+      ]
+    });
+    mockGetMyReview.mockResolvedValue({ success: true, review: withActions });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    const updated = makeReview({
+      objectives: [
+        {
+          ...withActions.objectives[0],
+          actions: withActions.objectives[0].actions!.map((a) =>
+            a.id === 'act-1' ? { ...a, status: 'en_cours' as const } : a
+          )
+        }
+      ]
+    });
+    vi.mocked(performanceApi.updateMyActionStatus).mockResolvedValue({ success: true, review: updated });
+
+    render(<MyPerformancePage />);
+
+    expect(await screen.findByText('Suivre la formation observabilité')).toBeInTheDocument();
+    expect(screen.getByText('Mes actions requises')).toBeInTheDocument();
+    expect(screen.getByText('1/2 terminée')).toBeInTheDocument();
+    // Le collaborateur ne peut ni ajouter ni supprimer d'action.
+    expect(screen.queryByPlaceholderText(/Nouvelle action/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Supprimer l'action/ })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('combobox', { name: /Statut de l'action Suivre la formation/ }), {
+      target: { value: 'en_cours' }
+    });
+
+    await waitFor(() => {
+      expect(performanceApi.updateMyActionStatus).toHaveBeenCalledWith('obj-1', 'act-1', 'en_cours');
+    });
+    expect(await screen.findByText('1 en cours')).toBeInTheDocument();
   });
 
   it('affiche les badges d\'axes de compétence associés à un objectif', async () => {

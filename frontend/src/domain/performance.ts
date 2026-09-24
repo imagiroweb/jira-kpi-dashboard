@@ -67,6 +67,23 @@ export interface ObjectiveAssessment {
   coachingAction?: string;
 }
 
+/** Statut d'une action à mener — miroir de `OBJECTIVE_ACTION_STATUSES` côté backend. */
+export const OBJECTIVE_ACTION_STATUSES = ['a_faire', 'en_cours', 'termine'] as const;
+export type ObjectiveActionStatus = (typeof OBJECTIVE_ACTION_STATUSES)[number];
+
+/** Action à mener rattachée à un objectif : définie par le lead/CTO, statut suivi par le collaborateur. */
+export interface ObjectiveAction {
+  id: string;
+  label: string;
+  status: ObjectiveActionStatus;
+  dueDate?: string;
+  createdBy: ReviewAuthor;
+  createdAt: string;
+  updatedBy?: ReviewAuthor;
+  updatedAt?: string;
+  completedAt?: string;
+}
+
 export interface Objective {
   id: string;
   title: string;
@@ -75,6 +92,8 @@ export interface Objective {
   /** Jusqu'à 2 axes de compétence associés à cet objectif (rapprochement OKR / grille de compétences). */
   competencyAxes?: CompetencyAxis[];
   krs: KeyResult[];
+  /** Actions à mener (toujours un tableau après `normalizePerformanceReview`). */
+  actions?: ObjectiveAction[];
   selfAssessment: ObjectiveAssessment;
   managerAssessment: ObjectiveAssessment;
 }
@@ -860,7 +879,7 @@ export function normalizeGeneralAssessmentAxes(raw?: Partial<GeneralAssessmentAx
 export function normalizePerformanceReview(review: PerformanceReview): PerformanceReview {
   return {
     ...review,
-    objectives: (review.objectives ?? []).map((objective) => ({
+    objectives: (review.objectives ?? []).map((objective) => normalizeObjectiveActions({
       ...objective,
       krs: objective.krs ?? [],
       selfAssessment: objective.selfAssessment ?? {},
@@ -872,3 +891,120 @@ export function normalizePerformanceReview(review: PerformanceReview): Performan
   };
 }
 
+
+// ---------------------------------------------------------------------------
+// Actions à mener (voir backend `domain/performance/objectiveActions.ts`)
+// ---------------------------------------------------------------------------
+
+export const OBJECTIVE_ACTION_STATUS_LABELS: Record<ObjectiveActionStatus, string> = {
+  a_faire: 'À faire',
+  en_cours: 'En cours',
+  termine: 'Terminé'
+};
+
+export const OBJECTIVE_ACTION_STATUS_BADGE_CLASS: Record<ObjectiveActionStatus, string> = {
+  a_faire: 'bg-surface-700/60 text-surface-300',
+  en_cours: 'badge-warning',
+  termine: 'badge-success'
+};
+
+/** Même id stable que le backend (`legacyCoachingActionId`) pour l'ancien champ texte `coachingAction`. */
+export function legacyCoachingActionId(objectiveId: string): string {
+  return `act-legacy-${objectiveId}`;
+}
+
+/**
+ * Garantit `actions` et affiche l'ancien champ texte `managerAssessment.coachingAction` comme une
+ * action "à faire" tant que le backend ne l'a pas encore reprise (il le fait à la première
+ * modification, avec le même id).
+ */
+export function normalizeObjectiveActions(objective: Objective): Objective {
+  const actions = objective.actions ?? [];
+  const legacy = objective.managerAssessment?.coachingAction?.trim();
+  if (actions.length > 0 || !legacy) return { ...objective, actions };
+  return {
+    ...objective,
+    actions: [
+      {
+        id: legacyCoachingActionId(objective.id),
+        label: legacy,
+        status: 'a_faire',
+        createdBy: { id: 'legacy', name: 'Reprise action à suivre' },
+        createdAt: ''
+      }
+    ]
+  };
+}
+
+export function isObjectiveActionOverdue(
+  action: Pick<ObjectiveAction, 'status' | 'dueDate'>,
+  now: Date = new Date()
+): boolean {
+  if (action.status === 'termine' || !action.dueDate) return false;
+  const due = new Date(action.dueDate);
+  if (Number.isNaN(due.getTime())) return false;
+  due.setHours(23, 59, 59, 999);
+  return due.getTime() < now.getTime();
+}
+
+export interface ObjectiveActionsSummary {
+  total: number;
+  aFaire: number;
+  enCours: number;
+  termine: number;
+  overdue: number;
+  /** Part des actions terminées (0-100), `null` si aucune action. */
+  completionRate: number | null;
+}
+
+/** Agrège les actions de tous les objectifs d'une fiche (synthèse collaborateur). */
+export function summarizeObjectiveActions(
+  objectives: Pick<Objective, 'id' | 'actions' | 'managerAssessment'>[],
+  now: Date = new Date()
+): ObjectiveActionsSummary {
+  const summary: ObjectiveActionsSummary = {
+    total: 0,
+    aFaire: 0,
+    enCours: 0,
+    termine: 0,
+    overdue: 0,
+    completionRate: null
+  };
+  for (const objective of objectives) {
+    const actions = normalizeObjectiveActions(objective as Objective).actions ?? [];
+    for (const action of actions) {
+      summary.total += 1;
+      if (action.status === 'termine') summary.termine += 1;
+      else if (action.status === 'en_cours') summary.enCours += 1;
+      else summary.aFaire += 1;
+      if (isObjectiveActionOverdue(action, now)) summary.overdue += 1;
+    }
+  }
+  summary.completionRate = summary.total > 0 ? (summary.termine / summary.total) * 100 : null;
+  return summary;
+}
+
+/** Cumule les synthèses d'actions de plusieurs fiches (vue par équipe). */
+export function mergeObjectiveActionsSummaries(summaries: ObjectiveActionsSummary[]): ObjectiveActionsSummary {
+  const total = summaries.reduce(
+    (acc, s) => ({
+      total: acc.total + s.total,
+      aFaire: acc.aFaire + s.aFaire,
+      enCours: acc.enCours + s.enCours,
+      termine: acc.termine + s.termine,
+      overdue: acc.overdue + s.overdue,
+      completionRate: null as number | null
+    }),
+    { total: 0, aFaire: 0, enCours: 0, termine: 0, overdue: 0, completionRate: null as number | null }
+  );
+  total.completionRate = total.total > 0 ? (total.termine / total.total) * 100 : null;
+  return total;
+}
+
+/** Payload de création / modification d'une action (lead/CTO). */
+export interface ObjectiveActionInput {
+  label?: string;
+  /** Date `YYYY-MM-DD` ; `null` efface l'échéance. */
+  dueDate?: string | null;
+  status?: ObjectiveActionStatus;
+}

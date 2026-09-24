@@ -16,7 +16,12 @@ import {
   summarizeObjectiveStatuses,
   summarizeTeamReviews,
   type Objective,
-  type PerformanceReview
+  type PerformanceReview,
+  normalizeObjectiveActions,
+  legacyCoachingActionId,
+  summarizeObjectiveActions,
+  mergeObjectiveActionsSummaries,
+  isObjectiveActionOverdue
 } from './performance';
 
 function objectiveWithStatuses(
@@ -369,5 +374,52 @@ describe('suggestCompetencyAxes', () => {
 
   it('ne suggère rien quand aucun mot-clé ne correspond', () => {
     expect(suggestCompetencyAxes('Titre neutre sans mot-clé particulier')).toEqual([]);
+  });
+});
+
+describe('actions à mener (normalizeObjectiveActions / summarizeObjectiveActions)', () => {
+  const author = { id: 'lead', name: 'lead' };
+  const baseObjective = {
+    id: 'obj-1',
+    title: 'x',
+    weight: 1,
+    krs: [],
+    selfAssessment: {},
+    managerAssessment: {}
+  };
+
+  it("affiche l'ancien champ coachingAction comme une action à faire (même id que le backend)", () => {
+    const normalized = normalizeObjectiveActions({
+      ...baseObjective,
+      managerAssessment: { coachingAction: 'Ancienne action' }
+    });
+    expect(normalized.actions).toEqual([
+      expect.objectContaining({ id: legacyCoachingActionId('obj-1'), label: 'Ancienne action', status: 'a_faire' })
+    ]);
+  });
+
+  it('compte par statut, les retards et le taux de réalisation ; fusionne par équipe', () => {
+    const now = new Date('2026-09-24T12:00:00');
+    const summary = summarizeObjectiveActions(
+      [
+        {
+          ...baseObjective,
+          actions: [
+            { id: 'a', label: 'a', status: 'termine', createdBy: author, createdAt: '' },
+            { id: 'b', label: 'b', status: 'en_cours', createdBy: author, createdAt: '', dueDate: '2026-09-01' },
+            { id: 'c', label: 'c', status: 'a_faire', createdBy: author, createdAt: '', dueDate: '2026-12-01' }
+          ]
+        }
+      ],
+      now
+    );
+    expect(summary).toEqual({ total: 3, aFaire: 1, enCours: 1, termine: 1, overdue: 1, completionRate: (1 / 3) * 100 });
+    const merged = mergeObjectiveActionsSummaries([summary, summarizeObjectiveActions([baseObjective], now)]);
+    expect(merged.total).toBe(3);
+    expect(mergeObjectiveActionsSummaries([]).completionRate).toBeNull();
+  });
+
+  it("n'est jamais en retard une fois terminée", () => {
+    expect(isObjectiveActionOverdue({ status: 'termine', dueDate: '2020-01-01' })).toBe(false);
   });
 });
