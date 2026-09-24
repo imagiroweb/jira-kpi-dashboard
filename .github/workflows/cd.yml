@@ -1,10 +1,12 @@
-# CD : Build des images Docker + push vers le registry (main uniquement)
-# Optionnel : déploiement par SSH sur le serveur (voir secrets ci-dessous)
+# CD : Build des images Docker + push vers le registry
+#   main    → tag latest  → stack prod
+#   develop → tag develop → stack préprod
+# Optionnel : déploiement par SSH ou webhook Portainer (voir secrets ci-dessous)
 name: CD
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch: # Permet de lancer le déploiement à la main
 
 env:
@@ -41,6 +43,7 @@ jobs:
           images: ${{ env.IMAGE_BACKEND }}
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
             type=sha,prefix=
 
       - name: Build and push backend
@@ -60,6 +63,7 @@ jobs:
           images: ${{ env.IMAGE_FRONTEND }}
           tags: |
             type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
             type=sha,prefix=
 
       - name: Build and push frontend
@@ -107,6 +111,54 @@ jobs:
             done
             docker compose -f docker-compose.prod.yml -f docker-compose.prod.ghcr.yml -f docker-compose.prod.scaleway.yml pull
             docker compose -f docker-compose.prod.yml -f docker-compose.prod.ghcr.yml -f docker-compose.prod.scaleway.yml up -d --remove-orphans
+
+  # --- Préprod : push sur develop, même DEPLOY_METHOD que la prod, autre chemin / webhook ---
+  deploy-ssh-preprod:
+    name: Deploy preprod via SSH
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/develop' && vars.DEPLOY_METHOD == 'ssh'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Copy docker-compose files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          source: "docker-compose.prod.yml,docker-compose.prod.ghcr.yml,docker-compose.prod.scaleway.yml,docker-compose.prod.preprod.yml"
+          target: ${{ vars.SSH_DEPLOY_PATH_PREPROD || '/opt/jira-kpi-dashboard-preprod' }}
+
+      - name: Deploy preprod on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          script: |
+            set -e
+            cd ${{ vars.SSH_DEPLOY_PATH_PREPROD || '/opt/jira-kpi-dashboard-preprod' }}
+            echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            for name in jira-kpi-preprod-frontend jira-kpi-preprod-backend jira-kpi-preprod-mongodb jira-kpi-preprod-redis; do
+              docker rm -f $name 2>/dev/null || true
+            done
+            docker compose -p jira-kpi-preprod -f docker-compose.prod.yml -f docker-compose.prod.ghcr.yml -f docker-compose.prod.scaleway.yml -f docker-compose.prod.preprod.yml pull
+            docker compose -p jira-kpi-preprod -f docker-compose.prod.yml -f docker-compose.prod.ghcr.yml -f docker-compose.prod.scaleway.yml -f docker-compose.prod.preprod.yml up -d --remove-orphans
+
+  deploy-portainer-preprod:
+    name: Deploy preprod via Portainer webhook
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/develop' && vars.DEPLOY_METHOD == 'portainer'
+    steps:
+      - name: Trigger Portainer preprod webhook
+        run: |
+          curl -X POST -f -H "Content-Type: application/json" \
+            "${{ secrets.PORTAINER_WEBHOOK_URL_PREPROD }}"
+        env:
+          PORTAINER_WEBHOOK_URL_PREPROD: ${{ secrets.PORTAINER_WEBHOOK_URL_PREPROD }}
 
   # --- Déploiement Portainer : activer en mettant la variable DEPLOY_METHOD = 'portainer' et le secret PORTAINER_WEBHOOK_URL ---
   deploy-portainer:
