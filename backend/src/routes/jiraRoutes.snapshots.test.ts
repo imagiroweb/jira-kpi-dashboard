@@ -92,6 +92,7 @@ describe('jiraRoutes — snapshots (TI)', () => {
   const app = createTestApp({ mountPath: '/api/jira', router: jiraRoutes });
 
   beforeEach(() => {
+    mockPageAccess = 'allow';
     jest.clearAllMocks();
     authMode = 'pass';
 
@@ -289,5 +290,13 @@ describe('jiraRoutes — snapshots (TI)', () => {
       expect(res.status).toBe(500);
       expect(res.body.success).toBe(false);
     });
+  });
+
+  it('GET /api/jira/dashboard-snapshots → 403 sans la page Dashboard', async () => {
+    mockPageAccess = 'deny';
+
+    const res = await request(app).get('/api/jira/dashboard-snapshots');
+
+    expect(res.status).toBe(403);
   });
 });

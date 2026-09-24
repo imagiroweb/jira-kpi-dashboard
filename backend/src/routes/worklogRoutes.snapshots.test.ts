@@ -86,6 +86,7 @@ describe('worklogRoutes — snapshots (TI)', () => {
   const app = createTestApp({ mountPath: '/api/worklog', router: worklogRoutes });
 
   beforeEach(() => {
+    mockPageAccess = 'allow';
     jest.clearAllMocks();
     authMode = 'pass';
 
@@ -248,5 +249,13 @@ describe('worklogRoutes — snapshots (TI)', () => {
       expect(res.status).toBe(500);
       expect(res.body.success).toBe(false);
     });
+  });
+
+  it('GET /api/worklog/support-snapshots → 403 sans la page Support', async () => {
+    mockPageAccess = 'deny';
+
+    const res = await request(app).get('/api/worklog/support-snapshots');
+
+    expect(res.status).toBe(403);
   });
 });
