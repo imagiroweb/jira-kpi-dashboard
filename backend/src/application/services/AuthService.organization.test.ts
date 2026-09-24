@@ -14,6 +14,8 @@ const mockOrgFindOne = jest.fn();
 const mockRoleFindById = jest.fn();
 const mockRoleFindOne = jest.fn();
 const mockSendInvitation = jest.fn();
+const mockUserFindByIdAndUpdate = jest.fn();
+const mockUserFindOneAndUpdate = jest.fn();
 
 jest.mock('../../domain/user/entities/User', () => ({
   User: {
@@ -29,8 +31,8 @@ jest.mock('../../domain/user/entities/User', () => ({
     exists: (...a: unknown[]) => mockUserExists(...a),
     create: (...a: unknown[]) => mockUserCreate(...a),
     updateOne: (...a: unknown[]) => mockUserUpdateOne(...a),
-    findByIdAndUpdate: jest.fn(),
-    findOneAndUpdate: jest.fn()
+    findByIdAndUpdate: (...a: unknown[]) => mockUserFindByIdAndUpdate(...a),
+    findOneAndUpdate: (...a: unknown[]) => mockUserFindOneAndUpdate(...a)
   }
 }));
 
@@ -316,6 +318,46 @@ describe('AuthService — organisation', () => {
 
       expect(result).toEqual(expect.objectContaining({ success: false, status: 401 }));
     });
+  });
+});
+
+describe('AuthService — plus de super admin attribué par email', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('une première connexion SSO avec l’ancien email « super admin » reçoit le rôle par défaut, pas super_admin', async () => {
+    const service = new AuthService();
+    const defaultRoleId = new mongoose.Types.ObjectId();
+    mockOrgFindOne.mockResolvedValue({ ...activeOrg });
+    mockUserFindOne.mockResolvedValue(null);
+    const created = {
+      _id: new mongoose.Types.ObjectId(),
+      email: 'bdeguil-robin@adoria.com',
+      provider: 'microsoft',
+      isActive: true,
+      organizationId: ORG_ID
+    };
+    mockUserCreate.mockResolvedValue(created);
+    mockUserFindById.mockResolvedValue(created);
+    mockRoleFindOne.mockResolvedValue({ _id: defaultRoleId });
+
+    const result = await service.handleMicrosoftSSO({
+      tenantId: '8f2c1d3e-1234-4abc-9def-0123456789ab',
+      objectId: 'oid-x',
+      email: 'bdeguil-robin@adoria.com'
+    });
+
+    expect(result.success).toBe(true);
+    expect(mockUserFindOneAndUpdate).not.toHaveBeenCalled();
+    expect(mockUserFindByIdAndUpdate).toHaveBeenCalledWith(created._id, {
+      $set: { roleId: defaultRoleId },
+      $unset: { role: 1 }
+    });
+  });
+
+  it('assignDefaultRoleIfNeeded ne rétrograde jamais un super_admin existant', async () => {
+    const service = new AuthService();
+    await service.assignDefaultRoleIfNeeded({ role: 'super_admin', email: 'x@y.fr' } as never);
+    expect(mockRoleFindOne).not.toHaveBeenCalled();
   });
 });
 

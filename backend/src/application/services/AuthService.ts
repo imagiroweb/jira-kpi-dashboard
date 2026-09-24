@@ -11,8 +11,6 @@ import { emailService } from '../../infrastructure/email/NodemailerEmailService'
 import type { MicrosoftIdentity } from '../../infrastructure/microsoft/MicrosoftIdTokenVerifier';
 import { logger } from '../../utils/logger';
 
-const SUPER_ADMIN_EMAIL = 'bdeguil-robin@adoria.com';
-
 /** Validité du lien d'invitation d'un compte local (72 h). */
 const INVITATION_TOKEN_TTL_MS = 72 * 60 * 60 * 1000;
 
@@ -343,7 +341,6 @@ export class AuthService {
 
       user.lastLogin = new Date();
       await user.save();
-      await this.ensureSuperAdmin(user.email);
 
       await this.logLoginOncePerMinute(user._id);
 
@@ -504,10 +501,12 @@ export class AuthService {
   }
 
   /**
-   * Assign default role "Utilisateur" to user if not super_admin
+   * Assign default role "Utilisateur" to user if not super_admin.
+   * Le rôle super_admin n'est jamais attribué automatiquement (plus d'email codé en dur) :
+   * uniquement par un super admin existant ou par le script d'amorçage `admin:bootstrap`.
    */
   async assignDefaultRoleIfNeeded(user: IUser): Promise<void> {
-    if (user.email.toLowerCase() === SUPER_ADMIN_EMAIL.toLowerCase()) return;
+    if (user.role === 'super_admin') return;
     try {
       const defaultRole = await Role.findOne({ name: 'Utilisateur' });
       if (defaultRole) {
@@ -515,23 +514,6 @@ export class AuthService {
       }
     } catch (error) {
       logger.error('assignDefaultRoleIfNeeded error:', error);
-    }
-  }
-
-  /**
-   * Ensure user with this email is super_admin (for bdeguil-robin@adoria.com)
-   */
-  async ensureSuperAdmin(email: string): Promise<void> {
-    if (email.toLowerCase() !== SUPER_ADMIN_EMAIL.toLowerCase()) return;
-    try {
-      const updated = await User.findOneAndUpdate(
-        { email: email.toLowerCase() },
-        { $set: { role: 'super_admin', roleId: null } },
-        { new: true }
-      );
-      if (updated) logger.info(`Super admin role set for ${email}`);
-    } catch (error) {
-      logger.error('ensureSuperAdmin error:', error);
     }
   }
 
