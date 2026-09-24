@@ -164,20 +164,6 @@ describe('App', () => {
     expect(useStore.getState().token).toBeNull();
   });
 
-  it('affiche RoleSelectionScreen quand pendingRoleSelection est actif', async () => {
-    seedAuthenticatedUser();
-    useStore.getState().setPendingRoleSelection(true);
-    mockGetRolesForSignup.mockResolvedValue([{ id: 'role-1', name: 'Développeur' }]);
-
-    render(<App />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Première connexion')).toBeInTheDocument();
-    });
-
-    expect(screen.queryByTestId('sidebar')).not.toBeInTheDocument();
-  });
-
   it('affiche l’application authentifiée après vérification réussie', async () => {
     seedAuthenticatedUser();
 

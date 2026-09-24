@@ -418,29 +418,6 @@ router.post('/microsoft/callback', async (req: Request, res: Response) => {
 
 /**
  * @swagger
- * /api/auth/roles/for-signup:
- *   get:
- *     summary: List roles for signup / first-login role selection (no auth)
- *     tags: [Authentication]
- *     responses:
- *       200:
- *         description: List of roles (id, name)
- */
-router.get('/roles/for-signup', async (_req: Request, res: Response) => {
-  try {
-    const roles = await Role.find().select('name').lean();
-    res.json({
-      success: true,
-      roles: roles.map((r: { _id: { toString: () => string }; name: string }) => ({ id: r._id.toString(), name: r.name }))
-    });
-  } catch (error) {
-    logger.error('Roles for signup error:', error);
-    res.status(500).json({ success: false, error: 'Erreur serveur' });
-  }
-});
-
-/**
- * @swagger
  * /api/auth/me:
  *   get:
  *     summary: Get current user info
@@ -492,51 +469,6 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
     });
   }
 });
-
-/**
- * @swagger
- * /api/auth/me/role:
- *   patch:
- *     summary: Set current user role (first-login selection)
- *     tags: [Authentication]
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [roleId]
- *             properties:
- *               roleId: { type: string }
- *     responses:
- *       200:
- *         description: Role updated
- *       400:
- *         description: Invalid role or not allowed
- */
-router.patch(
-  '/me/role',
-  authenticate,
-  [body('roleId').isString().notEmpty().withMessage('roleId requis')],
-  async (req: Request, res: Response) => {
-    try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({ success: false, errors: errors.array().map((e: { msg?: string }) => e.msg) });
-      }
-      const { roleId } = req.body;
-      const result = await authService.setMyRole(req.user!.userId, roleId);
-      if (!result.success) {
-        return res.status(400).json({ success: false, error: result.error });
-      }
-      res.json({ success: true, user: result.user });
-    } catch (error) {
-      logger.error('Set my role error:', error);
-      res.status(500).json({ success: false, error: 'Erreur serveur' });
-    }
-  }
-);
 
 /**
  * @swagger

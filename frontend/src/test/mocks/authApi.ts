@@ -16,7 +16,6 @@ export function createAuthApiMock() {
     getRoles: vi.fn(),
     createRole: vi.fn(),
     updateRole: vi.fn(),
-    updateMyRole: vi.fn(),
     recordPageView: vi.fn(),
     getRoadmapAdoria2026DefaultFilters: vi.fn().mockResolvedValue({
       trimestre: 'all',

@@ -70,7 +70,7 @@ export function MicrosoftCallback() {
         if (result.success && result.token && result.user) {
           setStatus('success');
           setTimeout(() => {
-            login(result.token!, result.user!, result.firstLogin);
+            login(result.token!, result.user!);
             window.location.href = '/';
           }, 1000);
         } else {

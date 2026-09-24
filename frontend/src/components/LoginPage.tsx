@@ -124,14 +124,14 @@ export function LoginPage() {
         }
         const result = await authApi.register(email, password, firstName, lastName, selectedRoleId);
         if (result.success && result.token && result.user) {
-          login(result.token, result.user, result.firstLogin);
+          login(result.token, result.user);
         } else {
           setError(result.error || 'Erreur lors de la création du compte');
         }
       } else {
         const result = await authApi.login(email, password);
         if (result.success && result.token && result.user) {
-          login(result.token, result.user, result.firstLogin);
+          login(result.token, result.user);
         } else {
           setError(result.error || 'Email ou mot de passe incorrect');
         }

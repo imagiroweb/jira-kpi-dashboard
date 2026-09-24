@@ -577,43 +577,6 @@ export class AuthService {
   }
 
   /**
-   * Set current user's role (for first-login role selection). Only allowed if user is not super_admin.
-   */
-  async setMyRole(userId: string, roleId: string): Promise<{ success: boolean; user?: LoginResult['user']; error?: string }> {
-    try {
-      const user = await User.findById(userId).select('-password');
-      if (!user) return { success: false, error: 'Utilisateur non trouvé' };
-      if (user.role === 'super_admin') return { success: false, error: 'Le rôle ne peut pas être modifié' };
-      const role = await Role.findById(roleId);
-      if (!role) return { success: false, error: 'Rôle invalide' };
-      user.role = undefined;
-      user.roleId = role._id;
-      await user.save();
-      const withPerms = await this.buildUserWithPermissions(user);
-      return {
-        success: true,
-        user: {
-          id: withPerms.id,
-          email: withPerms.email,
-          firstName: withPerms.firstName,
-          lastName: withPerms.lastName,
-          provider: withPerms.provider,
-          role: withPerms.role ?? undefined,
-          roleName: withPerms.roleName,
-          visiblePages: withPerms.visiblePages,
-          performanceGlobalAccess: withPerms.performanceGlobalAccess,
-          teamId: withPerms.teamId,
-          leadTeamIds: withPerms.leadTeamIds,
-          canManageTeamAssignment: withPerms.canManageTeamAssignment
-        }
-      };
-    } catch (error) {
-      logger.error('setMyRole error:', error);
-      return { success: false, error: 'Erreur serveur' };
-    }
-  }
-
-  /**
    * Get user by ID
    */
   async getUserById(userId: string): Promise<IUser | null> {

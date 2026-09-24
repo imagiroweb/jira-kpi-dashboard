@@ -373,15 +373,6 @@ export const authApi = {
   },
 
   /**
-   * Set current user's role (first-login selection)
-   */
-  async updateMyRole(roleId: string): Promise<User> {
-    const response = await api.patch<{ success: boolean; user: User }>('/api/auth/me/role', { roleId });
-    if (!response.data.success) throw new Error((response.data as { error?: string }).error);
-    return response.data.user;
-  },
-
-  /**
    * Demande un email de réinitialisation de mot de passe.
    * Répond toujours avec succès (anti-énumération d'email).
    */

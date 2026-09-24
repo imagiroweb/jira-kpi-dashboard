@@ -31,7 +31,6 @@ jest.mock('../application/services/AuthService', () => ({
     validatePassword: jest.fn(),
     getUserById: jest.fn(),
     buildUserWithPermissions: jest.fn(),
-    setMyRole: jest.fn(),
     requestPasswordReset: jest.fn(),
     resetPassword: jest.fn(),
     verifyToken: jest.fn(),

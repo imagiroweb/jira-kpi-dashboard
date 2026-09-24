@@ -56,7 +56,6 @@ export function resetStore(): void {
     isAuthenticated: false,
     user: null,
     token: null,
-    pendingRoleSelection: false,
     currentPage: 'dashboard',
     dateRange: getDefaultDateRange(),
     selectedProjects: [],

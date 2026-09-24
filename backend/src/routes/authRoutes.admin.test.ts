@@ -36,7 +36,6 @@ jest.mock('../application/services/AuthService', () => ({
     login: jest.fn(),
     validatePassword: jest.fn(),
     getUserById: jest.fn(),
-    setMyRole: jest.fn(),
     handleMicrosoftSSO: jest.fn(),
     requestPasswordReset: jest.fn(),
     resetPassword: jest.fn(),

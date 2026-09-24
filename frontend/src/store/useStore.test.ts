@@ -99,12 +99,6 @@ describe('useStore (auth)', () => {
     expect(useStore.getState().currentPage).toBe('dashboard');
   });
 
-  it('login avec firstLogin met pendingRoleSelection à true', () => {
-    useStore.getState().login('jwt-token', mockUser, true);
-
-    expect(useStore.getState().pendingRoleSelection).toBe(true);
-  });
-
   it('logout remet l’état auth à l’état initial', () => {
     useStore.getState().login('jwt-token', mockUser);
     useStore.getState().logout();
@@ -112,7 +106,6 @@ describe('useStore (auth)', () => {
     expect(useStore.getState().isAuthenticated).toBe(false);
     expect(useStore.getState().token).toBeNull();
     expect(useStore.getState().user).toBeNull();
-    expect(useStore.getState().pendingRoleSelection).toBe(false);
   });
 
   it('logout réinitialise les caches dashboard, support, epics et users', () => {

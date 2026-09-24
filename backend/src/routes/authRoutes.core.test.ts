@@ -11,7 +11,6 @@ const mockLogin = jest.fn();
 const mockValidatePassword = jest.fn();
 const mockGetUserById = jest.fn();
 const mockBuildUserWithPermissions = jest.fn();
-const mockSetMyRole = jest.fn();
 
 const mockRoleFind = jest.fn();
 
@@ -40,7 +39,6 @@ jest.mock('../application/services/AuthService', () => ({
     validatePassword: (...args: unknown[]) => mockValidatePassword(...args),
     getUserById: (...args: unknown[]) => mockGetUserById(...args),
     buildUserWithPermissions: (...args: unknown[]) => mockBuildUserWithPermissions(...args),
-    setMyRole: (...args: unknown[]) => mockSetMyRole(...args),
     handleMicrosoftSSO: jest.fn(),
     requestPasswordReset: jest.fn(),
     resetPassword: jest.fn(),
@@ -284,17 +282,12 @@ describe('authRoutes — core (TI)', () => {
     });
   });
 
-  describe('GET /api/auth/roles/for-signup', () => {
-    it('retourne 200 avec la liste des rôles (id, name)', async () => {
+  describe('GET /api/auth/roles/for-signup (supprimée — sécurité)', () => {
+    it('retourne 404 : la liste des rôles n’est plus exposée sans authentification', async () => {
       const res = await request(app).get('/api/auth/roles/for-signup');
 
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.roles).toEqual([
-        { id: 'role1', name: 'Développeur' },
-        { id: 'role2', name: 'Product' },
-      ]);
-      expect(mockRoleFind).toHaveBeenCalled();
+      expect(res.status).toBe(404);
+      expect(mockRoleFind).not.toHaveBeenCalled();
     });
   });
 
@@ -333,30 +326,13 @@ describe('authRoutes — core (TI)', () => {
     });
   });
 
-  describe('PATCH /api/auth/me/role', () => {
-    it('retourne 400 si roleId est absent', async () => {
-      const res = await request(app).patch('/api/auth/me/role').send({});
-
-      expect(res.status).toBe(400);
-      expect(res.body.success).toBe(false);
-      expect(Array.isArray(res.body.errors)).toBe(true);
-      expect(mockSetMyRole).not.toHaveBeenCalled();
-    });
-
-    it('retourne 200 si le rôle est mis à jour', async () => {
-      mockSetMyRole.mockResolvedValue({
-        success: true,
-        user: { id: TEST_USER_ID, roleName: 'Développeur' },
-      });
-
+  describe('PATCH /api/auth/me/role (supprimée — sécurité)', () => {
+    it('retourne 404 : un utilisateur ne peut pas s’attribuer un rôle lui-même', async () => {
       const res = await request(app)
         .patch('/api/auth/me/role')
         .send({ roleId: 'role1' });
 
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.user).toEqual({ id: TEST_USER_ID, roleName: 'Développeur' });
-      expect(mockSetMyRole).toHaveBeenCalledWith(TEST_USER_ID, 'role1');
+      expect(res.status).toBe(404);
     });
   });
 
