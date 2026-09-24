@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getBrevoClient, type BrevoTransactionalEventType } from '../infrastructure/brevo/BrevoClient';
 import { logger } from '../utils/logger';
 import { authenticate } from '../middleware/authMiddleware';
+import { requirePage } from '../middleware/requirePage';
 
 const TRANSACTIONAL_EVENT_TYPES: BrevoTransactionalEventType[] = [
   'requests', 'delivered', 'hardBounces', 'softBounces', 'bounces', 'opened', 'clicks',
@@ -10,11 +11,15 @@ const TRANSACTIONAL_EVENT_TYPES: BrevoTransactionalEventType[] = [
 
 const router = Router();
 
+// Données de contacts clients/prospects (emails des destinataires) : réservé aux rôles ayant
+// la page Marketing (ou super admin), jamais à tout utilisateur connecté.
+router.use(authenticate, requirePage('marketing'));
+
 /**
  * GET /api/brevo/account
  * Returns Brevo account details (requires BREVO_API_KEY).
  */
-router.get('/account', authenticate, async (req: Request, res: Response) => {
+router.get('/account', async (req: Request, res: Response) => {
   try {
     const client = getBrevoClient();
     if (!client.isConfigured()) {
@@ -45,7 +50,7 @@ router.get('/account', authenticate, async (req: Request, res: Response) => {
  * GET /api/brevo/stats
  * Aggregated stats for the marketing dashboard: contacts count, lists, recent campaigns.
  */
-router.get('/stats', authenticate, async (req: Request, res: Response) => {
+router.get('/stats', async (req: Request, res: Response) => {
   try {
     const client = getBrevoClient();
     if (!client.isConfigured()) {
@@ -133,7 +138,7 @@ router.get('/stats', authenticate, async (req: Request, res: Response) => {
  * GET /api/brevo/status
  * Check if Brevo is configured (no auth required for a simple check, or keep auth for consistency).
  */
-router.get('/status', authenticate, async (req: Request, res: Response) => {
+router.get('/status', async (req: Request, res: Response) => {
   const client = getBrevoClient();
   res.json({
     success: true,
@@ -146,7 +151,7 @@ router.get('/status', authenticate, async (req: Request, res: Response) => {
  * Logs des emails transactionnels (activité : envoyés, livrés, ouverts, clics, bounces, etc.).
  * Query: days (défaut 30, max 90), limit (défaut 200), event (optionnel).
  */
-router.get('/transactional/events', authenticate, async (req: Request, res: Response) => {
+router.get('/transactional/events', async (req: Request, res: Response) => {
   try {
     const client = getBrevoClient();
     if (!client.isConfigured()) {
@@ -178,7 +183,7 @@ router.get('/transactional/events', authenticate, async (req: Request, res: Resp
  * Export des emails ayant cliqué ou désinscrit pour une campagne (export Brevo asynchrone, poll puis CSV).
  * Timeout long (90s).
  */
-router.get('/campaigns/:campaignId/recipients', authenticate, async (req: Request, res: Response) => {
+router.get('/campaigns/:campaignId/recipients', async (req: Request, res: Response) => {
   try {
     const client = getBrevoClient();
     if (!client.isConfigured()) {
@@ -196,6 +201,8 @@ router.get('/campaigns/:campaignId/recipients', authenticate, async (req: Reques
       });
     }
     const emails = await client.getCampaignRecipientEmails(campaignId, typeParam as 'clickers' | 'unsubscribed');
+    // Traçabilité de l'export (qui, quoi, combien) — sans les emails eux-mêmes.
+    logger.info(`Export Brevo ${typeParam} campagne ${campaignId} par l'utilisateur ${req.user!.userId} : ${emails.length} email(s)`);
     res.json({ success: true, emails });
   } catch (error) {
     logger.error('Error fetching campaign recipients:', error);
