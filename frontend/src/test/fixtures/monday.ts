@@ -16,6 +16,7 @@ export const TEST_MONDAY_BOARDS: MondayBoard[] = [
 
 export const TEST_MONDAY_COLUMNS: MondayColumn[] = [
   { id: 'date', title: 'DATE', type: 'text' },
+  { id: 'trimestre', title: 'Trimestre', type: 'status' },
   { id: 'pm', title: 'PM', type: 'text' },
   { id: 'st', title: 'Statut', type: 'status' },
   { id: 'team', title: 'Team', type: 'status' },
@@ -32,6 +33,7 @@ export const TEST_MONDAY_ITEMS: MondayItem[] = [
     name: 'Feature A',
     column_values: [
       { id: 'date', text: '2026-01-01 - 2026-03-31', type: 'text' },
+      { id: 'trimestre', text: 'Q1', type: 'status' },
       { id: 'pm', text: 'Bob', type: 'text' },
       { id: 'st', text: 'En cours', type: 'status' },
       { id: 'team', text: 'Team Cook', type: 'status' },
@@ -47,6 +49,7 @@ export const TEST_MONDAY_ITEMS: MondayItem[] = [
     name: 'Feature B',
     column_values: [
       { id: 'date', text: '2026-04-01 - 2026-06-30', type: 'text' },
+      { id: 'trimestre', text: 'Q2', type: 'status' },
       { id: 'pm', text: 'Alice', type: 'text' },
       { id: 'st', text: 'Done', type: 'status' },
       { id: 'team', text: 'Softcam', type: 'status' },

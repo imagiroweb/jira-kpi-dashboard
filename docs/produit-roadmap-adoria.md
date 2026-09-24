@@ -6,7 +6,7 @@ Documentation fonctionnelle et technique pour la section **Produit** (`ProduitDa
 
 - **Données** : board Monday (par défaut ID `5191064770`), items et colonnes via l’API interne.
 - **Filtres** :
-  - **Trimestre (Q1–Q4)** : la **1ʳᵉ** et la **2ᵉ** date de la colonne **`DATE`** (titre exact, insensible à la casse) doivent être entièrement dans le **même trimestre calendaire** et l’**année civile en cours**. Les plages sur années passées ou chevauchant deux trimestres sont exclues.
+  - **Trimestre (Q1–Q4)** : exclusivement la colonne Monday **`Trimestre`** (titre exact, insensible à la casse). Une ligne est retenue si sa valeur est `Q1`, `Q2`, `Q3` ou `Q4` (espaces et casse ignorés). La timeline **`DATE`** et les autres colonnes (ex. CHR) ne participent pas à ce filtre. « Tous » n’applique pas ce filtre.
   - **Statut** : cases à cocher multiples ; aucune case cochée = pas de filtre.
   - **Team** : cases à cocher multiples (libellés Monday connus + valeurs du board) ; aucune case cochée = pas de filtre (tout afficher).
   - **Filtres par défaut** : bouton « Enregistrer comme filtres par défaut » (trimestre + statut + team) ; stockés sur le document User (`preferences.roadmapAdoria2026Filters`) via `GET/PUT /api/auth/me/preferences/roadmap-adoria-2026-filters`, réappliqués au chargement de la page pour l’utilisateur connecté.
@@ -41,7 +41,7 @@ Documentation fonctionnelle et technique pour la section **Produit** (`ProduitDa
 ## EN — Overview
 
 - **Data** : Monday board (default ID `5191064770`).
-- **Quarter filter** : both bounds of the **`DATE`** column must fall in the **same calendar quarter** and the **current year**; straddling quarters or past years are excluded.
+- **Quarter filter** : exclusively the Monday **`Trimestre`** column (exact title, case-insensitive). A row is kept when its value is `Q1`, `Q2`, `Q3`, or `Q4`. The **`DATE`** timeline and other columns (e.g. CHR) are not used. « Tous » applies no quarter filter.
 - **Status filter** : multi-select checkboxes; empty selection means no status filter.
 - **Team filter** : multi-select checkboxes (known Monday labels ∪ board values); empty selection means no team filter.
 - **Charts** : CP referent, **PM** (empty → « Non attribués »), status — responsive grid.
@@ -80,11 +80,14 @@ La logique métier (dates, trimestres, statuts, agrégations KPI, classification
 | `resolveRoadmapMacroEstimationColumns` | Paire `{ macro, est }` ; la colonne macro est exclue avant de résoudre l’estimation |
 | `isRoadmapNumericKpiValueMissing` | « Manquant » pour encarts macro / estimation (vide, `-`, ≤ 0) ; `col === null` → non manquant côté comptage |
 | `findRoadmapDateColumn` / `findRoadmapPmColumn` | Détection colonnes `DATE` / `PM` |
+| `findRoadmapTrimestreColumn` | Détection de la colonne `Trimestre` (filtre Q1–Q4 exclusif) |
+| `roadmapQuarterStatusMatchesQuarter` | Valeur `Q1`–`Q4` de la colonne Trimestre |
 | `STATUS_KEYS` | Mots-clés pour colonne statut |
 
 ### Colonnes Monday attendues
 
-- **DATE** : titre exact `date` (ex. `DATE`). Plage type `YYYY-MM-DD - YYYY-MM-DD`.
+- **Trimestre** : titre exact `trimestre`. Valeurs `Q1`–`Q4` pour le filtre trimestre de la page. La colonne `DATE` ne sert plus à ce filtre.
+- **DATE** : titre exact `date` (ex. `DATE`). Plage type `YYYY-MM-DD - YYYY-MM-DD`. Utilisée pour le kanban (retard) et le RAF, pas pour le filtre Q1–Q4.
 - **PM** : titre exact `pm` ou colonne « product manager » / « chef de produit ».
 - **CP référent**, **Statut** : détection par mots-clés (voir constantes dans le module).
 - **Macro chiffrage**, **Estimation** : titre de colonne contenant l’un des libellés des tableaux `ROADMAP_MACRO_CHIFFRAGE_KEYS` et `ROADMAP_ESTIMATION_KEYS` (ex. « Macro chiffrage », « Estimation », « chiffrage initial », « jours estimés »…). Utilisés pour les encarts KPI, le diagramme comparatif et les modales de détail.

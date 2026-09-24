@@ -398,7 +398,7 @@ describe('ProduitDashboard', () => {
     expect(screen.getByTitle('Sans devis — voir le détail des lignes')).toHaveTextContent('—');
   });
 
-  it('filtre trimestre : garde une ligne sans date renseignée si la colonne CHR indique le trimestre ciblé (ticket #29)', async () => {
+  it('filtre trimestre : ne retient que la colonne Trimestre, pas la date ni CHR', async () => {
     const columnsWithChr = [...TEST_MONDAY_COLUMNS, { id: 'chr', title: 'CHR', type: 'status' }];
     const itemsWithChr = [
       ...TEST_MONDAY_ITEMS,
@@ -407,6 +407,7 @@ describe('ProduitDashboard', () => {
         name: 'INT135 - Retouches rapport CM V3',
         column_values: [
           { id: 'date', text: '', type: 'text' },
+          { id: 'trimestre', text: 'Q3', type: 'status' },
           { id: 'pm', text: 'Bob', type: 'text' },
           { id: 'st', text: 'Done', type: 'status' },
           { id: 'team', text: 'Chocolateam', type: 'status' },
@@ -415,16 +416,34 @@ describe('ProduitDashboard', () => {
           { id: 'wfRequis', text: 'NON', type: 'status' },
           { id: 'wf', text: '', type: 'link' },
           { id: 'valClient', text: '', value: '{"checked":false}', type: 'checkbox' },
-          { id: 'chr', text: 'Q3', type: 'status' },
+          { id: 'chr', text: 'Q1', type: 'status' },
         ],
       },
       {
-        // Date exploitable en Q1 mais CHR resté sur "Q3" (non mis à jour) : la date
-        // reste la source de vérité, cette ligne ne doit pas remonter sous le filtre Q3.
+        // Date en Q1 et CHR sur Q1, mais Trimestre = Q3 : seule la colonne Trimestre compte.
         id: 'item-4',
-        name: 'CHR obsolète mais date renseignée',
+        name: 'Date et CHR hors Q3',
         column_values: [
           { id: 'date', text: '2026-02-01 - 2026-02-15', type: 'text' },
+          { id: 'trimestre', text: 'Q3', type: 'status' },
+          { id: 'pm', text: 'Bob', type: 'text' },
+          { id: 'st', text: 'Done', type: 'status' },
+          { id: 'team', text: 'Team Cook', type: 'status' },
+          { id: 'macro', text: '3', type: 'numbers' },
+          { id: 'sol', text: '', type: 'link' },
+          { id: 'wfRequis', text: 'NON', type: 'status' },
+          { id: 'wf', text: '', type: 'link' },
+          { id: 'valClient', text: '', value: '{"checked":false}', type: 'checkbox' },
+          { id: 'chr', text: 'Q1', type: 'status' },
+        ],
+      },
+      {
+        // Date entièrement en Q3 et CHR = Q3, mais Trimestre = Q1 : exclue du filtre Q3.
+        id: 'item-5',
+        name: 'Date Q3 ignorée',
+        column_values: [
+          { id: 'date', text: '2026-07-01 - 2026-09-30', type: 'text' },
+          { id: 'trimestre', text: 'Q1', type: 'status' },
           { id: 'pm', text: 'Bob', type: 'text' },
           { id: 'st', text: 'Done', type: 'status' },
           { id: 'team', text: 'Team Cook', type: 'status' },
@@ -456,15 +475,14 @@ describe('ProduitDashboard', () => {
 
     renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
 
-    // Feature B (Q2, sol vide) + INT135 (sans date, sol vide) + item-4 (Q1, sol vide) = 3 avant filtre trimestre.
-    expect(await screen.findByTitle('Sans solution doc — voir le détail des lignes')).toHaveTextContent('3');
+    // Feature B (Q2) + INT135 (Q3) + item-4 (Q3) + item-5 (Q1) = 4 avant filtre trimestre.
+    expect(await screen.findByTitle('Sans solution doc — voir le détail des lignes')).toHaveTextContent('4');
 
     fireEvent.click(screen.getByRole('button', { name: 'Q3' }));
 
-    // Feature A/B sont hors Q3 (dates en Q1/Q2) ; item-4 a une date exploitable en Q1 donc
-    // son CHR="Q3" obsolète est ignoré ; seule INT135 reste, via son CHR = Q3 (pas de date).
+    // Seules INT135 et item-4 ont Trimestre = Q3. La date Q3 et le CHR Q3 de item-5 sont ignorés.
     await waitFor(() => {
-      expect(screen.getByTitle('Sans solution doc — voir le détail des lignes')).toHaveTextContent('1');
+      expect(screen.getByTitle('Sans solution doc — voir le détail des lignes')).toHaveTextContent('2');
     });
   });
 

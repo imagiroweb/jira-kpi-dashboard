@@ -14,7 +14,7 @@ import {
   findColumnPreferSpecific,
   findRoadmapDateColumn,
   findRoadmapPmColumn,
-  findRoadmapQuarterStatusColumn,
+  findRoadmapTrimestreColumn,
   getMondayItemNumericValue,
   getQuarterEndDate,
   getRoadmapDateColumnRaw,
@@ -159,18 +159,25 @@ describe('roadmapAdoriaKpi', () => {
     });
   });
 
-  describe('findRoadmapQuarterStatusColumn / roadmapQuarterStatusMatchesQuarter', () => {
+  describe('findRoadmapTrimestreColumn / roadmapQuarterStatusMatchesQuarter', () => {
     const columns: MondayColumn[] = [
       { id: 'd1', title: 'Date', type: 'timeline' },
       { id: 'chr1', title: 'CHR', type: 'status' },
+      { id: 't1', title: 'Trimestre', type: 'status' },
     ];
 
-    it('trouve la colonne CHR par titre exact', () => {
-      expect(findRoadmapQuarterStatusColumn(columns)?.id).toBe('chr1');
+    it('trouve la colonne Trimestre par titre exact, pas CHR ni Date', () => {
+      expect(findRoadmapTrimestreColumn(columns)?.id).toBe('t1');
+      expect(findRoadmapTrimestreColumn([{ id: 't2', title: '  TRIMESTRE ', type: 'status' }])?.id).toBe('t2');
     });
 
-    it('retourne null si aucune colonne CHR', () => {
-      expect(findRoadmapQuarterStatusColumn([{ id: 'd1', title: 'Date', type: 'timeline' }])).toBeNull();
+    it('retourne null si aucune colonne Trimestre', () => {
+      expect(
+        findRoadmapTrimestreColumn([
+          { id: 'd1', title: 'Date', type: 'timeline' },
+          { id: 'chr1', title: 'CHR', type: 'status' },
+        ])
+      ).toBeNull();
     });
 
     it('matche la valeur au trimestre ciblé, insensible à la casse/espaces', () => {
