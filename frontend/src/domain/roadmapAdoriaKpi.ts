@@ -136,18 +136,18 @@ export function findRoadmapDateColumn(columns: MondayColumn[]): MondayColumn | n
 }
 
 /**
- * Colonne « CHR » (statut Q1/Q2/Q3/Q4/2027/To define/NO GO) : trimestre de référence
- * du board Roadmap Adoria, utilisée en complément de la timeline « Date » — certaines
- * lignes n'ont pas de date renseignée mais sont déjà catégorisées par trimestre via CHR.
+ * Colonne Monday « Trimestre » (statut Q1/Q2/Q3/Q4, et éventuellement 2027 / To define / NO GO).
+ * Source exclusive du filtre Q1–Q4 de la page Roadmap Adoria 2026 : ni la timeline « Date »,
+ * ni une autre colonne (ex. CHR) ne participent à ce filtre.
  */
-export function findRoadmapQuarterStatusColumn(columns: MondayColumn[]): MondayColumn | null {
-  return columns.find((c) => normalizeTitle(c.title) === 'chr') ?? null;
+export function findRoadmapTrimestreColumn(columns: MondayColumn[]): MondayColumn | null {
+  return columns.find((c) => normalizeTitle(c.title) === 'trimestre') ?? null;
 }
 
 /**
- * La valeur de la colonne CHR correspond-elle au trimestre ciblé (ex. « Q3 ») ?
- * Suppose que « Q1 »..« Q4 » désignent l'année du board (Roadmap Adoria 2026) ; les lignes
- * d'une autre année utilisent une valeur dédiée (ex. « 2027 »), sans ambiguïté à ce jour.
+ * La valeur de la colonne « Trimestre » correspond-elle au trimestre ciblé (ex. « Q3 ») ?
+ * « Q1 »..« Q4 » désignent l'année du board (Roadmap Adoria 2026) ; les autres libellés
+ * (ex. « 2027 », « To define », « NO GO ») ne matchent aucun filtre Q1–Q4.
  */
 export function roadmapQuarterStatusMatchesQuarter(value: string, qTarget: CalendarQuarter): boolean {
   return value.trim().toUpperCase() === `Q${qTarget}`;
