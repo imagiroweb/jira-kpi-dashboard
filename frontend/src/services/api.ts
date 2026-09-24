@@ -20,6 +20,8 @@ import {
   type GeneralAssessmentManagerAxesInput,
   type GeneralAssessmentReferentialProfile,
   type ProgressUpdateInput,
+  type ObjectiveActionInput,
+  type ObjectiveActionStatus,
   type OkrImportResult,
   type GeneralAssessmentImportResult,
   type RoleProfile
@@ -824,6 +826,51 @@ export const performanceApi = {
     const { data } = await api.post(
       `/performance/reviews/me/objectives/${objectiveId}/krs/${krId}/progress`,
       input
+    );
+    return { ...data, review: normalizePerformanceReview(data.review) };
+  },
+  /** Le collaborateur change le statut d'une de ses actions à mener (à faire / en cours / terminé). */
+  updateMyActionStatus: async (
+    objectiveId: string,
+    actionId: string,
+    status: ObjectiveActionStatus
+  ): Promise<{ success: boolean; review: PerformanceReview }> => {
+    const { data } = await api.patch(
+      `/performance/reviews/me/objectives/${objectiveId}/actions/${actionId}/status`,
+      { status }
+    );
+    return { ...data, review: normalizePerformanceReview(data.review) };
+  },
+  /** Lead/CTO : ajoute une action à mener sur un objectif d'un collaborateur. */
+  addObjectiveAction: async (
+    userId: string,
+    objectiveId: string,
+    input: ObjectiveActionInput & { cycleId?: string }
+  ): Promise<{ success: boolean; review: PerformanceReview }> => {
+    const { data } = await api.post(`/performance/reviews/${userId}/objectives/${objectiveId}/actions`, input);
+    return { ...data, review: normalizePerformanceReview(data.review) };
+  },
+  /** Lead/CTO : modifie une action (libellé, échéance, statut). */
+  updateObjectiveAction: async (
+    userId: string,
+    objectiveId: string,
+    actionId: string,
+    input: ObjectiveActionInput & { cycleId?: string }
+  ): Promise<{ success: boolean; review: PerformanceReview }> => {
+    const { data } = await api.patch(
+      `/performance/reviews/${userId}/objectives/${objectiveId}/actions/${actionId}`,
+      input
+    );
+    return { ...data, review: normalizePerformanceReview(data.review) };
+  },
+  /** Lead/CTO : supprime une action. */
+  deleteObjectiveAction: async (
+    userId: string,
+    objectiveId: string,
+    actionId: string
+  ): Promise<{ success: boolean; review: PerformanceReview }> => {
+    const { data } = await api.delete(
+      `/performance/reviews/${userId}/objectives/${objectiveId}/actions/${actionId}`
     );
     return { ...data, review: normalizePerformanceReview(data.review) };
   },

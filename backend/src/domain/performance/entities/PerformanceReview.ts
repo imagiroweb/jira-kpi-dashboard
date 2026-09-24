@@ -18,6 +18,13 @@ export type ObjectiveAssessmentStatus = (typeof OBJECTIVE_ASSESSMENT_STATUSES)[n
 export const PERFORMANCE_REVIEW_STATUSES = ['dossier_manquant', 'en_cours', 'complete'] as const;
 export type PerformanceReviewStatus = (typeof PERFORMANCE_REVIEW_STATUSES)[number];
 
+/**
+ * Statut d'une action à mener rattachée à un objectif (voir `IObjectiveAction`) : créée "à faire"
+ * par le lead/CTO, puis passée "en cours" / "terminée" par le collaborateur (ou son manager).
+ */
+export const OBJECTIVE_ACTION_STATUSES = ['a_faire', 'en_cours', 'termine'] as const;
+export type ObjectiveActionStatus = (typeof OBJECTIVE_ACTION_STATUSES)[number];
+
 export const COMPETENCY_AXES = ['technique', 'impact', 'collaboration', 'leadership'] as const;
 export type CompetencyAxis = (typeof COMPETENCY_AXES)[number];
 
@@ -76,6 +83,26 @@ export interface IObjectiveAssessment {
   coachingAction?: string;
 }
 
+/**
+ * Action à mener rattachée à un objectif — définie par le lead/CTO (jamais par le collaborateur),
+ * dont le collaborateur fait évoluer le statut. Remplace le champ texte unique
+ * `managerAssessment.coachingAction` (repris en une action "à faire" à la première modification,
+ * voir `migrateLegacyCoachingAction` dans `objectiveActions.ts`).
+ */
+export interface IObjectiveAction {
+  id: string;
+  label: string;
+  status: ObjectiveActionStatus;
+  /** Échéance optionnelle (une action non terminée dont l'échéance est passée est "en retard"). */
+  dueDate?: Date;
+  createdBy: IReviewAuthor;
+  createdAt: Date;
+  updatedBy?: IReviewAuthor;
+  updatedAt?: Date;
+  /** Horodatage du passage à "terminé" (effacé si l'action est rouverte). */
+  completedAt?: Date;
+}
+
 export interface IObjective {
   id: string;
   title: string;
@@ -84,6 +111,8 @@ export interface IObjective {
   /** Jusqu'à 2 axes de compétence associés à cet objectif (rapprochement OKR / grille de compétences). */
   competencyAxes?: CompetencyAxis[];
   krs: IKeyResult[];
+  /** Actions à mener définies par le lead/CTO, suivies par le collaborateur (à faire / en cours / terminé). */
+  actions?: IObjectiveAction[];
   selfAssessment: IObjectiveAssessment;
   managerAssessment: IObjectiveAssessment;
 }
@@ -201,6 +230,21 @@ const ObjectiveAssessmentSchema = new Schema<IObjectiveAssessment>(
   { _id: false }
 );
 
+const ObjectiveActionSchema = new Schema<IObjectiveAction>(
+  {
+    id: { type: String, required: true },
+    label: { type: String, required: true, trim: true },
+    status: { type: String, enum: OBJECTIVE_ACTION_STATUSES, default: 'a_faire' },
+    dueDate: { type: Date },
+    createdBy: { type: ReviewAuthorSchema, required: true },
+    createdAt: { type: Date, required: true, default: Date.now },
+    updatedBy: { type: ReviewAuthorSchema },
+    updatedAt: { type: Date },
+    completedAt: { type: Date }
+  },
+  { _id: false }
+);
+
 const ObjectiveSchema = new Schema<IObjective>(
   {
     id: { type: String, required: true },
@@ -209,6 +253,7 @@ const ObjectiveSchema = new Schema<IObjective>(
     weight: { type: Number, default: 0, min: 0, max: 1 },
     competencyAxes: { type: [String], enum: COMPETENCY_AXES, default: [] },
     krs: { type: [KeyResultSchema], default: [] },
+    actions: { type: [ObjectiveActionSchema], default: [] },
     selfAssessment: { type: ObjectiveAssessmentSchema, default: () => ({}) },
     managerAssessment: { type: ObjectiveAssessmentSchema, default: () => ({}) }
   },

@@ -402,6 +402,9 @@ export function applyObjectivesDefinition(
       weight: objectiveDef.weight,
       competencyAxes: objectiveDef.competencyAxes ?? [],
       krs,
+      // Les actions à mener ne font pas partie de la définition : elles sont gérées par leurs
+      // propres routes et survivent à une redéfinition de l'objectif (voir objectiveActions.ts).
+      actions: existingObjective?.actions ?? [],
       selfAssessment: existingObjective?.selfAssessment ?? {},
       managerAssessment: existingObjective?.managerAssessment ?? {}
     };

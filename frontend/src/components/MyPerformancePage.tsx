@@ -30,9 +30,12 @@ import {
   REVIEW_STATUS_BADGE_CLASS,
   CYCLE_STATUS_LABELS,
   COMPETENCY_AXIS_LABELS,
-  QUALITATIVE_FIELDS
+  QUALITATIVE_FIELDS,
+  ObjectiveActionStatus,
+  summarizeObjectiveActions
 } from '../domain/performance';
 import { ObjectivePaceSummary } from './ObjectivePaceSummary';
+import { ObjectiveActionsPanel, ObjectiveActionsSummaryBadges } from './ObjectiveActionsPanel';
 
 function extractApiErrorMessage(err: unknown, fallback: string): string {
   const e = err as { response?: { data?: { message?: string }; status?: number }; message?: string };
@@ -188,6 +191,26 @@ export function MyPerformancePage() {
     }
   }
 
+  /** Changement de statut d'une action requise — n'écrase pas l'auto-évaluation en cours de saisie. */
+  async function handleUpdateActionStatus(
+    objectiveId: string,
+    actionId: string,
+    status: ObjectiveActionStatus
+  ): Promise<boolean> {
+    try {
+      const res = await performanceApi.updateMyActionStatus(objectiveId, actionId, status);
+      setReview(normalizePerformanceReview(res.review));
+      socket?.notify?.success('Action mise à jour', 'Le statut de votre action a été enregistré');
+      return true;
+    } catch (err) {
+      socket?.notify?.error(
+        'Échec de la mise à jour',
+        extractApiErrorMessage(err, "Erreur lors de la mise à jour du statut de l'action")
+      );
+      return false;
+    }
+  }
+
   function toggleHistory(objectiveId: string, krId: string) {
     const key = krKey(objectiveId, krId);
     setExpandedHistory((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -301,6 +324,11 @@ export function MyPerformancePage() {
                 coaching={computeReviewCoaching(review.objectives, cycle)}
               />
             )}
+            {review.objectives.length > 0 && (
+              <div className="basis-full">
+                <ObjectiveActionsSummaryBadges audience="self" summary={summarizeObjectiveActions(review.objectives)} />
+              </div>
+            )}
           </div>
 
           {review.objectives.length === 0 ? (
@@ -323,6 +351,7 @@ export function MyPerformancePage() {
                     onDraftChange={updateKrDraft}
                     onSubmitProgress={handleAddProgress}
                     onToggleHistory={toggleHistory}
+                    onUpdateActionStatus={handleUpdateActionStatus}
                   />
                 ))}
               </div>
@@ -431,6 +460,7 @@ interface ObjectiveCardProps {
   onDraftChange: (objectiveId: string, krId: string, patch: Partial<KrDraft>) => void;
   onSubmitProgress: (objectiveId: string, krId: string) => void;
   onToggleHistory: (objectiveId: string, krId: string) => void;
+  onUpdateActionStatus: (objectiveId: string, actionId: string, status: ObjectiveActionStatus) => Promise<boolean>;
 }
 
 function ObjectiveCard({
@@ -442,7 +472,8 @@ function ObjectiveCard({
   expandedHistory,
   onDraftChange,
   onSubmitProgress,
-  onToggleHistory
+  onToggleHistory,
+  onUpdateActionStatus
 }: ObjectiveCardProps) {
   const progress = Math.round(computeObjectiveProgress(objective));
   const coaching = cycle ? computeObjectiveCoaching(objective, cycle) : null;
@@ -466,11 +497,7 @@ function ObjectiveCard({
 
       <div className="mt-3 mb-5">
         {coaching ? (
-          <ObjectivePaceSummary
-            audience="self"
-            coaching={coaching}
-            coachingAction={objective.managerAssessment.coachingAction}
-          />
+          <ObjectivePaceSummary audience="self" coaching={coaching} />
         ) : (
           <>
             <div className="flex items-center justify-between text-xs text-surface-400 mb-1">
@@ -483,6 +510,19 @@ function ObjectiveCard({
           </>
         )}
       </div>
+
+      {(objective.actions ?? []).length > 0 && (
+        <div className="mb-5">
+          <ObjectiveActionsPanel
+            mode="self"
+            actions={objective.actions ?? []}
+            disabled={isReadOnly}
+            onUpdate={(actionId, input) =>
+              input.status ? onUpdateActionStatus(objective.id, actionId, input.status) : Promise.resolve(false)
+            }
+          />
+        </div>
+      )}
 
       <div className="space-y-4">
         {objective.krs.map((kr) => (

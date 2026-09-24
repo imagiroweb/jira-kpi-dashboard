@@ -49,9 +49,13 @@ import {
   COMPETENCY_AXIS_LABELS,
   QUALITATIVE_FIELDS,
   PerformanceTeamMember,
-  normalizePerformanceReview
+  normalizePerformanceReview,
+  ObjectiveActionInput,
+  summarizeObjectiveActions,
+  mergeObjectiveActionsSummaries
 } from '../domain/performance';
 import { CoachingStatusBadge, ObjectivePaceSummary } from './ObjectivePaceSummary';
+import { ObjectiveActionsPanel, ObjectiveActionsSummaryBadges } from './ObjectiveActionsPanel';
 
 function extractApiErrorMessage(err: unknown, fallback: string): string {
   const e = err as { response?: { data?: { message?: string } }; message?: string };
@@ -207,7 +211,6 @@ type QualitativeKey = 'successes' | 'challenges' | 'growthAreas' | 'overallRevie
 interface ManagerObjectiveDraft {
   status: ObjectiveAssessmentStatus | '';
   comment: string;
-  coachingAction: string;
 }
 
 interface ManagerDraft {
@@ -223,8 +226,7 @@ function buildManagerDraft(review: PerformanceReview): ManagerDraft {
         o.id,
         {
           status: o.managerAssessment.status ?? computeAutoObjectiveStatus(computeObjectiveProgress(o)),
-          comment: o.managerAssessment.comment ?? '',
-          coachingAction: o.managerAssessment.coachingAction ?? ''
+          comment: o.managerAssessment.comment ?? ''
         }
       ])
     ),
@@ -335,7 +337,11 @@ export function TeamPerformancePage() {
       }
     }
     return Array.from(grouped.entries())
-      .map(([label, teamReviews]) => ({ label, summary: summarizeTeamReviews(teamReviews) }))
+      .map(([label, teamReviews]) => ({
+        label,
+        summary: summarizeTeamReviews(teamReviews),
+        actions: mergeObjectiveActionsSummaries(teamReviews.map((r) => summarizeObjectiveActions(r.objectives)))
+      }))
       .sort((a, b) => a.label.localeCompare(b.label, 'fr'));
   })();
 
@@ -577,7 +583,7 @@ export function TeamPerformancePage() {
   function updateManagerObjectiveDraft(objectiveId: string, patch: Partial<ManagerObjectiveDraft>) {
     setManagerDraft((prev) => {
       if (!prev) return prev;
-      const current = prev.objectives[objectiveId] ?? { status: '', comment: '', coachingAction: '' };
+      const current = prev.objectives[objectiveId] ?? { status: '', comment: '' };
       return { ...prev, objectives: { ...prev.objectives, [objectiveId]: { ...current, ...patch } } };
     });
   }
@@ -595,8 +601,7 @@ export function TeamPerformancePage() {
         return {
           id: o.id,
           status: draft?.status || undefined,
-          comment: draft?.comment.trim() ? draft.comment.trim() : undefined,
-          coachingAction: draft?.coachingAction.trim() ?? ''
+          comment: draft?.comment.trim() ? draft.comment.trim() : undefined
         };
       }),
       qualitative: {
@@ -623,6 +628,56 @@ export function TeamPerformancePage() {
     } finally {
       setSavingManager(false);
     }
+  }
+
+  /**
+   * Actions à mener : chaque opération est enregistrée immédiatement. On ne reconstruit pas
+   * `managerDraft` pour ne pas perdre une évaluation manager en cours de saisie.
+   */
+  async function runActionRequest(
+    request: () => Promise<{ review: PerformanceReview }>,
+    successTitle: string
+  ): Promise<boolean> {
+    if (!detail) return false;
+    try {
+      const res = await request();
+      const merged: PerformanceReview = { ...res.review, user: detail.user };
+      setDetail(merged);
+      upsertReviewInList(merged);
+      socket?.notify?.success(successTitle, 'Le suivi des actions a été mis à jour');
+      return true;
+    } catch (err) {
+      socket?.notify?.error('Échec', extractApiErrorMessage(err, "Erreur lors de l'enregistrement de l'action"));
+      return false;
+    }
+  }
+
+  function handleAddAction(objectiveId: string, input: ObjectiveActionInput) {
+    if (!detail || !cycle) return Promise.resolve(false);
+    return runActionRequest(
+      () => performanceApi.addObjectiveAction(reviewUserId(detail), objectiveId, { ...input, cycleId: cycle.id }),
+      'Action ajoutée'
+    );
+  }
+
+  function handleUpdateAction(objectiveId: string, actionId: string, input: ObjectiveActionInput) {
+    if (!detail || !cycle) return Promise.resolve(false);
+    return runActionRequest(
+      () =>
+        performanceApi.updateObjectiveAction(reviewUserId(detail), objectiveId, actionId, {
+          ...input,
+          cycleId: cycle.id
+        }),
+      'Action mise à jour'
+    );
+  }
+
+  function handleDeleteAction(objectiveId: string, actionId: string) {
+    if (!detail) return Promise.resolve(false);
+    return runActionRequest(
+      () => performanceApi.deleteObjectiveAction(reviewUserId(detail), objectiveId, actionId),
+      'Action supprimée'
+    );
   }
 
   async function handleCompleteReview() {
@@ -786,10 +841,11 @@ export function TeamPerformancePage() {
                     <th className="p-3 font-medium">Score objectifs (moy.)</th>
                     <th className="p-3 font-medium">Score auto-évaluation (moy.)</th>
                     <th className="p-3 font-medium">Score évaluation manager (moy.)</th>
+                    <th className="p-3 font-medium">Actions à mener</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {teamSummaries.map(({ label, summary }) => (
+                  {teamSummaries.map(({ label, summary, actions }) => (
                     <tr key={label} className="border-b border-surface-800/50">
                       <td className="p-3 text-surface-200">{label}</td>
                       <td className="p-3">
@@ -798,6 +854,9 @@ export function TeamPerformancePage() {
                       <td className="p-3 text-surface-300">{formatAvgScore(summary.avgObjectivesScore, '%')}</td>
                       <td className="p-3 text-surface-300">{formatAvgScore(summary.avgSelfAssessmentScore, ' / 5')}</td>
                       <td className="p-3 text-surface-300">{formatAvgScore(summary.avgManagerAssessmentScore, ' / 5')}</td>
+                      <td className="p-3">
+                        <ObjectiveActionsSummaryBadges compact summary={actions} />
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -823,6 +882,7 @@ export function TeamPerformancePage() {
                     <th className="p-3 font-medium">Statut</th>
                     <th className="p-3 font-medium">Score</th>
                     <th className="p-3 font-medium">Accompagnement</th>
+                    <th className="p-3 font-medium">Actions</th>
                     <th className="p-3 font-medium">Score auto-évaluation</th>
                     <th className="p-3 font-medium">Score évaluation manager</th>
                     <th className="p-3 font-medium">Objectifs</th>
@@ -846,6 +906,9 @@ export function TeamPerformancePage() {
                         ) : (
                           <span className="text-surface-500">—</span>
                         )}
+                      </td>
+                      <td className="p-3">
+                        <ObjectiveActionsSummaryBadges compact summary={summarizeObjectiveActions(review.objectives)} />
                       </td>
                       <td className="p-3 text-surface-300">
                         {formatGeneralAssessmentScore(review.generalSelfAssessment)}
@@ -878,6 +941,7 @@ export function TeamPerformancePage() {
                           {REVIEW_STATUS_LABELS.dossier_manquant}
                         </span>
                       </td>
+                      <td className="p-3 text-surface-300">—</td>
                       <td className="p-3 text-surface-300">—</td>
                       <td className="p-3 text-surface-300">—</td>
                       <td className="p-3 text-surface-300">—</td>
@@ -937,6 +1001,11 @@ export function TeamPerformancePage() {
                     title="Avancement total"
                     coaching={computeReviewCoaching(detail.objectives, cycle)}
                   />
+                )}
+                {detail.objectives.length > 0 && (
+                  <div className="basis-full">
+                    <ObjectiveActionsSummaryBadges summary={summarizeObjectiveActions(detail.objectives)} />
+                  </div>
                 )}
               </div>
 
@@ -1024,10 +1093,7 @@ export function TeamPerformancePage() {
                     </div>
 
                     {cycle && savedObjective && (
-                      <ObjectivePaceSummary
-                        coaching={computeObjectiveCoaching(savedObjective, cycle)}
-                        coachingAction={savedObjective.managerAssessment.coachingAction}
-                      />
+                      <ObjectivePaceSummary coaching={computeObjectiveCoaching(savedObjective, cycle)} />
                     )}
 
                     <div className="pl-2 space-y-2">
@@ -1119,8 +1185,7 @@ export function TeamPerformancePage() {
                     {detail.objectives.map((objective) => {
                       const draft = managerDraft.objectives[objective.id] ?? {
                         status: '',
-                        comment: '',
-                        coachingAction: ''
+                        comment: ''
                       };
                       return (
                         <div key={objective.id} className="border border-surface-700/50 rounded-xl p-4">
@@ -1134,10 +1199,7 @@ export function TeamPerformancePage() {
                           </div>
                           {cycle && (
                             <div className="mb-3">
-                              <ObjectivePaceSummary
-                                coaching={computeObjectiveCoaching(objective, cycle)}
-                                coachingAction={draft.coachingAction || objective.managerAssessment.coachingAction}
-                              />
+                              <ObjectivePaceSummary coaching={computeObjectiveCoaching(objective, cycle)} />
                             </div>
                           )}
                           <div className="grid sm:grid-cols-[220px_1fr] gap-3">
@@ -1174,17 +1236,13 @@ export function TeamPerformancePage() {
                             />
                           </div>
                           <div className="mt-3">
-                            <label className="block text-sm font-medium text-surface-300 mb-1.5">
-                              Action à suivre
-                            </label>
-                            <textarea
-                              className="input min-h-[60px]"
-                              placeholder="Action particulière que le collaborateur doit suivre"
-                              value={draft.coachingAction}
+                            <ObjectiveActionsPanel
+                              mode="manager"
+                              actions={objective.actions ?? []}
                               disabled={isReadOnly}
-                              onChange={(e) =>
-                                updateManagerObjectiveDraft(objective.id, { coachingAction: e.target.value })
-                              }
+                              onAdd={(input) => handleAddAction(objective.id, input)}
+                              onUpdate={(actionId, input) => handleUpdateAction(objective.id, actionId, input)}
+                              onDelete={(actionId) => handleDeleteAction(objective.id, actionId)}
                             />
                           </div>
                           {objective.selfAssessment.status && (

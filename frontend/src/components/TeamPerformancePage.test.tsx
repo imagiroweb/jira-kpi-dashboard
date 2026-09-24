@@ -22,6 +22,9 @@ vi.mock('../services/api', () => ({
     updateGeneralManagerAssessment: vi.fn(),
     getGeneralAssessmentReferential: vi.fn(),
     getTeamMembers: vi.fn(),
+    addObjectiveAction: vi.fn(),
+    updateObjectiveAction: vi.fn(),
+    deleteObjectiveAction: vi.fn(),
     importOkr: vi.fn(),
     importGeneralAssessment: vi.fn()
   },
@@ -379,9 +382,6 @@ describe('TeamPerformancePage', () => {
     ) as HTMLElement;
 
     fireEvent.change(within(objectiveEvaluationCard).getByRole('combobox'), { target: { value: 'atteint' } });
-    fireEvent.change(within(objectiveEvaluationCard).getByPlaceholderText(/Action particulière/), {
-      target: { value: 'Prioriser le KR incidents cette semaine' }
-    });
     fireEvent.click(screen.getByRole('button', { name: /Enregistrer l'évaluation/i }));
 
     await waitFor(() => {
@@ -392,8 +392,7 @@ describe('TeamPerformancePage', () => {
             {
               id: 'obj-1',
               status: 'atteint',
-              comment: undefined,
-              coachingAction: 'Prioriser le KR incidents cette semaine'
+              comment: undefined
             }
           ]
         })
@@ -485,7 +484,7 @@ describe('TeamPerformancePage', () => {
       expect(mockUpdateManagerAssessment).toHaveBeenCalledWith(
         'user-1',
         expect.objectContaining({
-          objectives: [{ id: 'obj-1', status: 'partiellement_atteint', comment: undefined, coachingAction: '' }]
+          objectives: [{ id: 'obj-1', status: 'partiellement_atteint', comment: undefined }]
         })
       );
     });
@@ -950,5 +949,54 @@ describe('TeamPerformancePage', () => {
 
     const bilanLine = (await screen.findByText('Bilan du cycle (collaborateur) :')).closest('p') as HTMLElement;
     expect(within(bilanLine).getByText('Partiellement atteint')).toHaveClass('badge-warning');
+  });
+  it('ajoute une action à mener et affiche l’avancement des actions dans la synthèse', async () => {
+    seedUser({ performanceGlobalAccess: true });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    const base = makeReview();
+    const withAction = makeReview({
+      objectives: [
+        {
+          ...base.objectives[0],
+          actions: [
+            {
+              id: 'act-1',
+              label: 'Binômer avec un senior sur les incidents',
+              status: 'a_faire',
+              dueDate: '2026-10-15T00:00:00.000Z',
+              createdBy: { id: 'cto', name: 'cto', role: 'cto' },
+              createdAt: '2026-09-24T00:00:00.000Z'
+            }
+          ]
+        }
+      ]
+    });
+    mockListReviews.mockResolvedValue({ success: true, reviews: [base] });
+    mockGetReview.mockResolvedValue({ success: true, review: base });
+    vi.mocked(performanceApi.addObjectiveAction).mockResolvedValue({ success: true, review: withAction });
+
+    render(<TeamPerformancePage />);
+    await screen.findByText('Alice Martin');
+    fireEvent.click(screen.getByRole('button', { name: 'Ouvrir' }));
+
+    const input = await screen.findByPlaceholderText(/Nouvelle action à mener/);
+    fireEvent.change(input, { target: { value: 'Binômer avec un senior sur les incidents' } });
+    fireEvent.change(screen.getByLabelText(/Échéance/), { target: { value: '2026-10-15' } });
+    fireEvent.click(screen.getByRole('button', { name: /^Ajouter$/ }));
+
+    await waitFor(() => {
+      expect(performanceApi.addObjectiveAction).toHaveBeenCalledWith('user-1', 'obj-1', {
+        label: 'Binômer avec un senior sur les incidents',
+        dueDate: '2026-10-15',
+        cycleId: ACTIVE_CYCLE.id
+      });
+    });
+    expect(await screen.findByText('Binômer avec un senior sur les incidents')).toBeInTheDocument();
+    expect(screen.getByText('0/1 terminée')).toBeInTheDocument();
+
+    // Retour à la liste : la colonne "Actions" reflète la fiche mise à jour.
+    fireEvent.click(screen.getByRole('button', { name: /Retour à la liste/ }));
+    expect((await screen.findAllByText('0/1 terminée')).length).toBeGreaterThan(0);
   });
 });
