@@ -3050,9 +3050,9 @@ export interface EpicTimeByUserResult {
   totalSeconds: number;
   people: EpicTimeByUserRow[];
   byRole: EpicTimeByRoleRow[];
-  /** Présents seulement avec l'accès aux coûts. */
-  totalCost?: number;
-  peopleWithoutCost?: number;
+  /** Coût total de l'épic, renvoyé à tous ; le détail par personne / rôle reste réservé. */
+  totalCost: number;
+  peopleWithoutCost: number;
 }
 
 export interface EpicDetailsResult {

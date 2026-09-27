@@ -90,6 +90,16 @@ describe('EpicTimeByUserPanel', () => {
     expect(screen.queryByText(/€/)).not.toBeInTheDocument();
   });
 
+  it('affiche le coût total sans le détail par personne ni par rôle', async () => {
+    renderPanel({ ...BASE, totalCost: 525, peopleWithoutCost: 1 });
+
+    const people = within(await screen.findByRole('list', { name: 'Temps passé par personne' })).getAllByRole('listitem');
+    expect(screen.getByText(new RegExp(`13.5h sur 9 ticket\\(s\\) · ${eur(525)}`))).toBeInTheDocument();
+    people.forEach((item) => expect(item).not.toHaveTextContent('€'));
+    const roles = within(screen.getByRole('list', { name: 'Répartition par rôle' })).getAllByRole('listitem');
+    roles.forEach((item) => expect(item).not.toHaveTextContent('€'));
+  });
+
   it('affiche les coûts par personne, par rôle et au total quand ils sont fournis', async () => {
     renderPanel(WITH_COSTS);
 
