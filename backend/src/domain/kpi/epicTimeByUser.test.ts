@@ -89,8 +89,10 @@ describe('aggregateWorklogsByAuthor', () => {
 describe('buildEpicTimeByUser', () => {
   const aggregate = aggregateWorklogsByAuthor(WORKLOGS);
 
-  it('renseigne le poste et répartit le temps par rôle, sans aucun champ de coût', () => {
-    const result = buildEpicTimeByUser(aggregate, USERS, { withCosts: false });
+  it('renseigne le poste et répartit le temps par rôle, avec le seul coût total', () => {
+    const { totalCost, peopleWithoutCost, ...result } = buildEpicTimeByUser(aggregate, USERS, { withCosts: false });
+    expect(totalCost).toBe(525);
+    expect(peopleWithoutCost).toBe(2);
 
     expect(result.people.map((p) => [p.displayName, p.role, p.percent])).toEqual([
       ['Caroline Martin', 'Développeuse', 87.5],

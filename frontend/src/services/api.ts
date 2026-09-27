@@ -314,7 +314,7 @@ export interface EpicTimeByUserResponse {
   totalSeconds: number;
   people: EpicTimeByUserRow[];
   byRole: EpicTimeByRoleRow[];
-  /** Présents seulement avec l'accès aux coûts. */
+  /** Coût total, visible par tous. Absent des réponses mises en cache avant ce changement. */
   totalCost?: number;
   peopleWithoutCost?: number;
 }

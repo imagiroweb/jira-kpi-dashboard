@@ -154,7 +154,8 @@ export function aggregateWorklogsByAuthor(worklogsByIssue: Map<string, WorklogLi
 
 /**
  * Rattache les auteurs aux utilisateurs de l'app (poste, coût horaire) et répartit le temps par rôle.
- * Sans `withCosts`, aucun champ de coût n'est présent dans le résultat (donnée réservée).
+ * Le coût total est toujours renvoyé. Sans `withCosts`, ni coût horaire ni coût par personne ou par
+ * rôle : un rôle tenu par une seule personne révélerait son coût.
  */
 export function buildEpicTimeByUser(
   aggregate: { totalSeconds: number; authors: AuthorTime[] },
@@ -163,21 +164,26 @@ export function buildEpicTimeByUser(
 ): {
   people: EpicTimeByUserRow[];
   byRole: EpicTimeByRoleRow[];
-  totalCost?: number;
-  peopleWithoutCost?: number;
+  totalCost: number;
+  peopleWithoutCost: number;
 } {
   const { totalSeconds } = aggregate;
+  const costs: Array<number | null> = [];
   const people: EpicTimeByUserRow[] = aggregate.authors.map(({ emailAddress, secondsByDay, ...a }) => {
     const user = findAppUser({ displayName: a.displayName, emailAddress }, users);
     const row: EpicTimeByUserRow = { ...a, role: user?.roleName ?? null, percent: roundPercent(a.timeSpentSeconds, totalSeconds) };
+    const hourlyRates = user?.hourlyRates ?? [];
+    // `?? {}` : agrégat mis en cache avant l'ajout du détail par jour.
+    const cost = costOfDailySeconds(hourlyRates, secondsByDay ?? {});
+    costs.push(cost);
     if (withCosts) {
-      const hourlyRates = user?.hourlyRates ?? [];
       row.hourlyRates = hourlyRates;
-      // `?? {}` : agrégat mis en cache avant l'ajout du détail par jour.
-      row.cost = costOfDailySeconds(hourlyRates, secondsByDay ?? {});
+      row.cost = cost;
     }
     return row;
   });
+  const totalCost = roundCost(costs.reduce<number>((sum, c) => sum + (c ?? 0), 0));
+  const peopleWithoutCost = costs.filter((c) => c == null).length;
 
   const roles = new Map<string | null, EpicTimeByRoleRow>();
   for (const p of people) {
@@ -201,11 +207,5 @@ export function buildEpicTimeByUser(
     // Poste non renseigné en dernier.
     .sort((a, b) => (a.role === null ? 1 : 0) - (b.role === null ? 1 : 0) || b.timeSpentSeconds - a.timeSpentSeconds);
 
-  if (!withCosts) return { people, byRole };
-  return {
-    people,
-    byRole,
-    totalCost: roundCost(people.reduce((sum, p) => sum + (p.cost ?? 0), 0)),
-    peopleWithoutCost: people.filter((p) => p.cost == null).length,
-  };
+  return { people, byRole, totalCost, peopleWithoutCost };
 }
