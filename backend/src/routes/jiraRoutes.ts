@@ -342,7 +342,8 @@ router.get('/epic/:epicKey/details', requirePage('epics'), async (req: Request, 
 
 /**
  * Temps passé par personne et par rôle sur tous les tickets d'une épic / légende (issue #44).
- * Les coûts ne sont renvoyés qu'au super admin et aux rôles ayant la page « Coûts horaires » (ex. Finance).
+ * Le coût total est renvoyé à tous. Le détail par personne et par rôle n'est renvoyé qu'au super
+ * admin et aux rôles ayant la page « Coûts horaires » (ex. Finance).
  * GET /api/jira/epic/:epicKey/time-by-user
  */
 router.get('/epic/:epicKey/time-by-user', requirePage('epics'), async (req: Request, res: Response) => {

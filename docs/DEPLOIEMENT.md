@@ -7,7 +7,8 @@ Ce document détaille la configuration des **secrets GitHub** et l’intégratio
 ## 1. Rappel du flux CI/CD
 
 - **CI** : à chaque push/PR sur `main` ou `develop` → lint + build + validation Docker.
-- **CD** : à chaque push sur `main` → build des images → push vers `ghcr.io`.
+- **CD prod** : à chaque push sur `main` → images taguées `latest` → push vers `ghcr.io` → déploiement de la stack prod.
+- **CD préprod** : à chaque push sur `develop` → images taguées `develop` → déploiement de la stack préprod (`jira-kpi-preprod.imagiro.fr`). La prod n’est pas touchée.
 - **Déploiement** (optionnel) : après le push des images, soit **SSH** (commande sur le serveur), soit **Portainer** (webhook qui redéploie la stack).
 
 ---
@@ -27,6 +28,7 @@ Ce document détaille la configuration des **secrets GitHub** et l’intégratio
 | `DEPLOY_METHOD` | `portainer` | Déploiement automatique via webhook Portainer après push sur `main`. |
 | *(rien ou autre)* | *(ne pas définir)* | Pas de déploiement auto, uniquement build + push des images. |
 | `SSH_DEPLOY_PATH` | ex. `/opt/jira-kpi-dashboard` | Optionnel. Chemin du projet sur le serveur (défaut : `/opt/jira-kpi-dashboard`). Uniquement pour `DEPLOY_METHOD=ssh`. |
+| `SSH_DEPLOY_PATH_PREPROD` | ex. `/opt/jira-kpi-dashboard-preprod` | Optionnel. Dossier de la stack préprod (défaut : `/opt/jira-kpi-dashboard-preprod`). Uniquement pour `DEPLOY_METHOD=ssh`, au push sur `develop`. |
 
 ### Secrets – Déploiement SSH
 
@@ -57,7 +59,8 @@ Sur le serveur, le script fait :
 
 | Secret | Description |
 |--------|-------------|
-| `PORTAINER_WEBHOOK_URL` | URL du webhook fournie par Portainer pour la stack (voir section 3). |
+| `PORTAINER_WEBHOOK_URL` | URL du webhook fournie par Portainer pour la stack prod (voir section 3). |
+| `PORTAINER_WEBHOOK_URL_PREPROD` | URL du webhook de la stack préprod. Appelée uniquement au push sur `develop`. |
 
 ---
 
@@ -230,7 +233,46 @@ Si tu préfères que Portainer lise les fichiers du repo :
 | Objectif | Variables | Secrets |
 |----------|-----------|---------|
 | Pas de déploiement auto | Ne pas définir `DEPLOY_METHOD` | Aucun |
-| Déploiement auto par SSH | `DEPLOY_METHOD` = `ssh`, optionnel `SSH_DEPLOY_PATH` | `SSH_HOST`, `SSH_USER`, `SSH_PRIVATE_KEY`, `GHCR_TOKEN` |
-| Déploiement auto par Portainer | `DEPLOY_METHOD` = `portainer` | `PORTAINER_WEBHOOK_URL` |
+| Déploiement auto par SSH | `DEPLOY_METHOD` = `ssh`, optionnel `SSH_DEPLOY_PATH` et `SSH_DEPLOY_PATH_PREPROD` | `SSH_HOST`, `SSH_USER`, `SSH_PRIVATE_KEY`, `GHCR_TOKEN` |
+| Déploiement auto par Portainer | `DEPLOY_METHOD` = `portainer` | `PORTAINER_WEBHOOK_URL`, et `PORTAINER_WEBHOOK_URL_PREPROD` pour la préprod |
 
-Une fois ces réglages en place, un simple **push sur `main`** déclenche build, push des images et (si activé) déploiement soit en SSH soit via le webhook Portainer.
+Un **push sur `main`** déploie la prod (`latest`). Un **push sur `develop`** déploie la préprod (`develop`).
+
+---
+
+## 5. Environnement de préprod
+
+Même serveur que la prod, autre stack. Hostname : `https://jira-kpi-preprod.imagiro.fr`.
+
+La préprod a ses propres conteneurs, volumes MongoDB/Redis et son réseau. `SYNC_ENABLED=false` : elle ne lance pas la synchro planifiée. Les jetons Jira/Monday restent ceux du `.env` (lecture).
+
+### 5.1 Une fois sur le serveur
+
+1. DNS : `jira-kpi-preprod.imagiro.fr` → la même IP que `jira-kpi.imagiro.fr`.
+2. Dossier et `.env` distincts (copier celui de la prod, puis changer au minimum `JWT_SECRET` et `MONGO_PASSWORD`) :
+
+```bash
+sudo mkdir -p /opt/jira-kpi-dashboard-preprod
+sudo cp /opt/jira-kpi-dashboard/.env /opt/jira-kpi-dashboard-preprod/.env
+# Éditer JWT_SECRET et MONGO_PASSWORD dans le .env préprod
+```
+
+3. Azure Entra → l’app registration existante → **Authentication** → **Single-page application** → ajouter  
+   `https://jira-kpi-preprod.imagiro.fr/auth/microsoft/callback`.
+4. Premier lancement (le réseau `traefik-public` existe déjà) :
+
+```bash
+cd /opt/jira-kpi-dashboard-preprod
+docker compose -p jira-kpi-preprod \
+  -f docker-compose.prod.yml \
+  -f docker-compose.prod.ghcr.yml \
+  -f docker-compose.prod.scaleway.yml \
+  -f docker-compose.prod.preprod.yml \
+  up -d
+```
+
+Les fichiers compose sont copiés par la CD au premier push sur `develop` si `DEPLOY_METHOD=ssh`. Avant ce push, les copier à la main ou laisser la CD créer le dossier.
+
+### 5.2 Ensuite
+
+Merger sur `develop` déploie la préprod. Merger `develop` dans `main` déploie la prod. Ne pas pointer la préprod sur le tag `latest`.

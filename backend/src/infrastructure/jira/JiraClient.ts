@@ -1,6 +1,16 @@
 import axios, { AxiosInstance, AxiosError, AxiosResponse } from 'axios';
 import { logger } from '../../utils/logger';
 
+function jiraErrorDetail(error: unknown): string {
+  if (axios.isAxiosError?.(error)) {
+    const status = error.response?.status;
+    const data = error.response?.data as { errorMessages?: string[] } | undefined;
+    const message = data?.errorMessages?.join('; ') || error.message;
+    return status ? `${status} ${message}` : message;
+  }
+  return error instanceof Error ? error.message : 'unknown error';
+}
+
 /**
  * Jira API Client
  * Handles authentication and HTTP communication with Jira
@@ -80,14 +90,64 @@ export class JiraClient {
   }
 
   /**
-   * Get board details by ID
+   * Get board details by ID.
+   * L'endpoint unitaire renvoie parfois 404 pour un board pourtant visible (team-managed, privé).
+   * On cherche alors le nom dans la liste Agile, puis dans les vues GreenHopper.
    */
   async getBoard(boardId: number): Promise<JiraBoard | null> {
     try {
       const response = await this.client.get<JiraBoard>(`/rest/agile/1.0/board/${boardId}`);
-      return response.data;
+      if (response.data?.name) return response.data;
     } catch (e) {
-      logger.warn(`Could not fetch board ${boardId}`);
+      logger.warn(`Could not fetch board ${boardId} directly: ${jiraErrorDetail(e)}`);
+    }
+
+    const fromList = await this.findBoardInAgileList(boardId);
+    if (fromList) return fromList;
+
+    const fromViews = await this.findBoardInRapidViews(boardId);
+    if (fromViews) return fromViews;
+
+    logger.warn(`Board ${boardId} name unresolved`);
+    return null;
+  }
+
+  private async findBoardInAgileList(boardId: number): Promise<JiraBoard | null> {
+    const maxResults = 50;
+    let startAt = 0;
+    for (let page = 0; page < 20; page++) {
+      try {
+        const response = await this.client.get<{ values?: JiraBoard[]; isLast?: boolean }>(
+          '/rest/agile/1.0/board',
+          { params: { startAt, maxResults } }
+        );
+        const values = response.data.values ?? [];
+        const found = values.find((b) => Number(b.id) === boardId);
+        if (found?.name) {
+          logger.info(`Board ${boardId} resolved from agile list: "${found.name}"`);
+          return found;
+        }
+        if (response.data.isLast || values.length < maxResults) return null;
+        startAt += values.length;
+      } catch (e) {
+        logger.warn(`Could not list boards while resolving ${boardId}: ${jiraErrorDetail(e)}`);
+        return null;
+      }
+    }
+    return null;
+  }
+
+  private async findBoardInRapidViews(boardId: number): Promise<JiraBoard | null> {
+    try {
+      const response = await this.client.get<{ views?: Array<{ id: number; name: string }> }>(
+        '/rest/greenhopper/1.0/rapidview'
+      );
+      const found = (response.data.views ?? []).find((v) => Number(v.id) === boardId);
+      if (!found?.name) return null;
+      logger.info(`Board ${boardId} resolved from rapid views: "${found.name}"`);
+      return { id: boardId, name: found.name, type: 'scrum' };
+    } catch (e) {
+      logger.warn(`Could not list rapid views while resolving ${boardId}: ${jiraErrorDetail(e)}`);
       return null;
     }
   }

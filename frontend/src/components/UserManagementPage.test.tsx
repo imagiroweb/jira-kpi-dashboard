@@ -275,6 +275,25 @@ describe('UserManagementPage', () => {
     });
   });
 
+  it('filtre la page pour n’afficher qu’une section', async () => {
+    renderWithProviders(<UserManagementPage />, { user: SUPER_ADMIN });
+
+    await screen.findByRole('button', { name: /Ajouter un rôle/i });
+    expect(screen.getByRole('heading', { name: 'Utilisateurs' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Rôles et pages visibles' })).toBeInTheDocument();
+
+    const filters = screen.getByRole('group', { name: 'Filtrer les sections' });
+    fireEvent.click(within(filters).getByRole('button', { name: 'Utilisateurs' }));
+
+    expect(screen.getByRole('heading', { name: 'Utilisateurs' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Rôles et pages visibles' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Ajouter un rôle/i })).not.toBeInTheDocument();
+
+    fireEvent.click(within(filters).getByRole('button', { name: 'Utilisateurs' }));
+
+    expect(screen.getByRole('heading', { name: 'Rôles et pages visibles' })).toBeInTheDocument();
+  });
+
   it('crée un nouveau rôle', async () => {
     renderWithProviders(<UserManagementPage />, { user: SUPER_ADMIN });
 

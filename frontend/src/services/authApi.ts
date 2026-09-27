@@ -25,6 +25,27 @@ api.interceptors.request.use((config) => {
   return config;
 });
 
+export interface IntegrationSettings {
+  jiraUrl: string;
+  jiraEmail: string;
+  jiraApiTokenSet: boolean;
+  jiraApiTokenFromDatabase: boolean;
+  mondayApiKeySet: boolean;
+  mondayApiKeyFromDatabase: boolean;
+  dashboardBoardIds: number[];
+  qaBoardIds: number[];
+  boardsConfigured: boolean;
+}
+
+export interface IntegrationSettingsInput {
+  jiraUrl: string;
+  jiraEmail: string;
+  jiraApiToken: string;
+  mondayApiKey: string;
+  dashboardBoardIds: number[];
+  qaBoardIds: number[];
+}
+
 export interface VisiblePages {
   dashboard: boolean;
   users: boolean;
@@ -269,6 +290,21 @@ export const authApi = {
   /**
    * Update role (super_admin only)
    */
+  async getIntegrationSettings(): Promise<IntegrationSettings> {
+    const response = await api.get<{ success: boolean; settings: IntegrationSettings }>('/api/auth/integration-settings');
+    if (!response.data.success) throw new Error((response.data as { error?: string }).error);
+    return response.data.settings;
+  },
+
+  async saveIntegrationSettings(input: IntegrationSettingsInput): Promise<IntegrationSettings> {
+    const response = await api.put<{ success: boolean; settings: IntegrationSettings }>(
+      '/api/auth/integration-settings',
+      input
+    );
+    if (!response.data.success) throw new Error((response.data as { error?: string }).error);
+    return response.data.settings;
+  },
+
   async updateRole(roleId: string, data: { name?: string; pageVisibilities?: VisiblePages }): Promise<RoleDto> {
     const response = await api.patch<{ success: boolean; role: RoleDto }>(`/api/auth/roles/${roleId}`, data);
     if (!response.data.success) throw new Error((response.data as { error?: string }).error);

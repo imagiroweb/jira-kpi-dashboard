@@ -37,7 +37,9 @@ export function EpicTimeByUserPanel({
   ticketTimeSpentSeconds: number;
 }) {
 
-  const showCosts = data?.totalCost !== undefined;
+  const showTotalCost = data?.totalCost !== undefined;
+  // Le serveur n'envoie le coût par personne qu'aux rôles ayant accès aux coûts horaires.
+  const showCosts = !!data && data.people.some((p) => p.cost !== undefined);
   // Écart de plus d'une minute entre la somme des worklogs et le temps passé des tickets.
   const gapSeconds = data ? data.totalSeconds - ticketTimeSpentSeconds : 0;
   const hasGap = data !== null && Math.abs(gapSeconds) >= 60;
@@ -52,7 +54,7 @@ export function EpicTimeByUserPanel({
         {data && (
           <span className="text-xs text-surface-500">
             {data.people.length} personne(s) · {formatHoursOnly(data.totalSeconds)} sur {data.issueCount} ticket(s)
-            {showCosts && <> · {formatEuros(data.totalCost ?? 0)}</>}
+            {showTotalCost && <> · {formatEuros(data.totalCost ?? 0)}</>}
           </span>
         )}
       </div>
@@ -141,7 +143,7 @@ export function EpicTimeByUserPanel({
         </ul>
       )}
 
-      {showCosts && !!data?.peopleWithoutCost && (
+      {showTotalCost && !!data?.peopleWithoutCost && (
         <p className="text-xs text-surface-500">
           * {data.peopleWithoutCost} personne(s) sans coût horaire (ou non retrouvée(s) dans la gestion des utilisateurs) : leur
           temps n&apos;est pas compté dans les coûts.

@@ -10,6 +10,7 @@ import {
   ResponsiveContainer
 } from 'recharts';
 import { authApi, UserWithRoleDto, RoleDto, VisiblePages, UserActivityLogEntry } from '../services/authApi';
+import { IntegrationSettingsPanel } from './IntegrationSettingsPanel';
 import { useStore } from '../store/useStore';
 import { InviteLocalUserForm } from './InviteLocalUserForm';
 
@@ -52,6 +53,7 @@ export function UserManagementPage() {
   const [allLogsLoading, setAllLogsLoading] = useState(false);
   const [pageStats, setPageStats] = useState<{ pages: Record<string, number>; total: number; percentages: Record<string, number> } | null>(null);
   const [pageStatsLoading, setPageStatsLoading] = useState(false);
+  const [sectionFilter, setSectionFilter] = useState<'users' | 'rights' | 'connections' | null>(null);
 
   const isSuperAdmin = user?.role === 'super_admin' || user?.visiblePages?.gestionUtilisateurs;
 
@@ -246,8 +248,55 @@ export function UserManagementPage() {
           </div>
         )}
 
+        <div className="flex flex-wrap gap-2 mb-8" role="group" aria-label="Filtrer les sections">
+          {(
+            [
+              {
+                id: 'users' as const,
+                label: 'Utilisateurs',
+                Icon: Users,
+                activeClass: 'bg-primary-500/20 border-primary-500/50 text-primary-200',
+                iconClass: 'text-primary-400',
+              },
+              {
+                id: 'rights' as const,
+                label: 'Droits',
+                Icon: ShieldCheck,
+                activeClass: 'bg-amber-500/20 border-amber-500/50 text-amber-200',
+                iconClass: 'text-amber-400',
+              },
+              {
+                id: 'connections' as const,
+                label: 'Connexion & board',
+                Icon: KeyRound,
+                activeClass: 'bg-cyan-500/20 border-cyan-500/50 text-cyan-200',
+                iconClass: 'text-cyan-400',
+              },
+            ]
+          ).map((section) => {
+            const selected = sectionFilter === section.id;
+            return (
+              <button
+                key={section.id}
+                type="button"
+                aria-pressed={selected}
+                title={selected ? 'Afficher toutes les sections' : `N'afficher que ${section.label}`}
+                onClick={() => setSectionFilter(selected ? null : section.id)}
+                className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                  selected
+                    ? section.activeClass
+                    : 'bg-surface-800/50 border-surface-700/50 text-surface-400 hover:text-surface-200 hover:border-surface-600/60'
+                }`}
+              >
+                <section.Icon className={`w-4 h-4 ${selected ? section.iconClass : ''}`} aria-hidden />
+                {section.label}
+              </button>
+            );
+          })}
+        </div>
+
         {/* Liste des utilisateurs */}
-        <section className="mb-10">
+        <section className="mb-10" hidden={sectionFilter !== null && sectionFilter !== 'users'}>
           <div className="flex items-center justify-between mb-4">
             <h2 className="text-lg font-semibold text-surface-200 flex items-center gap-2">
               <Users className="w-5 h-5 text-primary-400" />
@@ -322,7 +371,7 @@ export function UserManagementPage() {
         </section>
 
         {/* Rôles et pages visibles */}
-        <section>
+        <section className="mb-10" hidden={sectionFilter !== null && sectionFilter !== 'rights'}>
           <h2 className="text-lg font-semibold text-surface-200 mb-4 flex items-center gap-2">
             <ShieldCheck className="w-5 h-5 text-amber-400" />
             Rôles et pages visibles
@@ -410,6 +459,10 @@ export function UserManagementPage() {
             )}
           </div>
         </section>
+
+        <div hidden={sectionFilter !== null && sectionFilter !== 'connections'}>
+          <IntegrationSettingsPanel />
+        </div>
       </div>
 
               {/* Drawer activité utilisateur */}
