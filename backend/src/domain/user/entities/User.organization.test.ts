@@ -15,4 +15,8 @@ describe('User organization (TU)', () => {
     expect(User.schema.path('isPlatformAdmin').options.default).toBe(false);
     expect(new User({ email: 'a@b.fr', provider: 'microsoft' }).isPlatformAdmin).toBe(false);
   });
+
+  it('n’expose jamais le hash du mot de passe par défaut (select: false)', () => {
+    expect(User.schema.path('password').options.select).toBe(false);
+  });
 });

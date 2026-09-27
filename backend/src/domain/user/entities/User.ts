@@ -88,6 +88,8 @@ const UserSchema = new Schema<IUser>(
     },
     password: {
       type: String,
+      // Hash bcrypt jamais renvoyé par défaut : à demander explicitement (`.select('+password')`).
+      select: false,
       required: function(this: IUser) {
         return this.provider === 'local';
       },

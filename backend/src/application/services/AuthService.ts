@@ -334,7 +334,7 @@ export class AuthService {
       const user = await User.findOne({ 
         email: email.toLowerCase(),
         provider: 'local'
-      });
+      }).select('+password'); // hash exclu par défaut (select: false), requis ici seulement
 
       if (!user) {
         return {
