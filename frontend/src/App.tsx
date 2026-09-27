@@ -13,7 +13,6 @@ import {
   TeamPerformancePage,
   LoginPage, 
   MicrosoftCallback,
-  RoleSelectionScreen,
   ResetPasswordPage
 } from './components';
 import { useStore, type PageId } from './store/useStore';
@@ -26,7 +25,6 @@ function App() {
   const currentPage = useStore((state) => state.currentPage);
   const setCurrentPage = useStore((state) => state.setCurrentPage);
   const isAuthenticated = useStore((state) => state.isAuthenticated);
-  const pendingRoleSelection = useStore((state) => state.pendingRoleSelection);
   const token = useStore((state) => state.token);
   const logout = useStore((state) => state.logout);
   const [isVerifyingToken, setIsVerifyingToken] = useState(true);
@@ -85,10 +83,6 @@ function App() {
   // Show login page if not authenticated
   if (!isAuthenticated) {
     return <LoginPage />;
-  }
-
-  if (pendingRoleSelection) {
-    return <RoleSelectionScreen />;
   }
 
   return <AuthenticatedApp currentPage={currentPage} setCurrentPage={setCurrentPage} />;

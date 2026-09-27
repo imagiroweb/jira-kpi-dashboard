@@ -18,7 +18,6 @@ export { PointHebdoPage } from './PointHebdoPage';
 export { UserManagementPage } from './UserManagementPage';
 export { MyPerformancePage } from './MyPerformancePage';
 export { TeamPerformancePage } from './TeamPerformancePage';
-export { RoleSelectionScreen } from './RoleSelectionScreen';
 
 // Authentication components
 export { LoginPage } from './LoginPage';
@@ -26,3 +25,4 @@ export { MicrosoftCallback } from './MicrosoftCallback';
 export { PasswordStrengthIndicator } from './PasswordStrengthIndicator';
 export { ForgotPasswordPage } from './ForgotPasswordPage';
 export { ResetPasswordPage } from './ResetPasswordPage';
+export { InviteLocalUserForm } from './InviteLocalUserForm';

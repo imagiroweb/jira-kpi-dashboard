@@ -4,13 +4,12 @@ import { vi } from 'vitest';
 export function createAuthApiMock() {
   return {
     login: vi.fn(),
-    register: vi.fn(),
+    inviteLocalUser: vi.fn(),
     validatePassword: vi.fn(),
     verifyToken: vi.fn(),
     getCurrentUser: vi.fn(),
     getMicrosoftConfig: vi.fn(),
     microsoftCallback: vi.fn(),
-    getRolesForSignup: vi.fn(),
     getUsersAndRoles: vi.fn(),
     updateUserRole: vi.fn(),
     getRoles: vi.fn(),
@@ -28,7 +27,6 @@ export function createAuthApiMock() {
     saveIntegrationSettings: vi.fn(),
     createRole: vi.fn(),
     updateRole: vi.fn(),
-    updateMyRole: vi.fn(),
     recordPageView: vi.fn(),
     getRoadmapAdoria2026DefaultFilters: vi.fn().mockResolvedValue({
       trimestre: 'all',

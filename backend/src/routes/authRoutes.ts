@@ -13,6 +13,7 @@ import { Role, IPageVisibilities, PAGE_IDS } from '../domain/user/entities/Role'
 import { UserActivityLog } from '../domain/user/entities/UserActivityLog';
 import { parseRoadmapAdoria2026Filters } from '../domain/user/parseRoadmapAdoria2026Filters';
 import { sanitizeMicrosoftAccessToken } from '../utils/sanitizeMicrosoftAccessToken';
+import { microsoftIdTokenVerifier, MicrosoftTokenError } from '../infrastructure/microsoft/MicrosoftIdTokenVerifier';
 
 import { logger } from '../utils/logger';
 import { getIntegrationSettingsView, saveIntegrationSettings } from '../domain/settings/integrationSettings';
@@ -37,15 +38,6 @@ const requireMongo = (_req: Request, res: Response, next: () => void) => {
   next();
 };
 
-// Microsoft Graph API profile response type
-interface MicrosoftGraphProfile {
-  id: string;
-  mail?: string;
-  userPrincipalName: string;
-  givenName?: string;
-  surname?: string;
-  displayName?: string;
-}
 
 const router = Router();
 
@@ -54,7 +46,10 @@ const router = Router();
  */
 router.get('/microsoft/config', (req: Request, res: Response) => {
   const clientId = process.env.MICROSOFT_CLIENT_ID;
-  const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+  // Autorité utilisée par le navigateur : `organizations` (tout tenant professionnel, jamais les
+  // comptes personnels) pour le multi-entreprises, ou un tenant précis. Le backend n'accepte de
+  // toute façon que les tenants déclarés dans les organisations (liste blanche).
+  const tenantId = process.env.MICROSOFT_AUTHORITY_TENANT || process.env.MICROSOFT_TENANT_ID || 'organizations';
 
   if (!clientId) {
     return res.status(503).json({
@@ -97,101 +92,6 @@ location.replace("/auth/microsoft/callback" + location.search + location.hash);
 });
 
 router.use(requireMongo);
-
-/**
- * @swagger
- * /api/auth/register:
- *   post:
- *     summary: Register a new user
- *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - email
- *               - password
- *             properties:
- *               email:
- *                 type: string
- *                 format: email
- *               password:
- *                 type: string
- *                 minLength: 12
- *               firstName:
- *                 type: string
- *               lastName:
- *                 type: string
- *     responses:
- *       201:
- *         description: User created successfully
- *       400:
- *         description: Validation error
- */
-router.post(
-  '/register',
-  [
-    body('email')
-      .isEmail()
-      .withMessage('Email invalide')
-      .normalizeEmail({ gmail_remove_dots: false }),
-    body('password')
-      .isLength({ min: 12 })
-      .withMessage('Le mot de passe doit contenir au moins 12 caractères'),
-    body('firstName')
-      .optional()
-      .trim()
-      .isLength({ min: 1, max: 50 })
-      .withMessage('Le prénom doit contenir entre 1 et 50 caractères'),
-    body('lastName')
-      .optional()
-      .trim()
-      .isLength({ min: 1, max: 50 })
-      .withMessage('Le nom doit contenir entre 1 et 50 caractères'),
-    body('roleId')
-      .optional()
-      .isString()
-      .withMessage('roleId invalide')
-  ],
-  async (req: Request, res: Response) => {
-    try {
-      // Check validation errors
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          errors: errors.array().map((e: { msg?: string }) => e.msg)
-        });
-      }
-
-      const { email, password, firstName, lastName, roleId } = req.body;
-
-      const result = await authService.register(email, password, firstName, lastName, roleId);
-
-      if (!result.success) {
-        return res.status(400).json({
-          success: false,
-          error: result.error
-        });
-      }
-
-      res.status(201).json({
-        success: true,
-        token: result.token,
-        user: result.user,
-        firstLogin: result.firstLogin
-      });
-    } catch (error) {
-      logger.error('Registration route error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Erreur serveur lors de la création du compte'
-      });
-    }
-  }
-);
 
 /**
  * @swagger
@@ -331,113 +231,60 @@ router.post(
  *           schema:
  *             type: object
  *             required:
- *               - accessToken
+ *               - idToken
+ *               - nonce
  *             properties:
- *               accessToken:
+ *               idToken:
  *                 type: string
- *                 description: Microsoft access token
+ *                 description: id_token OpenID Connect émis par Microsoft Entra ID pour cette application
+ *               nonce:
+ *                 type: string
+ *                 description: nonce envoyé à l'autorisation (anti-rejeu)
  *     responses:
  *       200:
  *         description: SSO login successful
  *       401:
- *         description: Invalid token
+ *         description: Jeton invalide (signature, audience, émetteur, nonce, expiration)
+ *       403:
+ *         description: Tenant ou domaine d'email non autorisé (aucune organisation correspondante)
  */
 router.post('/microsoft/callback', async (req: Request, res: Response) => {
-  try {
-    const accessToken = sanitizeMicrosoftAccessToken(req.body?.accessToken);
+  const idToken = sanitizeMicrosoftAccessToken(req.body?.idToken);
+  const nonce = typeof req.body?.nonce === 'string' ? req.body.nonce : undefined;
 
-    if (!accessToken) {
-      return res.status(400).json({
-        success: false,
-        error:
-          'Token Microsoft manquant ou invalide (format incorrect : JSON, espaces ou caractères interdits dans le header Authorization)',
-      });
-    }
-
-    // Verify the token with Microsoft Graph API
-    const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
-
-    if (!graphResponse.ok) {
-      return res.status(401).json({
-        success: false,
-        error: 'Token Microsoft invalide',
-      });
-    }
-
-    const profile = (await graphResponse.json()) as MicrosoftGraphProfile;
-    const email = profile.mail || profile.userPrincipalName;
-    if (!email || typeof email !== 'string') {
-      return res.status(401).json({
-        success: false,
-        error: 'Profil Microsoft sans adresse e-mail exploitable',
-      });
-    }
-
-    // Handle SSO login/registration
-    const result = await authService.handleMicrosoftSSO(
-      profile.id,
-      email,
-      profile.givenName,
-      profile.surname
-    );
-
-    if (!result.success) {
-      return res.status(401).json({
-        success: false,
-        error: result.error,
-      });
-    }
-
-    res.json({
-      success: true,
-      token: result.token,
-      user: result.user,
-      firstLogin: result.firstLogin,
-    });
-  } catch (error) {
-    const err = error as { message?: string; code?: string; cause?: { message?: string } };
-    logger.error('Microsoft SSO callback error:', {
-      message: err?.message,
-      code: err?.code,
-      cause: err?.cause?.message,
-    });
-    const detail = err?.cause?.message || err?.message || '';
-    const headerIssue =
-      /invalid character in header|invalid header value|is an invalid header/i.test(detail);
-    res.status(500).json({
+  if (!idToken || !nonce) {
+    return res.status(400).json({
       success: false,
-      error: headerIssue
-        ? 'Erreur SSO : caractère invalide dans le header Authorization (token Microsoft corrompu). Réessayez la connexion.'
-        : 'Erreur lors de la connexion Microsoft',
+      error: 'Jeton Microsoft (id_token) ou nonce manquant ou invalide. Réessayez la connexion SSO.',
     });
   }
-});
 
-/**
- * @swagger
- * /api/auth/roles/for-signup:
- *   get:
- *     summary: List roles for signup / first-login role selection (no auth)
- *     tags: [Authentication]
- *     responses:
- *       200:
- *         description: List of roles (id, name)
- */
-router.get('/roles/for-signup', async (_req: Request, res: Response) => {
+  let identity;
   try {
-    const roles = await Role.find().select('name').lean();
-    res.json({
-      success: true,
-      roles: roles.map((r: { _id: { toString: () => string }; name: string }) => ({ id: r._id.toString(), name: r.name }))
+    identity = await microsoftIdTokenVerifier.verify(idToken, {
+      clientId: process.env.MICROSOFT_CLIENT_ID || '',
+      nonce,
     });
   } catch (error) {
-    logger.error('Roles for signup error:', error);
-    res.status(500).json({ success: false, error: 'Erreur serveur' });
+    if (error instanceof MicrosoftTokenError) {
+      logger.warn(`SSO Microsoft : jeton rejeté (${error.message})`);
+      return res.status(401).json({ success: false, error: 'Jeton Microsoft invalide' });
+    }
+    logger.error('Microsoft SSO verification error:', { message: (error as Error)?.message });
+    return res.status(503).json({ success: false, error: 'Vérification Microsoft indisponible, réessayez plus tard' });
   }
+
+  const result = await authService.handleMicrosoftSSO(identity);
+  if (!result.success) {
+    return res.status(result.status ?? 401).json({ success: false, error: result.error });
+  }
+
+  res.json({
+    success: true,
+    token: result.token,
+    user: result.user,
+    firstLogin: result.firstLogin,
+  });
 });
 
 /**
@@ -493,51 +340,6 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
     });
   }
 });
-
-/**
- * @swagger
- * /api/auth/me/role:
- *   patch:
- *     summary: Set current user role (first-login selection)
- *     tags: [Authentication]
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [roleId]
- *             properties:
- *               roleId: { type: string }
- *     responses:
- *       200:
- *         description: Role updated
- *       400:
- *         description: Invalid role or not allowed
- */
-router.patch(
-  '/me/role',
-  authenticate,
-  [body('roleId').isString().notEmpty().withMessage('roleId requis')],
-  async (req: Request, res: Response) => {
-    try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({ success: false, errors: errors.array().map((e: { msg?: string }) => e.msg) });
-      }
-      const { roleId } = req.body;
-      const result = await authService.setMyRole(req.user!.userId, roleId);
-      if (!result.success) {
-        return res.status(400).json({ success: false, error: result.error });
-      }
-      res.json({ success: true, user: result.user });
-    } catch (error) {
-      logger.error('Set my role error:', error);
-      res.status(500).json({ success: false, error: 'Erreur serveur' });
-    }
-  }
-);
 
 /**
  * @swagger
@@ -835,6 +637,42 @@ router.get('/users', authenticate, requireSuperAdmin, async (req: Request, res: 
     res.status(500).json({ success: false, error: 'Erreur serveur' });
   }
 });
+
+/**
+ * @swagger
+ * /api/auth/users:
+ *   post:
+ *     summary: Créer un compte local dans l'organisation de l'administrateur et envoyer une invitation (super admin)
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     description: >
+ *       Remplace l'inscription libre. Refusé si l'organisation n'autorise pas les comptes locaux
+ *       ou si le domaine de l'email n'est pas autorisé.
+ */
+router.post(
+  '/users',
+  authenticate,
+  requireSuperAdmin,
+  [
+    body('email').isEmail().withMessage('Email invalide').normalizeEmail({ gmail_remove_dots: false }),
+    body('firstName').optional().trim().isLength({ min: 1, max: 50 }).withMessage('Prénom invalide'),
+    body('lastName').optional().trim().isLength({ min: 1, max: 50 }).withMessage('Nom invalide'),
+    body('roleId').optional().isMongoId().withMessage('roleId invalide')
+  ],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array().map((e: { msg?: string }) => e.msg) });
+    }
+    const { email, firstName, lastName, roleId } = req.body;
+    const result = await authService.inviteLocalUser(req.user!.userId, { email, firstName, lastName, roleId });
+    if (!result.success) {
+      return res.status(result.status ?? 400).json({ success: false, error: result.error });
+    }
+    res.status(201).json({ success: true, userId: result.userId, emailSent: result.emailSent });
+  }
+);
 
 /**
  * @swagger

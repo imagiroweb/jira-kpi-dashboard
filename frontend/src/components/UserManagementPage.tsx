@@ -12,6 +12,7 @@ import {
 import { authApi, UserWithRoleDto, RoleDto, VisiblePages, UserActivityLogEntry } from '../services/authApi';
 import { IntegrationSettingsPanel } from './IntegrationSettingsPanel';
 import { useStore } from '../store/useStore';
+import { InviteLocalUserForm } from './InviteLocalUserForm';
 
 const PAGE_LABELS: Record<keyof VisiblePages, string> = {
   dashboard: 'Dashboard',
@@ -43,6 +44,7 @@ export function UserManagementPage() {
   const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
   const [newRoleName, setNewRoleName] = useState('');
   const [showNewRole, setShowNewRole] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
   const [drawerUser, setDrawerUser] = useState<UserWithRoleDto | null>(null);
   const [drawerLogs, setDrawerLogs] = useState<UserActivityLogEntry[]>([]);
   const [drawerLogsLoading, setDrawerLogsLoading] = useState(false);
@@ -126,6 +128,17 @@ export function UserManagementPage() {
     } finally {
       setLoading(false);
     }
+  };
+
+  /** Rafraîchit la liste sans l'écran de chargement (garde le formulaire d'invitation affiché). */
+  const refreshUsers = () => {
+    authApi
+      .getUsersAndRoles()
+      .then((data) => {
+        setUsers(data.users);
+        setRoles(data.roles);
+      })
+      .catch(() => {});
   };
 
   useEffect(() => {
@@ -284,10 +297,25 @@ export function UserManagementPage() {
 
         {/* Liste des utilisateurs */}
         <section className="mb-10" hidden={sectionFilter !== null && sectionFilter !== 'users'}>
-          <h2 className="text-lg font-semibold text-surface-200 mb-4 flex items-center gap-2">
-            <Users className="w-5 h-5 text-primary-400" />
-            Utilisateurs
-          </h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-surface-200 flex items-center gap-2">
+              <Users className="w-5 h-5 text-primary-400" />
+              Utilisateurs
+            </h2>
+            {!showInvite && (
+              <button
+                type="button"
+                onClick={() => setShowInvite(true)}
+                className="btn-secondary px-3 py-2 text-sm"
+              >
+                <Plus className="w-4 h-4" />
+                Inviter un compte local
+              </button>
+            )}
+          </div>
+          {showInvite && (
+            <InviteLocalUserForm roles={roles} onInvited={refreshUsers} onClose={() => setShowInvite(false)} />
+          )}
           <div className="rounded-xl border border-surface-700/50 bg-surface-900/50 overflow-hidden">
             <table className="w-full text-left">
               <thead>

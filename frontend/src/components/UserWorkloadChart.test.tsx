@@ -62,7 +62,7 @@ describe('UserWorkloadChart', () => {
 
     await waitFor(() => {
       expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('/worklog/saved-reports')
+        expect.stringContaining('/worklog/saved-reports'), expect.anything()
       );
     });
   });

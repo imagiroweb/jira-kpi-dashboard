@@ -59,8 +59,14 @@ services:
       - JWT_SECRET=${JWT_SECRET:-}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
       - MICROSOFT_CLIENT_ID=${MICROSOFT_CLIENT_ID:-}
-      - MICROSOFT_TENANT_ID=${MICROSOFT_TENANT_ID:-common}
+      - MICROSOFT_TENANT_ID=${MICROSOFT_TENANT_ID:-}
+      - MICROSOFT_AUTHORITY_TENANT=${MICROSOFT_AUTHORITY_TENANT:-}
       - MICROSOFT_REDIRECT_URI=${MICROSOFT_REDIRECT_URI:-}
+      # Organisation par défaut (créée au premier démarrage si aucune n'existe) — voir env.prod.template
+      - DEFAULT_ORG_NAME=${DEFAULT_ORG_NAME:-Adoria}
+      - DEFAULT_ORG_TENANT_ID=${DEFAULT_ORG_TENANT_ID:-}
+      - DEFAULT_ORG_EMAIL_DOMAINS=${DEFAULT_ORG_EMAIL_DOMAINS:-}
+      - DEFAULT_ORG_ALLOW_LOCAL_ACCOUNTS=${DEFAULT_ORG_ALLOW_LOCAL_ACCOUNTS:-true}
       # Réinitialisation mot de passe (Nodemailer) — requis en prod si comptes locaux
       - APP_BASE_URL=${APP_BASE_URL:-}
       - SMTP_HOST=${SMTP_HOST:-}

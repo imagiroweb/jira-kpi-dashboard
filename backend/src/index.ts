@@ -30,6 +30,7 @@ import { swaggerSpec } from './config/swagger';
 import { schedulerService } from './services/schedulerService';
 import { Role } from './domain/user/entities/Role';
 import { emailService } from './infrastructure/email/NodemailerEmailService';
+import { ensureDefaultOrganization } from './application/services/organizationBootstrap';
 import { applyStoredIntegrationSettings } from './domain/settings/integrationSettings';
 
 // MongoDB connection
@@ -130,6 +131,7 @@ const connectMongoDB = async () => {
       );
     }
     logger.info('Default roles seeded: Utilisateur, Dev, PO, Product, Marketing');
+    await ensureDefaultOrganization();
     await applyStoredIntegrationSettings();
   } catch (error) {
     logger.error('MongoDB connection error:', error);

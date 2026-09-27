@@ -42,6 +42,14 @@ jest.mock('../../domain/user/entities/UserActivityLog', () => ({
   }
 }));
 
+jest.mock('../../domain/organization/entities/Organization', () => ({
+  Organization: {
+    findById: () => ({
+      select: () => ({ lean: () => Promise.resolve({ isActive: true, allowLocalAccounts: true }) })
+    })
+  }
+}));
+
 jest.mock('../../utils/logger', () => ({
   logger: { info: jest.fn(), error: jest.fn(), warn: jest.fn() }
 }));
@@ -58,6 +66,7 @@ async function baseUser(overrides: Record<string, unknown> = {}) {
     password: hashedPassword,
     isActive: true,
     provider: 'local',
+    organizationId: new mongoose.Types.ObjectId(),
     role: undefined,
     roleId: undefined,
     teamId: undefined,

@@ -15,6 +15,7 @@ import {
   localTodayIsoDate,
   resolveSupportTimelineRange,
 } from '../domain/supportTicketTimeline';
+import { authFetch } from '../services/authFetch';
 
 interface SupportIssue {
   issueKey: string;
@@ -193,7 +194,7 @@ export function SupportDashboard() {
         }
         params.append('activeSprint', String(useActiveSprint));
 
-        const response = await fetch(`${API_BASE_URL}/worklog/support-kpi?${params}`);
+        const response = await authFetch(`${API_BASE_URL}/worklog/support-kpi?${params}`);
 
         if (response.ok) {
           const result = await response.json();

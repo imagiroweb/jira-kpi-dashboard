@@ -136,11 +136,9 @@ interface AppState {
   kpiRefreshTrigger: number;
   
   // Auth Actions
-  login: (token: string, user: User, firstLogin?: boolean) => void;
+  login: (token: string, user: User) => void;
   logout: () => void;
   updateUser: (user: User) => void;
-  pendingRoleSelection: boolean;
-  setPendingRoleSelection: (value: boolean) => void;
   
   // Navigation Actions
   setCurrentPage: (page: PageType) => void;
@@ -178,7 +176,6 @@ export const useStore = create<AppState>()(
       isAuthenticated: false,
       user: null,
       token: null,
-      pendingRoleSelection: false,
       
       // Initial Navigation State
       currentPage: 'dashboard',
@@ -209,14 +206,13 @@ export const useStore = create<AppState>()(
       kpiRefreshTrigger: 0,
       
       // Auth Actions
-      login: (token, user, firstLogin) => {
+      login: (token, user) => {
         localStorage.setItem('auth_token', token);
         const firstPage = getFirstVisiblePage(user?.visiblePages) ?? 'dashboard';
         set({ 
           isAuthenticated: true, 
           token, 
           user,
-          pendingRoleSelection: firstLogin === true,
           currentPage: firstPage
         });
       },
@@ -227,8 +223,7 @@ export const useStore = create<AppState>()(
           isAuthenticated: false, 
           token: null, 
           user: null,
-          pendingRoleSelection: false,
-          dashboardStats: [],
+              dashboardStats: [],
           dashboardLastUpdate: null,
           dashboardLastFiltersKey: null,
           dashboardUseActiveSprint: true,
@@ -259,7 +254,6 @@ export const useStore = create<AppState>()(
           const nextPage = currentStillVisible ? state.currentPage : firstPage;
           return { user, currentPage: nextPage };
         }),
-      setPendingRoleSelection: (value) => set({ pendingRoleSelection: value }),
       
       // Navigation Actions
       setCurrentPage: (page) => set({ currentPage: page }),

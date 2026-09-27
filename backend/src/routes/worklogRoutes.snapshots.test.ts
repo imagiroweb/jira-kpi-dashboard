@@ -9,6 +9,14 @@ import { createWorklogAppServiceMock } from '../test/mocks/worklogAppService';
 
 let authMode: 'pass' | 'deny' = 'pass';
 
+// Contrôle par page testé à part (middleware/requirePage.test.ts) : ici, laisse passer
+// sauf si mockPageAccess = 'deny'.
+let mockPageAccess = 'allow' as 'allow' | 'deny';
+jest.mock('../middleware/requirePage', () => ({
+  requirePage: () => (_req: unknown, res: { status: (c: number) => { json: (b: unknown) => void } }, next: () => void) =>
+    mockPageAccess === 'deny' ? res.status(403).json({ success: false, error: 'Accès non autorisé pour votre rôle' }) : next(),
+}));
+
 jest.mock('../middleware/authMiddleware', () => {
   const auth = jest.requireActual<typeof import('../test/mocks/authMiddleware')>(
     '../test/mocks/authMiddleware'
@@ -78,6 +86,7 @@ describe('worklogRoutes — snapshots (TI)', () => {
   const app = createTestApp({ mountPath: '/api/worklog', router: worklogRoutes });
 
   beforeEach(() => {
+    mockPageAccess = 'allow';
     jest.clearAllMocks();
     authMode = 'pass';
 
@@ -240,5 +249,13 @@ describe('worklogRoutes — snapshots (TI)', () => {
       expect(res.status).toBe(500);
       expect(res.body.success).toBe(false);
     });
+  });
+
+  it('GET /api/worklog/support-snapshots → 403 sans la page Support', async () => {
+    mockPageAccess = 'deny';
+
+    const res = await request(app).get('/api/worklog/support-snapshots');
+
+    expect(res.status).toBe(403);
   });
 });

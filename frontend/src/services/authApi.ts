@@ -115,15 +115,10 @@ export interface AuthResponse {
   success: boolean;
   token?: string;
   user?: User;
-  /** True when user was just created and must choose a role (e.g. first Microsoft login) */
+  /** True when the account was just created (first Microsoft login) */
   firstLogin?: boolean;
   error?: string;
   errors?: string[];
-}
-
-export interface RoleForSignup {
-  id: string;
-  name: string;
 }
 
 export interface MicrosoftConfig {
@@ -141,44 +136,6 @@ export interface PasswordValidation {
 }
 
 export const authApi = {
-  /**
-   * List roles for signup / first-login role selection (no auth)
-   */
-  async getRolesForSignup(): Promise<RoleForSignup[]> {
-    const response = await api.get<{ success: boolean; roles: RoleForSignup[] }>('/api/auth/roles/for-signup');
-    if (!response.data.success) throw new Error((response.data as { error?: string }).error);
-    return response.data.roles;
-  },
-
-  /**
-   * Register a new user (roleId required for first-time signup)
-   */
-  async register(
-    email: string,
-    password: string,
-    firstName?: string,
-    lastName?: string,
-    roleId?: string
-  ): Promise<AuthResponse> {
-    try {
-      const response = await api.post<AuthResponse>('/api/auth/register', {
-        email,
-        password,
-        firstName,
-        lastName,
-        roleId
-      });
-      return response.data;
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { error?: string; errors?: string[] } } };
-      if (err.response?.data) {
-        const msg = err.response.data.error || err.response.data.errors?.join('. ');
-        if (msg) return { success: false, error: msg };
-      }
-      return { success: false, error: 'Erreur de connexion au serveur' };
-    }
-  },
-
   /**
    * Login with email and password
    */
@@ -231,10 +188,11 @@ export const authApi = {
   /**
    * Handle Microsoft SSO callback
    */
-  async microsoftCallback(accessToken: string): Promise<AuthResponse> {
+  async microsoftCallback(idToken: string, nonce: string): Promise<AuthResponse> {
     try {
       const response = await api.post<AuthResponse>('/api/auth/microsoft/callback', {
-        accessToken
+        idToken,
+        nonce
       });
       return response.data;
     } catch (error: unknown) {
@@ -277,6 +235,26 @@ export const authApi = {
     const response = await api.get<{ success: boolean; users: UserWithRoleDto[]; roles: RoleDto[] }>('/api/auth/users');
     if (!response.data.success) throw new Error((response.data as { error?: string }).error);
     return { users: response.data.users, roles: response.data.roles };
+  },
+
+  /**
+   * Crée un compte local dans l'organisation de l'admin et envoie une invitation (super_admin only).
+   * Remplace l'inscription libre.
+   */
+  async inviteLocalUser(input: {
+    email: string;
+    firstName?: string;
+    lastName?: string;
+    roleId?: string;
+  }): Promise<{ success: boolean; userId?: string; emailSent?: boolean; error?: string }> {
+    try {
+      const response = await api.post<{ success: boolean; userId: string; emailSent: boolean }>('/api/auth/users', input);
+      return response.data;
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { error?: string; errors?: string[] } } };
+      const msg = err.response?.data?.error || err.response?.data?.errors?.join('. ');
+      return { success: false, error: msg || 'Erreur de connexion au serveur' };
+    }
   },
 
   /**
@@ -406,15 +384,6 @@ export const authApi = {
       percentages: response.data.percentages,
       daily: response.data.daily ?? []
     };
-  },
-
-  /**
-   * Set current user's role (first-login selection)
-   */
-  async updateMyRole(roleId: string): Promise<User> {
-    const response = await api.patch<{ success: boolean; user: User }>('/api/auth/me/role', { roleId });
-    if (!response.data.success) throw new Error((response.data as { error?: string }).error);
-    return response.data.user;
   },
 
   /**
