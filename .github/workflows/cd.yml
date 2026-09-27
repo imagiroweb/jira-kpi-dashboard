@@ -92,7 +92,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "docker-compose.prod.yml,docker-compose.prod.ghcr.yml,docker-compose.prod.scaleway.yml"
+          source: "docker-compose.prod.yml,docker-compose.prod.ghcr.yml,docker-compose.prod.scaleway.yml,scripts/mongo-create-app-user.sh"
           target: ${{ vars.SSH_DEPLOY_PATH || '/opt/jira-kpi-dashboard' }}
 
       - name: Deploy on server
@@ -128,7 +128,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "docker-compose.prod.yml,docker-compose.prod.ghcr.yml,docker-compose.prod.scaleway.yml,docker-compose.prod.preprod.yml"
+          source: "docker-compose.prod.yml,docker-compose.prod.ghcr.yml,docker-compose.prod.scaleway.yml,docker-compose.prod.preprod.yml,scripts/mongo-create-app-user.sh"
           target: ${{ vars.SSH_DEPLOY_PATH_PREPROD || '/opt/jira-kpi-dashboard-preprod' }}
 
       - name: Deploy preprod on server

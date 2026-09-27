@@ -27,6 +27,7 @@ import { teamRoutes } from './routes/teamRoutes';
 import { costRoutes } from './routes/costRoutes';
 import { setupSocketHandlers } from './websocket/socketHandler';
 import { createOriginCheck } from './middleware/originCheck';
+import { describeMongoUri } from './config/mongoUri';
 import { swaggerSpec } from './config/swagger';
 import { schedulerService } from './services/schedulerService';
 import { Role } from './domain/user/entities/Role';
@@ -41,6 +42,12 @@ const connectMongoDB = async () => {
   try {
     await mongoose.connect(mongoUri, opts);
     logger.info('MongoDB connected successfully');
+    if (process.env.NODE_ENV === 'production' && describeMongoUri(mongoUri).usesRootAccount) {
+      logger.warn(
+        'MongoDB : connexion avec le compte root. Créez l’utilisateur applicatif (scripts/mongo-create-app-user.sh) ' +
+          'et renseignez MONGO_APP_USER / MONGO_APP_PASSWORD.'
+      );
+    }
     // Seed default roles (create or update)
     const defaultRoles = [
       {
