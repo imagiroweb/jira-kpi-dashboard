@@ -67,8 +67,8 @@ export function LoginPage() {
 
     try {
       const result = await authApi.login(email, password);
-      if (result.success && result.token && result.user) {
-        login(result.token, result.user);
+      if (result.success && result.user) {
+        login(result.user);
       } else {
         setError(result.error || 'Email ou mot de passe incorrect');
       }

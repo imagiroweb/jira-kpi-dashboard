@@ -125,7 +125,6 @@ describe('MicrosoftCallback', () => {
     stubLocation({ hash: '#state=st-1&id_token=abc%2Bdef' });
     mockMicrosoftCallback.mockResolvedValue({
       success: true,
-      token: 'jwt-token',
       user: TEST_USER,
       firstLogin: false,
     });
@@ -143,7 +142,6 @@ describe('MicrosoftCallback', () => {
 
     mockMicrosoftCallback.mockResolvedValue({
       success: true,
-      token: 'jwt-token',
       user: TEST_USER,
       firstLogin: false,
     });
@@ -160,7 +158,6 @@ describe('MicrosoftCallback', () => {
 
     await waitFor(() => {
       expect(useStore.getState().isAuthenticated).toBe(true);
-      expect(useStore.getState().token).toBe('jwt-token');
       expect(location.getHref()).toBe('/');
     });
   });

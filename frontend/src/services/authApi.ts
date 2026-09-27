@@ -6,24 +6,14 @@ const API_URL = '';
 
 const api = axios.create({
   baseURL: API_URL,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json'
   }
 });
 
-// Add auth token to requests if available (sauf callback SSO Microsoft : token local
-// potentiellement corrompu ne doit pas polluer Authorization).
-api.interceptors.request.use((config) => {
-  const url = `${config.baseURL ?? ''}${config.url ?? ''}`;
-  if (url.includes('/auth/microsoft/callback')) {
-    return config;
-  }
-  const token = localStorage.getItem('auth_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
+// Session : cookie HttpOnly posé par le backend (jamais lisible en JavaScript), envoyé
+// automatiquement par le navigateur (même origine, withCredentials).
 
 export interface IntegrationSettings {
   jiraUrl: string;
@@ -113,7 +103,6 @@ export interface UserActivityLogEntry {
 
 export interface AuthResponse {
   success: boolean;
-  token?: string;
   user?: User;
   /** True when the account was just created (first Microsoft login) */
   firstLogin?: boolean;
@@ -201,6 +190,17 @@ export const authApi = {
         return { success: false, error: err.response.data.error };
       }
       return { success: false, error: 'Erreur de connexion Microsoft' };
+    }
+  },
+
+  /**
+   * Déconnexion : le backend efface le cookie de session HttpOnly.
+   */
+  async logout(): Promise<void> {
+    try {
+      await api.post('/api/auth/logout');
+    } catch {
+      // non bloquant : l'état local est réinitialisé de toute façon
     }
   },
 

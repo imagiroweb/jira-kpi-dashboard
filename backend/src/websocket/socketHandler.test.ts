@@ -132,6 +132,22 @@ describe('socketHandler', () => {
       expect(next).toHaveBeenCalledWith(expect.any(Error));
     });
 
+    it('accepte le cookie de session HttpOnly envoyé au handshake', async () => {
+      const user = { userId: 'u1', email: 'alice@test.com' };
+      mockVerifyToken.mockResolvedValue(user);
+      const io = makeIoMock();
+      setupSocketHandlers(asServer(io));
+      const middleware = getAuthMiddleware(io);
+      const socket = makeSocketMock('sock-cookie');
+      (socket.handshake as { headers?: Record<string, string> }).headers = { cookie: 'x=1; session=cookie-jwt' };
+      const next = jest.fn();
+
+      await middleware(socket, next);
+
+      expect(mockVerifyToken).toHaveBeenCalledWith('cookie-jwt');
+      expect(next).toHaveBeenCalledWith();
+    });
+
     it('accepte une connexion avec un token valide et attache l\'utilisateur au socket', async () => {
       const user = { userId: 'u1', email: 'alice@test.com' };
       mockVerifyToken.mockResolvedValue(user);

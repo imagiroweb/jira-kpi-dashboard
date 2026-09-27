@@ -11,6 +11,7 @@ import {
 import { Role, IPageVisibilities, PAGE_IDS } from '../domain/user/entities/Role';
 import { UserActivityLog } from '../domain/user/entities/UserActivityLog';
 import { parseRoadmapAdoria2026Filters } from '../domain/user/parseRoadmapAdoria2026Filters';
+import { clearSessionCookie, setSessionCookie } from '../config/sessionCookie';
 import { sanitizeMicrosoftAccessToken } from '../utils/sanitizeMicrosoftAccessToken';
 import { microsoftIdTokenVerifier, MicrosoftTokenError } from '../infrastructure/microsoft/MicrosoftIdTokenVerifier';
 
@@ -154,9 +155,10 @@ router.post(
         });
       }
 
+      // Jeton de session en cookie HttpOnly : jamais renvoyé dans le corps (inaccessible au JavaScript).
+      setSessionCookie(res, result.token!);
       res.json({
         success: true,
-        token: result.token,
         user: result.user
       });
     } catch (error) {
@@ -282,12 +284,24 @@ router.post('/microsoft/callback', ssoCallbackLimiter, async (req: Request, res:
     return res.status(result.status ?? 401).json({ success: false, error: result.error });
   }
 
+  setSessionCookie(res, result.token!);
   res.json({
     success: true,
-    token: result.token,
     user: result.user,
     firstLogin: result.firstLogin,
   });
+});
+
+/**
+ * @swagger
+ * /api/auth/logout:
+ *   post:
+ *     summary: Déconnexion — efface le cookie de session
+ *     tags: [Authentication]
+ */
+router.post('/logout', (_req: Request, res: Response) => {
+  clearSessionCookie(res);
+  res.json({ success: true });
 });
 
 /**

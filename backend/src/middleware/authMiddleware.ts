@@ -1,5 +1,6 @@
 import { Request, Response, NextFunction } from 'express';
 import { authService, AuthTokenPayload } from '../application/services/AuthService';
+import { readSessionCookie } from '../config/sessionCookie';
 
 // Extend Express Request type (namespace required for Express augmentation)
 declare global {
@@ -11,8 +12,13 @@ declare global {
   }
 }
 
-/** Jeton de session transmis par le client (en-tête `Authorization: Bearer …`). */
+/**
+ * Jeton de session : cookie HttpOnly posé à la connexion (navigateur), sinon en-tête
+ * `Authorization: Bearer …` (scripts d'administration / d'import).
+ */
 export function extractSessionToken(req: Request): string | null {
+  const fromCookie = readSessionCookie(req.headers.cookie);
+  if (fromCookie) return fromCookie;
   const authHeader = req.headers.authorization;
   if (authHeader && authHeader.startsWith('Bearer ')) {
     const token = authHeader.substring(7).trim();

@@ -1,6 +1,7 @@
 import { Server, Socket } from 'socket.io';
 import { logger } from '../utils/logger';
 import { authService } from '../application/services/AuthService';
+import { readSessionCookie } from '../config/sessionCookie';
 
 interface ConnectedClient {
   id: string;
@@ -15,8 +16,12 @@ export function setupSocketHandlers(io: Server): void {
   // client sans token valide n'établit jamais la connexion (les événements diffusés ici
   // — dont les mises à jour de points hebdo — ne doivent pas être accessibles anonymement).
   io.use(async (socket, next) => {
-    const token = socket.handshake.auth?.token;
-    if (typeof token !== 'string' || !token) {
+    // Cookie de session HttpOnly (navigateur) ; `auth.token` accepté pour les clients non navigateurs.
+    const authToken = socket.handshake.auth?.token;
+    const token =
+      readSessionCookie(socket.handshake.headers?.cookie) ??
+      (typeof authToken === 'string' && authToken ? authToken : null);
+    if (!token) {
       logger.warn(`Socket connection rejected (no token): ${socket.id}`);
       return next(new Error('Authentification requise'));
     }

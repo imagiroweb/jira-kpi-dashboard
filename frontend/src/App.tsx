@@ -15,7 +15,7 @@ import {
   MicrosoftCallback,
   ResetPasswordPage
 } from './components';
-import { useStore, type PageId } from './store/useStore';
+import { clearLegacyAuthToken, useStore, type PageId } from './store/useStore';
 import { authApi } from './services/authApi';
 import { Loader2 } from 'lucide-react';
 import { SocketProvider } from './contexts/SocketContext';
@@ -25,7 +25,6 @@ function App() {
   const currentPage = useStore((state) => state.currentPage);
   const setCurrentPage = useStore((state) => state.setCurrentPage);
   const isAuthenticated = useStore((state) => state.isAuthenticated);
-  const token = useStore((state) => state.token);
   const logout = useStore((state) => state.logout);
   const [isVerifyingToken, setIsVerifyingToken] = useState(true);
 
@@ -39,7 +38,8 @@ function App() {
   const updateUser = useStore((state) => state.updateUser);
   useEffect(() => {
     const verifyAuth = async () => {
-      if (token) {
+      clearLegacyAuthToken();
+      if (isAuthenticated) {
         const isValid = await authApi.verifyToken();
         if (!isValid) {
           logout();
@@ -51,7 +51,7 @@ function App() {
       setIsVerifyingToken(false);
     };
     verifyAuth();
-  }, [token, logout, updateUser]);
+  }, [isAuthenticated, logout, updateUser]);
 
   // Handle Microsoft callback
   if (isMicrosoftCallback) {

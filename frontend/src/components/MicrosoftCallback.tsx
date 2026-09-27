@@ -78,10 +78,10 @@ export function MicrosoftCallback() {
 
         const result = await authApi.microsoftCallback(idToken.trim(), requestState.nonce);
 
-        if (result.success && result.token && result.user) {
+        if (result.success && result.user) {
           setStatus('success');
           setTimeout(() => {
-            login(result.token!, result.user!);
+            login(result.user!);
             window.location.href = '/';
           }, 1000);
         } else {

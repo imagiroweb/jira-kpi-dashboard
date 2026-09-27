@@ -273,7 +273,8 @@ describe('authRoutes — Microsoft (TI)', () => {
         .send({ idToken: 'a.b.c', nonce: 'n1' });
 
       expect(res.status).toBe(200);
-      expect(res.body.token).toBe('sso-jwt');
+      expect(res.body.token).toBeUndefined();
+      expect(String(res.headers['set-cookie'])).toMatch(/^session=sso-jwt;.*HttpOnly.*SameSite=Strict/);
       expect(mockVerifyIdToken).toHaveBeenCalledWith('a.b.c', { clientId: 'ms-client-id', nonce: 'n1' });
       expect(mockHandleMicrosoftSSO).toHaveBeenCalledWith(identity);
     });

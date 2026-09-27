@@ -26,6 +26,7 @@ import { performanceRoutes } from './routes/performanceRoutes';
 import { teamRoutes } from './routes/teamRoutes';
 import { costRoutes } from './routes/costRoutes';
 import { setupSocketHandlers } from './websocket/socketHandler';
+import { createOriginCheck } from './middleware/originCheck';
 import { swaggerSpec } from './config/swagger';
 import { schedulerService } from './services/schedulerService';
 import { Role } from './domain/user/entities/Role';
@@ -182,6 +183,9 @@ const limiter = rateLimit({
   legacyHeaders: false,
 });
 app.use('/api/', limiter);
+
+// CSRF : les requêtes qui modifient des données avec le cookie de session doivent venir de l'application.
+app.use('/api/', createOriginCheck(allowedOrigins));
 
 // Swagger Documentation
 app.use(

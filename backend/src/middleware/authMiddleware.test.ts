@@ -79,6 +79,13 @@ describe('authMiddleware', () => {
     expect(mockVerifyToken).toHaveBeenCalledWith('revoked-token');
   });
 
+  it('authenticate lit le jeton dans le cookie de session en priorité', async () => {
+    mockVerifyToken.mockResolvedValue({ userId: 'u1', email: 'a@b.fr', provider: 'local' });
+    const res = await request(app).get('/protected').set('Cookie', 'session=cookie-jwt').set('Authorization', 'Bearer header-jwt');
+    expect(res.status).toBe(200);
+    expect(mockVerifyToken).toHaveBeenCalledWith('cookie-jwt');
+  });
+
   it('extractSessionToken lit uniquement un en-tête Bearer non vide', () => {
     expect(extractSessionToken({ headers: { authorization: 'Bearer abc' } } as never)).toBe('abc');
     expect(extractSessionToken({ headers: { authorization: 'Bearer ' } } as never)).toBeNull();

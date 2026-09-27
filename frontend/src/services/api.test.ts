@@ -37,44 +37,28 @@ describe('intercepteurs axios', () => {
     vi.unstubAllGlobals();
   });
 
-  it('ajoute le token Authorization si présent dans localStorage', () => {
-    localStorage.setItem('auth_token', 'jwt-test');
-    const config = { headers: {} as Record<string, string> };
-
-    const result = interceptorCapture.requestOnFulfilled!(config);
-
-    expect(result.headers.Authorization).toBe('Bearer jwt-test');
+  it('n’ajoute plus d’en-tête Authorization : la session est un cookie HttpOnly', () => {
+    localStorage.setItem('auth_token', 'ancien-jwt');
+    expect(interceptorCapture.requestOnFulfilled).toBeNull();
   });
 
-  it('n’ajoute pas Authorization sans token', () => {
-    const config = { headers: {} as Record<string, string> };
-
-    const result = interceptorCapture.requestOnFulfilled!(config);
-
-    expect(result.headers.Authorization).toBeUndefined();
-  });
-
-  it('supprime le token et redirige vers /login sur une réponse 401', async () => {
-    localStorage.setItem('auth_token', 'jwt-expired');
+  it('redirige vers /login sur une réponse 401 (session absente, expirée ou révoquée)', async () => {
     const location = { href: '' };
     vi.stubGlobal('location', location);
 
     const error = { response: { status: 401 } };
     await expect(interceptorCapture.responseOnRejected!(error)).rejects.toEqual(error);
 
-    expect(localStorage.getItem('auth_token')).toBeNull();
     expect(location.href).toBe('/login');
   });
 
   it('rejette sans redirection pour les autres codes d’erreur', async () => {
-    localStorage.setItem('auth_token', 'jwt-valid');
     const location = { href: '' };
     vi.stubGlobal('location', location);
 
     const error = { response: { status: 500 } };
     await expect(interceptorCapture.responseOnRejected!(error)).rejects.toEqual(error);
 
-    expect(localStorage.getItem('auth_token')).toBe('jwt-valid');
     expect(location.href).toBe('');
   });
 });

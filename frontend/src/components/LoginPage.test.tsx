@@ -33,7 +33,6 @@ describe('LoginPage', () => {
   it('connecte l’utilisateur en cas de login réussi', async () => {
     mockLogin.mockResolvedValue({
       success: true,
-      token: 'jwt-token',
       user: TEST_USER,
     });
 
