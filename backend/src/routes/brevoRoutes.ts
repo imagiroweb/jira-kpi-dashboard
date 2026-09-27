@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { getBrevoClient, type BrevoTransactionalEventType } from '../infrastructure/brevo/BrevoClient';
 import { logger } from '../utils/logger';
+import { clientErrorDetail } from '../utils/clientError';
 import { authenticate } from '../middleware/authMiddleware';
 import { requirePage } from '../middleware/requirePage';
 
@@ -41,7 +42,7 @@ router.get('/account', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la récupération du compte Brevo',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -129,7 +130,7 @@ router.get('/stats', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la récupération des statistiques Brevo',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -173,7 +174,7 @@ router.get('/transactional/events', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la récupération des logs transactionnels',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -209,7 +210,7 @@ router.get('/campaigns/:campaignId/recipients', async (req: Request, res: Respon
     res.status(500).json({
       success: false,
       message: 'Erreur lors de l\'export des destinataires',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });

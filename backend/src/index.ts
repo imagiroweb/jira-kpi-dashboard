@@ -194,20 +194,23 @@ app.use('/api/', limiter);
 // CSRF : les requêtes qui modifient des données avec le cookie de session doivent venir de l'application.
 app.use('/api/', createOriginCheck(allowedOrigins));
 
-// Swagger Documentation
-app.use(
-  '/api-docs',
-  swaggerUi.serve as unknown as express.RequestHandler,
-  swaggerUi.setup(swaggerSpec, {
-    customCss: '.swagger-ui .topbar { display: none }',
-    customSiteTitle: 'Jira KPI Dashboard API'
-  }) as unknown as express.RequestHandler
-);
+// Swagger Documentation — désactivée en production (cartographie complète de l'API), sauf
+// ENABLE_API_DOCS=true.
+if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_API_DOCS === 'true') {
+  app.use(
+    '/api-docs',
+    swaggerUi.serve as unknown as express.RequestHandler,
+    swaggerUi.setup(swaggerSpec, {
+      customCss: '.swagger-ui .topbar { display: none }',
+      customSiteTitle: 'Jira KPI Dashboard API'
+    }) as unknown as express.RequestHandler
+  );
 
-app.get('/api-docs.json', (req, res) => {
-  res.setHeader('Content-Type', 'application/json');
-  res.send(swaggerSpec);
-});
+  app.get('/api-docs.json', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.send(swaggerSpec);
+  });
+}
 
 // Routes
 app.use('/api/health', healthRoutes);
@@ -243,7 +246,9 @@ httpServer.listen(PORT, HOST, () => {
   logger.info(`Server running on port ${PORT}`);
   logger.info(`WebSocket server ready`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  logger.info(`API docs available at http://${HOST}:${PORT}/api-docs`);
+  if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_API_DOCS === 'true') {
+    logger.info(`API docs available at http://${HOST}:${PORT}/api-docs`);
+  }
   logger.info(`Jira URL configured: ${process.env.JIRA_URL ? '✓' : '✗ MISSING'}`);
   logger.info(`Jira Projects: ${process.env.JIRA_PROJECT_KEY || 'Not configured'}`);
   

@@ -349,7 +349,7 @@ describe('AuthService — plus de super admin attribué par email', () => {
     mockUserFindOne.mockResolvedValue(null);
     const created = {
       _id: new mongoose.Types.ObjectId(),
-      email: 'bdeguil-robin@adoria.com',
+      email: 'pmartin-durand@adoria.com',
       provider: 'microsoft',
       isActive: true,
       organizationId: ORG_ID
@@ -361,7 +361,7 @@ describe('AuthService — plus de super admin attribué par email', () => {
     const result = await service.handleMicrosoftSSO({
       tenantId: '8f2c1d3e-1234-4abc-9def-0123456789ab',
       objectId: 'oid-x',
-      email: 'bdeguil-robin@adoria.com'
+      email: 'pmartin-durand@adoria.com'
     });
 
     expect(result.success).toBe(true);

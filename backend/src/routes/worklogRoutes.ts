@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { worklogAppService } from '../application/services/WorklogApplicationService';
 import { globalCache } from '../infrastructure/cache/CacheDecorator';
 import { logger } from '../utils/logger';
+import { clientErrorDetail } from '../utils/clientError';
 import { SupportSprintSnapshot } from '../domain/support/entities/SupportSprintSnapshot';
 import { authenticate, requireSuperAdmin } from '../middleware/authMiddleware';
 import { requirePage } from '../middleware/requirePage';
@@ -74,7 +75,7 @@ router.get('/issue/:issueKey', requirePage('users'), async (req: Request, res: R
     res.status(500).json({
       success: false,
       message: 'Failed to fetch worklogs',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -117,7 +118,7 @@ router.get('/user/:accountId', requirePage('users'), async (req: Request, res: R
     res.status(500).json({
       success: false,
       message: 'Failed to fetch worklogs',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -188,7 +189,7 @@ router.get('/search', requirePage('users'), async (req: Request, res: Response) 
     res.status(500).json({
       success: false,
       message: 'Failed to search worklogs',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -231,7 +232,7 @@ router.get('/project/:projectKey', requirePage('users'), async (req: Request, re
     res.status(500).json({
       success: false,
       message: 'Failed to fetch worklogs',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -309,7 +310,7 @@ router.get('/report', requirePage('users'), async (req: Request, res: Response) 
     res.status(500).json({
       success: false,
       message: 'Failed to generate report',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -338,7 +339,7 @@ router.get('/sprint-issues/:projectKey', requirePage('dashboard', 'users'), asyn
     res.status(500).json({
       success: false,
       message: 'Failed to fetch sprint issues',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -367,7 +368,7 @@ router.get('/velocity-history/:projectKey', requirePage('dashboard', 'users'), a
     res.status(500).json({
       success: false,
       message: 'Failed to fetch velocity history',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -399,7 +400,7 @@ router.get('/support-kpi', requirePage('support'), async (req: Request, res: Res
     res.status(500).json({
       success: false,
       message: 'Failed to fetch support KPIs',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -538,7 +539,7 @@ router.post('/sync', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la synchronisation',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -616,7 +617,7 @@ router.post('/support-snapshot', requirePage('support'), async (req: Request, re
     res.status(500).json({
       success: false,
       message: 'Erreur lors de l\'enregistrement du snapshot',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -657,7 +658,7 @@ router.get('/support-snapshots', requirePage('support'), async (req: Request, re
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la récupération des snapshots',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -696,7 +697,7 @@ router.get('/support-snapshot/:id', requirePage('support'), async (req: Request,
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la récupération du snapshot',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -729,7 +730,7 @@ router.delete('/support-snapshot/:id', requirePage('support'), async (req: Reque
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la suppression du snapshot',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
