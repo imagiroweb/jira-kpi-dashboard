@@ -12,6 +12,7 @@ export function createAuthApiMock() {
     microsoftCallback: vi.fn(),
     getUsersAndRoles: vi.fn(),
     updateUserRole: vi.fn(),
+    setUserActive: vi.fn(),
     getRoles: vi.fn(),
     getIntegrationSettings: vi.fn().mockResolvedValue({
       jiraUrl: '',

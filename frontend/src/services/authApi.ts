@@ -258,6 +258,15 @@ export const authApi = {
   },
 
   /**
+   * Active / désactive un compte (super_admin only). La désactivation révoque ses sessions.
+   */
+  async setUserActive(userId: string, isActive: boolean): Promise<boolean> {
+    const response = await api.patch<{ success: boolean; isActive: boolean }>(`/api/auth/users/${userId}/status`, { isActive });
+    if (!response.data.success) throw new Error((response.data as { error?: string }).error);
+    return response.data.isActive;
+  },
+
+  /**
    * Update user role (super_admin only)
    */
   async updateUserRole(userId: string, role: 'super_admin' | null, roleId: string | null): Promise<User> {

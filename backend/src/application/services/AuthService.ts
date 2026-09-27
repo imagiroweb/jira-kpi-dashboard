@@ -38,6 +38,8 @@ export interface AuthTokenPayload {
   userId: string;
   email: string;
   provider: 'local' | 'microsoft';
+  /** Version des sessions de l'utilisateur au moment de l'émission (voir `User.tokenVersion`). */
+  tv?: number;
 }
 
 export interface LoginResult {
@@ -178,10 +180,35 @@ export class AuthService {
    */
   verifyToken(token: string): AuthTokenPayload | null {
     try {
-      return jwt.verify(token, this.jwtSecret) as AuthTokenPayload;
+      return jwt.verify(token, this.jwtSecret, { algorithms: ['HS256'] }) as AuthTokenPayload;
     } catch (error) {
       return null;
     }
+  }
+
+  /**
+   * Valide une session : signature/expiration du JWT, puis état du compte en base à chaque
+   * requête — compte existant, actif, et version de session identique (`tv`). Un compte
+   * désactivé ou dont les sessions ont été révoquées est refusé immédiatement, sans attendre
+   * l'expiration du jeton.
+   */
+  async validateSession(token: string): Promise<AuthTokenPayload | null> {
+    const payload = this.verifyToken(token);
+    if (!payload?.userId) return null;
+    try {
+      const user = await User.findById(payload.userId).select('isActive tokenVersion').lean();
+      if (!user || !user.isActive) return null;
+      if ((payload.tv ?? 0) !== (user.tokenVersion ?? 0)) return null;
+      return payload;
+    } catch (error) {
+      logger.error('validateSession error:', error);
+      return null;
+    }
+  }
+
+  /** Révoque toutes les sessions ouvertes d'un utilisateur (les JWT déjà émis deviennent invalides). */
+  async revokeSessions(userId: string | IUser['_id']): Promise<void> {
+    await User.updateOne({ _id: userId }, { $inc: { tokenVersion: 1 } });
   }
 
   /**
@@ -344,7 +371,8 @@ export class AuthService {
       const token = this.generateToken({
         userId: user._id.toString(),
         email: user.email,
-        provider: 'local'
+        provider: 'local',
+        tv: user.tokenVersion ?? 0
       });
       const userWithPerms = await this.buildUserWithPermissions(user);
 
@@ -463,6 +491,7 @@ export class AuthService {
         userId: user._id.toString(),
         email: user.email,
         provider: 'microsoft',
+        tv: user.tokenVersion ?? 0,
       });
       const userWithPerms = await this.buildUserWithPermissions(user);
 
@@ -712,7 +741,9 @@ export class AuthService {
         { _id: userId },
         {
           $set: { password: hashedPassword },
-          $unset: { passwordResetToken: '', passwordResetExpires: '' }
+          $unset: { passwordResetToken: '', passwordResetExpires: '' },
+          // Nouveau mot de passe : toutes les sessions ouvertes sont révoquées.
+          $inc: { tokenVersion: 1 }
         }
       );
 

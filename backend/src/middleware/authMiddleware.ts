@@ -11,48 +11,37 @@ declare global {
   }
 }
 
-/**
- * Middleware to verify JWT token and attach user to request
- */
-export const authenticate = (req: Request, res: Response, next: NextFunction) => {
+/** Jeton de session transmis par le client (en-tête `Authorization: Bearer …`). */
+export function extractSessionToken(req: Request): string | null {
   const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith('Bearer ')) {
+    const token = authHeader.substring(7).trim();
+    return token || null;
+  }
+  return null;
+}
 
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+/**
+ * Vérifie la session (JWT + compte actif + version de session) et attache l'utilisateur à la requête.
+ */
+export const authenticate = async (req: Request, res: Response, next: NextFunction) => {
+  const token = extractSessionToken(req);
+  if (!token) {
     return res.status(401).json({
       success: false,
       error: 'Token d\'authentification manquant'
     });
   }
 
-  const token = authHeader.substring(7); // Remove 'Bearer ' prefix
-  const payload = authService.verifyToken(token);
-
+  const payload = await authService.validateSession(token);
   if (!payload) {
     return res.status(401).json({
       success: false,
-      error: 'Token invalide ou expiré'
+      error: 'Session invalide ou expirée'
     });
   }
 
-  // Attach user info to request
   req.user = payload;
-  next();
-};
-
-/**
- * Optional authentication - doesn't fail if no token
- */
-export const optionalAuth = (req: Request, res: Response, next: NextFunction) => {
-  const authHeader = req.headers.authorization;
-
-  if (authHeader && authHeader.startsWith('Bearer ')) {
-    const token = authHeader.substring(7);
-    const payload = authService.verifyToken(token);
-    if (payload) {
-      req.user = payload;
-    }
-  }
-
   next();
 };
 

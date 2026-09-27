@@ -145,6 +145,23 @@ export function UserManagementPage() {
     if (isSuperAdmin) load();
   }, [isSuperAdmin]);
 
+  const handleToggleActive = async (u: UserWithRoleDto) => {
+    const next = !u.isActive;
+    if (!next && !window.confirm(`Désactiver le compte ${u.email} ? Ses sessions ouvertes seront fermées immédiatement.`)) {
+      return;
+    }
+    setSavingUserId(u.id);
+    try {
+      const isActive = await authApi.setUserActive(u.id, next);
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, isActive } : x)));
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } }; message?: string };
+      setError(err?.response?.data?.error || err?.message || 'Erreur mise à jour');
+    } finally {
+      setSavingUserId(null);
+    }
+  };
+
   const handleUserRoleChange = async (userId: string, role: 'super_admin' | null, roleId: string | null) => {
     setSavingUserId(userId);
     try {
@@ -324,6 +341,7 @@ export function UserManagementPage() {
                   <th className="p-4 text-xs font-medium text-surface-500 uppercase tracking-wider">Nom</th>
                   <th className="p-4 text-xs font-medium text-surface-500 uppercase tracking-wider">Connexion</th>
                   <th className="p-4 text-xs font-medium text-surface-500 uppercase tracking-wider">Rôle</th>
+                  <th className="p-4 text-xs font-medium text-surface-500 uppercase tracking-wider">Statut</th>
                 </tr>
               </thead>
               <tbody>
@@ -362,6 +380,21 @@ export function UserManagementPage() {
                         {savingUserId === u.id && <Loader2 className="w-4 h-4 animate-spin text-primary-400" />}
                         <ChevronRight className="w-4 h-4 text-surface-500 group-hover:text-primary-400 shrink-0" aria-hidden />
                       </div>
+                    </td>
+                    <td className="p-4" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => void handleToggleActive(u)}
+                        disabled={savingUserId === u.id || u.id === user?.id}
+                        title={u.id === user?.id ? 'Vous ne pouvez pas désactiver votre propre compte' : undefined}
+                        className={`px-3 py-1 rounded-lg text-xs font-medium border disabled:opacity-40 ${
+                          u.isActive
+                            ? 'border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10'
+                            : 'border-red-500/40 text-red-400 hover:bg-red-500/10'
+                        }`}
+                      >
+                        {u.isActive ? 'Actif' : 'Désactivé'}
+                      </button>
                     </td>
                   </tr>
                 ))}

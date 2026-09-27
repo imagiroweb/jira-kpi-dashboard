@@ -14,13 +14,14 @@ export function setupSocketHandlers(io: Server): void {
   // Authentification obligatoire : même JWT que l'API REST (Authorization: Bearer). Un
   // client sans token valide n'établit jamais la connexion (les événements diffusés ici
   // — dont les mises à jour de points hebdo — ne doivent pas être accessibles anonymement).
-  io.use((socket, next) => {
+  io.use(async (socket, next) => {
     const token = socket.handshake.auth?.token;
     if (typeof token !== 'string' || !token) {
       logger.warn(`Socket connection rejected (no token): ${socket.id}`);
       return next(new Error('Authentification requise'));
     }
-    const payload = authService.verifyToken(token);
+    // Même contrôle que l'API : JWT valide, compte actif, session non révoquée.
+    const payload = await authService.validateSession(token);
     if (!payload) {
       logger.warn(`Socket connection rejected (invalid token): ${socket.id}`);
       return next(new Error('Token invalide ou expiré'));
