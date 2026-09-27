@@ -1,0 +1,64 @@
+# Override préprod. À passer EN DERNIER, après les fichiers de prod :
+#   docker compose -p jira-kpi-preprod \
+#     -f docker-compose.prod.yml \
+#     -f docker-compose.prod.ghcr.yml \
+#     -f docker-compose.prod.scaleway.yml \
+#     -f docker-compose.prod.preprod.yml up -d
+#
+# Isole conteneurs, volumes, réseau et hostname. Les images sont taguées :develop.
+# SYNC_ENABLED=false : la préprod ne lance pas la synchro Jira/Monday de la prod.
+#
+# Prérequis :
+#   - DNS jira-kpi-preprod.imagiro.fr → IP du serveur
+#   - .env propre au dossier préprod (JWT_SECRET et MONGO_PASSWORD distincts)
+#   - Redirect URI Azure : https://jira-kpi-preprod.imagiro.fr/auth/microsoft/callback
+
+name: jira-kpi-preprod
+
+services:
+  mongodb:
+    container_name: jira-kpi-preprod-mongodb
+
+  redis:
+    container_name: jira-kpi-preprod-redis
+
+  backend:
+    image: ghcr.io/imagiroweb/jira-kpi-backend:develop
+    container_name: jira-kpi-preprod-backend
+    environment:
+      CORS_ORIGIN: https://jira-kpi-preprod.imagiro.fr
+      MICROSOFT_REDIRECT_URI: https://jira-kpi-preprod.imagiro.fr/auth/microsoft/callback
+      APP_BASE_URL: https://jira-kpi-preprod.imagiro.fr
+      SYNC_ENABLED: "false"
+
+  frontend:
+    image: ghcr.io/imagiroweb/jira-kpi-frontend:develop
+    container_name: jira-kpi-preprod-frontend
+    labels: !override
+      - "traefik.enable=true"
+      - "traefik.docker.network=traefik-public"
+      - "traefik.http.routers.jira-kpi-preprod-http.rule=Host(`jira-kpi-preprod.imagiro.fr`)"
+      - "traefik.http.routers.jira-kpi-preprod-http.entrypoints=web"
+      - "traefik.http.routers.jira-kpi-preprod-http.middlewares=jira-kpi-preprod-https-redirect"
+      - "traefik.http.middlewares.jira-kpi-preprod-https-redirect.redirectscheme.scheme=https"
+      - "traefik.http.routers.jira-kpi-preprod.rule=Host(`jira-kpi-preprod.imagiro.fr`)"
+      - "traefik.http.routers.jira-kpi-preprod.entrypoints=websecure"
+      - "traefik.http.routers.jira-kpi-preprod.tls=true"
+      - "traefik.http.routers.jira-kpi-preprod.tls.certresolver=letsencrypt"
+      - "traefik.http.services.jira-kpi-preprod.loadbalancer.server.port=80"
+
+networks:
+  jira-kpi-network:
+    name: jira-kpi-preprod-network
+
+volumes:
+  mongo_data:
+    name: jira-kpi-preprod-mongo-data
+  mongo_config:
+    name: jira-kpi-preprod-mongo-config
+  redis_data:
+    name: jira-kpi-preprod-redis-data
+  backend_uploads:
+    name: jira-kpi-preprod-uploads
+  backend_logs:
+    name: jira-kpi-preprod-logs
