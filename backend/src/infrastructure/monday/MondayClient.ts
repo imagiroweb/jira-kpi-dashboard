@@ -307,3 +307,8 @@ export function getMondayClient(): MondayClient {
   }
   return mondayClientInstance;
 }
+
+/** À appeler après un changement de MONDAY_API_KEY pour reconstruire le client. */
+export function resetMondayClient(): void {
+  mondayClientInstance = null;
+}

@@ -1,7 +1,7 @@
 import mongoose, { Document, Schema } from 'mongoose';
 
 /**
- * Équipe (ex. "Choco", "Calson", "Cook", "QA", "Front").
+ * Équipe (ex. "Supply", "Brigade", "Cook", "QA", "Front").
  *
  * Le rattachement d'un collaborateur à une équipe est modulable : voir
  * `User.teamId`, modifiable à tout moment (changement d'équipe), et

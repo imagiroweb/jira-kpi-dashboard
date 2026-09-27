@@ -87,6 +87,21 @@ describe('JiraClient', () => {
     expect(ok).toEqual({ id: 9, name: 'B' });
 
     mockGet.mockRejectedValueOnce(new Error('404'));
+    mockGet.mockResolvedValueOnce({
+      data: { values: [{ id: 1047, name: 'Front', type: 'kanban' }], isLast: true }
+    });
+    const fromList = await new JiraClient().getBoard(1047);
+    expect(fromList?.name).toBe('Front');
+
+    mockGet.mockRejectedValueOnce(new Error('404'));
+    mockGet.mockRejectedValueOnce(new Error('list failed'));
+    mockGet.mockResolvedValueOnce({ data: { views: [{ id: 1047, name: 'Front' }] } });
+    const fromViews = await new JiraClient().getBoard(1047);
+    expect(fromViews?.name).toBe('Front');
+
+    mockGet.mockRejectedValueOnce(new Error('404'));
+    mockGet.mockResolvedValueOnce({ data: { values: [], isLast: true } });
+    mockGet.mockResolvedValueOnce({ data: { views: [] } });
     const missing = await new JiraClient().getBoard(99);
     expect(missing).toBeNull();
   });

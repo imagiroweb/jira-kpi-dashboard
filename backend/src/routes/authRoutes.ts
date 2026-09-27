@@ -15,6 +15,7 @@ import { parseRoadmapAdoria2026Filters } from '../domain/user/parseRoadmapAdoria
 import { sanitizeMicrosoftAccessToken } from '../utils/sanitizeMicrosoftAccessToken';
 
 import { logger } from '../utils/logger';
+import { getIntegrationSettingsView, saveIntegrationSettings } from '../domain/settings/integrationSettings';
 
 /** Max 5 demandes de reset par IP par 15 minutes */
 const forgotPasswordLimiter = rateLimit({
@@ -1116,6 +1117,34 @@ router.patch(
     }
   }
 );
+
+/**
+ * GET /api/auth/integration-settings — Jira, Monday et boards affichés (super admin).
+ * Les secrets ne sont jamais renvoyés, seulement un indicateur « renseigné ».
+ */
+router.get('/integration-settings', authenticate, requireSuperAdmin, async (_req: Request, res: Response) => {
+  try {
+    const settings = await getIntegrationSettingsView();
+    res.json({ success: true, settings });
+  } catch (error) {
+    logger.error('Get integration settings error:', error);
+    res.status(500).json({ success: false, error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * PUT /api/auth/integration-settings — enregistre URL, jetons et ids de boards.
+ * Un jeton vide conserve la valeur déjà en base.
+ */
+router.put('/integration-settings', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const settings = await saveIntegrationSettings(req.body ?? {});
+    res.json({ success: true, settings });
+  } catch (error) {
+    logger.error('Save integration settings error:', error);
+    res.status(500).json({ success: false, error: 'Erreur serveur' });
+  }
+});
 
 export { router as authRoutes };
 

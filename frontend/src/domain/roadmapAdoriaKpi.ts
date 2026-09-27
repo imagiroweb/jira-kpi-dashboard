@@ -18,7 +18,7 @@ export const TEAM_KEYS = ['team', 'équipe', 'equipe'];
  */
 export const ROADMAP_ADORIA_KNOWN_TEAMS = [
   'To define',
-  'Team Calson',
+  'Brigade',
   'Softcam',
   'Team Cook',
   'IA',
