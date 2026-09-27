@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
-import rateLimit from 'express-rate-limit';
 import mongoose from 'mongoose';
 import { authService } from '../application/services/AuthService';
 import { authenticate, requireSuperAdmin } from '../middleware/authMiddleware';
@@ -16,16 +15,17 @@ import { sanitizeMicrosoftAccessToken } from '../utils/sanitizeMicrosoftAccessTo
 import { microsoftIdTokenVerifier, MicrosoftTokenError } from '../infrastructure/microsoft/MicrosoftIdTokenVerifier';
 
 import { logger } from '../utils/logger';
+import {
+  forgotPasswordLimiter,
+  invitationLimiter,
+  loginPerAccountLimiter,
+  loginPerIpLimiter,
+  publicUtilityLimiter,
+  resetPasswordLimiter,
+  ssoCallbackLimiter
+} from '../middleware/rateLimits';
 import { getIntegrationSettingsView, saveIntegrationSettings } from '../domain/settings/integrationSettings';
 
-/** Max 5 demandes de reset par IP par 15 minutes */
-const forgotPasswordLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { success: false, error: 'Trop de tentatives. Veuillez réessayer dans 15 minutes.' }
-});
 
 /** Répond 503 si MongoDB n'est pas connecté (évite le timeout de 10s des opérations bufferisées) */
 const requireMongo = (_req: Request, res: Response, next: () => void) => {
@@ -122,6 +122,8 @@ router.use(requireMongo);
  */
 router.post(
   '/login',
+  loginPerIpLimiter,
+  loginPerAccountLimiter,
   [
     body('email')
       .isEmail()
@@ -190,6 +192,7 @@ router.post(
  */
 router.post(
   '/validate-password',
+  publicUtilityLimiter,
   [body('password').isString().withMessage('Mot de passe requis')],
   async (req: Request, res: Response) => {
     try {
@@ -248,7 +251,7 @@ router.post(
  *       403:
  *         description: Tenant ou domaine d'email non autorisé (aucune organisation correspondante)
  */
-router.post('/microsoft/callback', async (req: Request, res: Response) => {
+router.post('/microsoft/callback', ssoCallbackLimiter, async (req: Request, res: Response) => {
   const idToken = sanitizeMicrosoftAccessToken(req.body?.idToken);
   const nonce = typeof req.body?.nonce === 'string' ? req.body.nonce : undefined;
 
@@ -572,6 +575,7 @@ router.post(
  */
 router.post(
   '/reset-password',
+  resetPasswordLimiter,
   [
     body('token').isString().notEmpty().withMessage('Token manquant'),
     body('password')
@@ -654,6 +658,7 @@ router.post(
   '/users',
   authenticate,
   requireSuperAdmin,
+  invitationLimiter,
   [
     body('email').isEmail().withMessage('Email invalide').normalizeEmail({ gmail_remove_dots: false }),
     body('firstName').optional().trim().isLength({ min: 1, max: 50 }).withMessage('Prénom invalide'),
