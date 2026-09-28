@@ -31,6 +31,12 @@ import { anonymizePerformanceReviews, anonymizeUser } from './application/servic
 import { setupSocketHandlers } from './websocket/socketHandler';
 import { createOriginCheck } from './middleware/originCheck';
 import { describeMongoUri } from './config/mongoUri';
+import { resolveMasterKey } from './config/dataEncryption';
+import { initKeyring } from './infrastructure/crypto/keyringService';
+import { decryptingJsonReplacer } from './infrastructure/crypto/mongooseEncryption';
+
+// Clé maître de chiffrement des données : obligatoire, le serveur ne démarre pas sans.
+const dataMasterKey = resolveMasterKey();
 import { swaggerSpec } from './config/swagger';
 import { schedulerService } from './services/schedulerService';
 import { Role } from './domain/user/entities/Role';
@@ -45,6 +51,13 @@ const connectMongoDB = async () => {
   try {
     await mongoose.connect(mongoUri, opts);
     logger.info('MongoDB connected successfully');
+    try {
+      await initKeyring(dataMasterKey);
+    } catch (error) {
+      // Mauvaise clé maître : ne jamais servir de requêtes (données illisibles / clés incohérentes).
+      logger.error(`Chiffrement : ${(error as Error).message}`);
+      process.exit(1);
+    }
     if (process.env.NODE_ENV === 'production' && describeMongoUri(mongoUri).usesRootAccount) {
       logger.warn(
         'MongoDB : connexion avec le compte root. Créez l’utilisateur applicatif (scripts/mongo-create-app-user.sh) ' +
@@ -154,6 +167,8 @@ const connectMongoDB = async () => {
 connectMongoDB();
 
 const app = express();
+// Aucune valeur chiffrée ne doit sortir telle quelle dans une réponse JSON.
+app.set('json replacer', decryptingJsonReplacer);
 // Derrière Traefik / un reverse proxy, X-Forwarded-For est présent : requis pour express-rate-limit (sinon ValidationError).
 if (process.env.NODE_ENV === 'production') {
   const hops = Number(process.env.TRUST_PROXY_HOPS);

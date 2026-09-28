@@ -4,6 +4,8 @@ module.exports = {
   testEnvironment: 'node',
   roots: ['<rootDir>/src'],
   testMatch: ['**/*.test.ts'],
+  // Trousseau de chiffrement de test (champs chiffrés des modèles)
+  setupFiles: ['<rootDir>/src/test/setupEncryption.ts'],
   moduleFileExtensions: ['ts', 'js', 'json'],
   // Périmètre métier : logique / API / utilitaires testables.
   // Hors scope : scripts, clients infra lourds (Jira/Monday/…), barrels index.ts,
