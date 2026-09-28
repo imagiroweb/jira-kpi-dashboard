@@ -335,8 +335,8 @@ export const useStore = create<AppState>()(
         epicsPrefixFilter: state.epicsPrefixFilter,
         usersPageUseActiveSprint: state.usersPageUseActiveSprint,
         selectedProjects: state.selectedProjects,
-        usersReportPayload: state.usersReportPayload,
-        usersReportLastUpdate: state.usersReportLastUpdate?.toISOString() ?? null,
+        // Rapport « Utilisateurs » (temps passé par personne) : gardé en mémoire uniquement, jamais
+        // écrit dans le localStorage (données nominatives persistées sur le poste = minimisation RGPD).
         usersLastFiltersKey: state.usersLastFiltersKey
       })
     }
