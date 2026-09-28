@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import crypto from 'crypto';
 import jwt, { SignOptions } from 'jsonwebtoken';
 import { User, IUser } from '../../domain/user/entities/User';
+import { emailHashOf } from '../../domain/user/emailHash';
 import { Role, IPageVisibilities, PAGE_IDS } from '../../domain/user/entities/Role';
 import { Team } from '../../domain/team/entities/Team';
 import { Organization } from '../../domain/organization/entities/Organization';
@@ -252,7 +253,7 @@ export class AuthService {
       if (!isEmailDomainAllowed(email, organization.allowedEmailDomains)) {
         return { success: false, status: 400, error: 'Domaine d’email non autorisé pour cette organisation' };
       }
-      if (await User.exists({ email })) {
+      if (await User.exists({ emailHash: emailHashOf(email) })) {
         return { success: false, status: 409, error: 'Un compte existe déjà avec cet email' };
       }
 
@@ -331,8 +332,8 @@ export class AuthService {
   async login(email: string, password: string): Promise<LoginResult> {
     try {
       // Find user
-      const user = await User.findOne({ 
-        email: email.toLowerCase(),
+      const user = await User.findOne({
+        emailHash: emailHashOf(email),
         provider: 'local'
       }).select('+password'); // hash exclu par défaut (select: false), requis ici seulement
 
@@ -450,7 +451,7 @@ export class AuthService {
       let user = await User.findOne({
         $or: [
           { microsoftId: identity.objectId },
-          { email: normalizedEmail, provider: 'microsoft' },
+          { emailHash: emailHashOf(normalizedEmail), provider: 'microsoft' },
         ],
       });
 
@@ -665,7 +666,7 @@ export class AuthService {
   async requestPasswordReset(email: string): Promise<{ success: boolean; error?: string }> {
     try {
       const user = await User.findOne({
-        email: email.toLowerCase(),
+        emailHash: emailHashOf(email),
         provider: 'local'
       }).select('+passwordResetToken +passwordResetExpires');
 

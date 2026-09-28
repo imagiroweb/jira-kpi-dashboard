@@ -1,6 +1,8 @@
 import path from 'path';
 import dotenv from 'dotenv';
 import mongoose from 'mongoose';
+import { resolveMasterKey } from '../../config/dataEncryption';
+import { initKeyring } from '../../infrastructure/crypto/keyringService';
 
 dotenv.config({ path: path.resolve(__dirname, '../../../../.env') });
 
@@ -28,11 +30,14 @@ export function parseBool(value: string | true | undefined): boolean | undefined
   return !['false', '0', 'non', 'no'].includes(value.trim().toLowerCase());
 }
 
-/** Exécute une commande d'administration avec une connexion MongoDB (MONGODB_URI). */
+/** Exécute une commande d'administration avec une connexion MongoDB (MONGODB_URI)
+ * et le trousseau de chiffrement chargé (DATA_ENCRYPTION_KEY). */
 export async function runWithMongo(task: () => Promise<void>): Promise<void> {
   const uri = process.env.MONGODB_URI || 'mongodb://localhost:27017/jira-kpi';
   try {
+    const masterKey = resolveMasterKey();
     await mongoose.connect(uri, { serverSelectionTimeoutMS: 10000 });
+    await initKeyring(masterKey);
     await task();
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);

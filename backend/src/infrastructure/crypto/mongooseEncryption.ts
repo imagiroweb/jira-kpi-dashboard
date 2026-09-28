@@ -52,6 +52,27 @@ export function decryptLeanResults(schema: Schema): void {
   }
 }
 
+/**
+ * `doc.toObject()` / `doc.toJSON()` renvoient les valeurs stockées (sans getters) : on les déchiffre
+ * pour que le code métier manipule du clair (un objet réaffecté au document est rechiffré par les setters).
+ * Si l'appelant fournit son propre `transform`, celui du schéma n'est pas appliqué.
+ */
+export function decryptOnSerialize(schema: Schema): void {
+  for (const option of ['toObject', 'toJSON'] as const) {
+    const current = (schema.get(option) ?? {}) as Record<string, unknown>;
+    schema.set(option, {
+      ...current,
+      transform: (_doc: unknown, ret: Record<string, unknown>) => decryptDeepInPlace(ret)
+    });
+  }
+}
+
+/** Déchiffrement complet à la lecture pour un schéma portant des champs chiffrés. */
+export function withEncryptedFields(schema: Schema): void {
+  decryptLeanResults(schema);
+  decryptOnSerialize(schema);
+}
+
 /** Express `json replacer` : aucune valeur chiffrée ne sort telle quelle dans une réponse. */
 export function decryptingJsonReplacer(_key: string, value: unknown): unknown {
   return isEncryptedValue(value) ? safeDecrypt(value, null) : value;
