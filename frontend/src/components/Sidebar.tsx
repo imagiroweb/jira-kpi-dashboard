@@ -4,6 +4,7 @@ import { groupOfPage, resolveNav, type NavEntry } from '../domain/sidebarNav';
 import { useStore } from '../store/useStore';
 import { useSocketOptional } from '../hooks/useSocketContext';
 import { syncApi } from '../services/api';
+import { authApi } from '../services/authApi';
 
 // PageType is defined in the store, we just use the same type here
 export type PageType = 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'pointHebdo' | 'gestionUtilisateurs' | 'performance' | 'performanceDashboard' | 'couts';
@@ -188,8 +189,9 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
     );
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     if (window.confirm('Êtes-vous sûr de vouloir vous déconnecter ?')) {
+      await authApi.logout();
       logout();
     }
   };

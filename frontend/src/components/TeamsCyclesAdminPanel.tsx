@@ -316,7 +316,7 @@ export function TeamsCyclesAdminPanel({ teams, cycles, onChanged }: TeamsCyclesA
           <h3 className="text-base font-semibold text-surface-100">Import des entretiens</h3>
           <p className="text-xs text-surface-500 mt-1">
             Ta session sert d’authentification (rien n’est stocké côté serveur). Dépose les .xlsx /
-            .ods : le nom de fichier est rattaché à l’email Entra (`b` + `deguil-robin`).
+            .ods : le nom de fichier est rattaché à l’email Entra (`p` + `martin-durand`).
           </p>
         </div>
         <div className="grid sm:grid-cols-2 gap-3">
@@ -407,7 +407,7 @@ export function TeamsCyclesAdminPanel({ teams, cycles, onChanged }: TeamsCyclesA
         <div>
           <h3 className="text-base font-semibold text-surface-100">Import des grilles d’auto-évaluation</h3>
           <p className="text-xs text-surface-500 mt-1">
-            Un fichier par collaborateur (ex. `deguil-robin.xlsx`). Le nom est lu dans le fichier
+            Un fichier par collaborateur (ex. `martin-durand.xlsx`). Le nom est lu dans le fichier
             (cellule B3). Les agrégats `dashboard-all` / `grille-evaluations` sont ignorés.
           </p>
         </div>

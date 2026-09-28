@@ -34,10 +34,20 @@ export interface PasswordValidationResult {
   score: number;
 }
 
-export interface AuthTokenPayload {
+/**
+ * Contenu du JWT de session : identifiant et version de session uniquement. Aucune donnée
+ * personnelle (l'email n'y figure plus : un JWT n'est que signé, pas chiffré).
+ */
+export interface SessionTokenClaims {
   userId: string;
-  email: string;
   provider: 'local' | 'microsoft';
+  /** Version des sessions de l'utilisateur au moment de l'émission (voir `User.tokenVersion`). */
+  tv?: number;
+}
+
+/** Utilisateur de la session courante (`req.user`) : claims du jeton + email relu en base. */
+export interface AuthTokenPayload extends SessionTokenClaims {
+  email: string;
 }
 
 export interface LoginResult {
@@ -166,22 +176,49 @@ export class AuthService {
   /**
    * Generate JWT token
    */
-  generateToken(payload: AuthTokenPayload): string {
+  generateToken(claims: SessionTokenClaims): string {
     const options: SignOptions = {
-      expiresIn: this.jwtExpiresIn as SignOptions['expiresIn']
+      expiresIn: this.jwtExpiresIn as SignOptions['expiresIn'],
+      algorithm: 'HS256'
     };
-    return jwt.sign(payload, this.jwtSecret, options);
+    const { userId, provider, tv } = claims;
+    return jwt.sign({ userId, provider, tv: tv ?? 0 }, this.jwtSecret, options);
   }
 
   /**
    * Verify JWT token
    */
-  verifyToken(token: string): AuthTokenPayload | null {
+  verifyToken(token: string): SessionTokenClaims | null {
     try {
-      return jwt.verify(token, this.jwtSecret) as AuthTokenPayload;
+      return jwt.verify(token, this.jwtSecret, { algorithms: ['HS256'] }) as SessionTokenClaims;
     } catch (error) {
       return null;
     }
+  }
+
+  /**
+   * Valide une session : signature/expiration du JWT, puis état du compte en base à chaque
+   * requête — compte existant, actif, et version de session identique (`tv`). Un compte
+   * désactivé ou dont les sessions ont été révoquées est refusé immédiatement, sans attendre
+   * l'expiration du jeton.
+   */
+  async validateSession(token: string): Promise<AuthTokenPayload | null> {
+    const payload = this.verifyToken(token);
+    if (!payload?.userId) return null;
+    try {
+      const user = await User.findById(payload.userId).select('email isActive tokenVersion').lean();
+      if (!user || !user.isActive) return null;
+      if ((payload.tv ?? 0) !== (user.tokenVersion ?? 0)) return null;
+      return { userId: payload.userId, provider: payload.provider, tv: payload.tv ?? 0, email: user.email };
+    } catch (error) {
+      logger.error('validateSession error:', error);
+      return null;
+    }
+  }
+
+  /** Révoque toutes les sessions ouvertes d'un utilisateur (les JWT déjà émis deviennent invalides). */
+  async revokeSessions(userId: string | IUser['_id']): Promise<void> {
+    await User.updateOne({ _id: userId }, { $inc: { tokenVersion: 1 } });
   }
 
   /**
@@ -297,7 +334,7 @@ export class AuthService {
       const user = await User.findOne({ 
         email: email.toLowerCase(),
         provider: 'local'
-      });
+      }).select('+password'); // hash exclu par défaut (select: false), requis ici seulement
 
       if (!user) {
         return {
@@ -343,8 +380,8 @@ export class AuthService {
 
       const token = this.generateToken({
         userId: user._id.toString(),
-        email: user.email,
-        provider: 'local'
+        provider: 'local',
+        tv: user.tokenVersion ?? 0
       });
       const userWithPerms = await this.buildUserWithPermissions(user);
 
@@ -461,8 +498,8 @@ export class AuthService {
 
       const token = this.generateToken({
         userId: user._id.toString(),
-        email: user.email,
         provider: 'microsoft',
+        tv: user.tokenVersion ?? 0,
       });
       const userWithPerms = await this.buildUserWithPermissions(user);
 
@@ -712,7 +749,9 @@ export class AuthService {
         { _id: userId },
         {
           $set: { password: hashedPassword },
-          $unset: { passwordResetToken: '', passwordResetExpires: '' }
+          $unset: { passwordResetToken: '', passwordResetExpires: '' },
+          // Nouveau mot de passe : toutes les sessions ouvertes sont révoquées.
+          $inc: { tokenVersion: 1 }
         }
       );
 

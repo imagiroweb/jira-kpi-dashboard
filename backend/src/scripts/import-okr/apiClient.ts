@@ -21,6 +21,10 @@ function requireEnv(name: string): string {
  * Client HTTP minimal pour les scripts d'import ponctuel, authentifié via un token JWT fourni en
  * variable d'environnement (`IMPORT_API_TOKEN`) — décision produit : pas de login programmatique,
  * l'opérateur du script colle le token d'une session existante (CTO/super_admin).
+ *
+ * Le jeton n'est plus dans le localStorage : le copier depuis les outils de développement du
+ * navigateur, onglet Application > Cookies > `__Host-session` (ou `session` en local). Il est
+ * envoyé en `Authorization: Bearer`, accepté par l'API pour les clients non navigateurs.
  */
 export function createImportApiClient() {
   const baseURL = process.env.IMPORT_API_BASE_URL || 'http://localhost:3002/api';

@@ -89,7 +89,6 @@ interface AppState {
   // Authentication State
   isAuthenticated: boolean;
   user: User | null;
-  token: string | null;
   
   // Navigation & Shared State
   currentPage: PageType;
@@ -136,7 +135,7 @@ interface AppState {
   kpiRefreshTrigger: number;
   
   // Auth Actions
-  login: (token: string, user: User) => void;
+  login: (user: User) => void;
   logout: () => void;
   updateUser: (user: User) => void;
   
@@ -169,14 +168,22 @@ interface AppState {
   triggerKpiRefresh: () => void;
 }
 
+/** Ancien jeton en localStorage (avant le cookie HttpOnly) : supprimé s'il subsiste. */
+export function clearLegacyAuthToken(): void {
+  try {
+    localStorage.removeItem('auth_token');
+  } catch {
+    // stockage indisponible
+  }
+}
+
 export const useStore = create<AppState>()(
   persist(
     (set) => ({
       // Initial Auth State
       isAuthenticated: false,
       user: null,
-      token: null,
-      
+
       // Initial Navigation State
       currentPage: 'dashboard',
       dateRange: getDefaultDateRange(),
@@ -206,24 +213,22 @@ export const useStore = create<AppState>()(
       kpiRefreshTrigger: 0,
       
       // Auth Actions
-      login: (token, user) => {
-        localStorage.setItem('auth_token', token);
+      // Le jeton de session est un cookie HttpOnly posé par le backend : rien à stocker ici.
+      login: (user) => {
         const firstPage = getFirstVisiblePage(user?.visiblePages) ?? 'dashboard';
         set({ 
           isAuthenticated: true, 
-          token, 
           user,
           currentPage: firstPage
         });
       },
       
       logout: () => {
-        localStorage.removeItem('auth_token');
+        clearLegacyAuthToken();
         set({ 
           isAuthenticated: false, 
-          token: null, 
           user: null,
-              dashboardStats: [],
+          dashboardStats: [],
           dashboardLastUpdate: null,
           dashboardLastFiltersKey: null,
           dashboardUseActiveSprint: true,
@@ -311,7 +316,6 @@ export const useStore = create<AppState>()(
       partialize: (state) => ({
         isAuthenticated: state.isAuthenticated,
         user: state.user,
-        token: state.token,
         dateRange: state.dateRange,
         dashboardStats: state.dashboardStats,
         dashboardLastUpdate: state.dashboardLastUpdate?.toISOString() ?? null,

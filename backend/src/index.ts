@@ -26,6 +26,8 @@ import { performanceRoutes } from './routes/performanceRoutes';
 import { teamRoutes } from './routes/teamRoutes';
 import { costRoutes } from './routes/costRoutes';
 import { setupSocketHandlers } from './websocket/socketHandler';
+import { createOriginCheck } from './middleware/originCheck';
+import { describeMongoUri } from './config/mongoUri';
 import { swaggerSpec } from './config/swagger';
 import { schedulerService } from './services/schedulerService';
 import { Role } from './domain/user/entities/Role';
@@ -40,6 +42,12 @@ const connectMongoDB = async () => {
   try {
     await mongoose.connect(mongoUri, opts);
     logger.info('MongoDB connected successfully');
+    if (process.env.NODE_ENV === 'production' && describeMongoUri(mongoUri).usesRootAccount) {
+      logger.warn(
+        'MongoDB : connexion avec le compte root. Créez l’utilisateur applicatif (scripts/mongo-create-app-user.sh) ' +
+          'et renseignez MONGO_APP_USER / MONGO_APP_PASSWORD.'
+      );
+    }
     // Seed default roles (create or update)
     const defaultRoles = [
       {
@@ -183,20 +191,26 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// Swagger Documentation
-app.use(
-  '/api-docs',
-  swaggerUi.serve as unknown as express.RequestHandler,
-  swaggerUi.setup(swaggerSpec, {
-    customCss: '.swagger-ui .topbar { display: none }',
-    customSiteTitle: 'Jira KPI Dashboard API'
-  }) as unknown as express.RequestHandler
-);
+// CSRF : les requêtes qui modifient des données avec le cookie de session doivent venir de l'application.
+app.use('/api/', createOriginCheck(allowedOrigins));
 
-app.get('/api-docs.json', (req, res) => {
-  res.setHeader('Content-Type', 'application/json');
-  res.send(swaggerSpec);
-});
+// Swagger Documentation — désactivée en production (cartographie complète de l'API), sauf
+// ENABLE_API_DOCS=true.
+if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_API_DOCS === 'true') {
+  app.use(
+    '/api-docs',
+    swaggerUi.serve as unknown as express.RequestHandler,
+    swaggerUi.setup(swaggerSpec, {
+      customCss: '.swagger-ui .topbar { display: none }',
+      customSiteTitle: 'Jira KPI Dashboard API'
+    }) as unknown as express.RequestHandler
+  );
+
+  app.get('/api-docs.json', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.send(swaggerSpec);
+  });
+}
 
 // Routes
 app.use('/api/health', healthRoutes);
@@ -232,7 +246,9 @@ httpServer.listen(PORT, HOST, () => {
   logger.info(`Server running on port ${PORT}`);
   logger.info(`WebSocket server ready`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  logger.info(`API docs available at http://${HOST}:${PORT}/api-docs`);
+  if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_API_DOCS === 'true') {
+    logger.info(`API docs available at http://${HOST}:${PORT}/api-docs`);
+  }
   logger.info(`Jira URL configured: ${process.env.JIRA_URL ? '✓' : '✗ MISSING'}`);
   logger.info(`Jira Projects: ${process.env.JIRA_PROJECT_KEY || 'Not configured'}`);
   

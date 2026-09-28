@@ -803,7 +803,7 @@ describe('TeamPerformancePage', () => {
     });
     const reviewCook = makeReview({
       id: 'review-2',
-      user: { _id: 'user-2', firstName: 'Bruno', lastName: 'Petit', email: 'bruno@test.com' },
+      user: { _id: 'user-2', firstName: 'Paul', lastName: 'Petit', email: 'bruno@test.com' },
       team: 'team-2',
       status: 'en_cours',
       objectives: [

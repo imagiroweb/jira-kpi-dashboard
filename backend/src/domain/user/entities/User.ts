@@ -52,6 +52,9 @@ export interface IUser extends Document {
   passwordResetToken?: string;
   /** Date d'expiration du token (1h après génération) */
   passwordResetExpires?: Date;
+  /** Version des sessions : incrémentée pour révoquer tous les JWT émis (désactivation,
+   * changement de rôle, réinitialisation du mot de passe). Comparée au claim `tv` du jeton. */
+  tokenVersion?: number;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -85,6 +88,8 @@ const UserSchema = new Schema<IUser>(
     },
     password: {
       type: String,
+      // Hash bcrypt jamais renvoyé par défaut : à demander explicitement (`.select('+password')`).
+      select: false,
       required: function(this: IUser) {
         return this.provider === 'local';
       },
@@ -183,6 +188,10 @@ const UserSchema = new Schema<IUser>(
     passwordResetExpires: {
       type: Date,
       select: false
+    },
+    tokenVersion: {
+      type: Number,
+      default: 0
     }
   },
   {

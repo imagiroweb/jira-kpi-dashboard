@@ -5,6 +5,7 @@ import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
 
 const mockUserFindOne = jest.fn();
+const mockUserFindOneSelect = jest.fn();
 const mockUserFindById = jest.fn();
 const mockUserExists = jest.fn();
 const mockUserCreate = jest.fn();
@@ -19,7 +20,15 @@ const mockUserFindOneAndUpdate = jest.fn();
 
 jest.mock('../../domain/user/entities/User', () => ({
   User: {
-    findOne: (...a: unknown[]) => mockUserFindOne(...a),
+    // login : .findOne(...).select('+password') ; SSO : await .findOne(...)
+    findOne: (...a: unknown[]) => {
+      const p = Promise.resolve(mockUserFindOne(...a)) as Promise<unknown> & { select?: (f: string) => unknown };
+      p.select = (fields: string) => {
+        mockUserFindOneSelect(fields);
+        return mockUserFindOne(...a);
+      };
+      return p;
+    },
     // .select().lean() (admin) ou await .select('-password') (création SSO)
     findById: (...a: unknown[]) => ({
       select: () => {
@@ -127,6 +136,15 @@ describe('AuthService — organisation', () => {
 
       expect((await service.login('jean@adoria.com', 'ValidPass123!')).success).toBe(false);
       expect(mockOrgFindById).not.toHaveBeenCalled();
+    });
+
+    it('charge explicitement le hash du mot de passe (exclu par défaut)', async () => {
+      mockUserFindOne.mockResolvedValue(await localUser());
+      mockOrgFindById.mockResolvedValue({ isActive: true, allowLocalAccounts: true });
+
+      await service.login('jean@adoria.com', 'ValidPass123!');
+
+      expect(mockUserFindOneSelect).toHaveBeenCalledWith('+password');
     });
 
     it('ne révèle rien sur l’organisation si le mot de passe est faux', async () => {
@@ -331,7 +349,7 @@ describe('AuthService — plus de super admin attribué par email', () => {
     mockUserFindOne.mockResolvedValue(null);
     const created = {
       _id: new mongoose.Types.ObjectId(),
-      email: 'bdeguil-robin@adoria.com',
+      email: 'pmartin-durand@adoria.com',
       provider: 'microsoft',
       isActive: true,
       organizationId: ORG_ID
@@ -343,7 +361,7 @@ describe('AuthService — plus de super admin attribué par email', () => {
     const result = await service.handleMicrosoftSSO({
       tenantId: '8f2c1d3e-1234-4abc-9def-0123456789ab',
       objectId: 'oid-x',
-      email: 'bdeguil-robin@adoria.com'
+      email: 'pmartin-durand@adoria.com'
     });
 
     expect(result.success).toBe(true);

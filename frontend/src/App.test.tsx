@@ -149,7 +149,7 @@ describe('App', () => {
   });
 
   it('déconnecte l’utilisateur si verifyToken échoue', async () => {
-    seedAuthenticatedUser(undefined, 'expired-token');
+    seedAuthenticatedUser();
     mockVerifyToken.mockResolvedValue(false);
 
     render(<App />);
@@ -159,7 +159,6 @@ describe('App', () => {
     });
 
     expect(useStore.getState().isAuthenticated).toBe(false);
-    expect(useStore.getState().token).toBeNull();
   });
 
   it('affiche l’application authentifiée après vérification réussie', async () => {

@@ -29,6 +29,11 @@ vi.mock('../services/api', () => ({
   syncApi: { forceSync: mockForceSync },
 }));
 
+const mockAuthLogout = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock('../services/authApi', () => ({
+  authApi: { logout: mockAuthLogout },
+}));
+
 vi.mock('../hooks/useSocketContext', () => ({
   useSocketContext: () => socketCtx,
   useSocketOptional: () => socketCtx,
@@ -165,7 +170,7 @@ describe('Sidebar', () => {
     expect(useStore.getState().kpiRefreshTrigger).toBeGreaterThan(initialTrigger);
   });
 
-  it('déconnecte l’utilisateur après confirmation', () => {
+  it('déconnecte l’utilisateur après confirmation (et efface le cookie de session)', async () => {
     const confirmMock = vi.mocked(window.confirm);
     confirmMock.mockReturnValue(true);
 
@@ -177,8 +182,9 @@ describe('Sidebar', () => {
     fireEvent.click(screen.getByTitle('Se déconnecter'));
 
     expect(confirmMock).toHaveBeenCalledWith('Êtes-vous sûr de vouloir vous déconnecter ?');
-    expect(useStore.getState().isAuthenticated).toBe(false);
+    await waitFor(() => expect(useStore.getState().isAuthenticated).toBe(false));
     expect(useStore.getState().user).toBeNull();
+    expect(mockAuthLogout).toHaveBeenCalled();
   });
 
   it('ne déconnecte pas si l’utilisateur annule la confirmation', () => {

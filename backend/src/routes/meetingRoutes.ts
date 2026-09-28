@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { Server } from 'socket.io';
 import { logger } from '../utils/logger';
+import { clientErrorDetail } from '../utils/clientError';
 import { WeeklySprintMeeting, IWeeklySprintMeeting } from '../domain/meeting/entities/WeeklySprintMeeting';
 import {
   applyMeetingPatch,
@@ -102,7 +103,7 @@ function fail(res: Response, status: number, message: string, error?: unknown) {
   return res.status(status).json({
     success: false,
     message,
-    ...(error ? { error: error instanceof Error ? error.message : 'Unknown error' } : {})
+    ...(error ? { error: clientErrorDetail(error) } : {})
   });
 }
 

@@ -17,6 +17,7 @@ const mockGetUserLogs = vi.mocked(authApi.getUserLogs);
 const mockGetUserPageStats = vi.mocked(authApi.getUserPageStats);
 const mockUpdateRole = vi.mocked(authApi.updateRole);
 const mockCreateRole = vi.mocked(authApi.createRole);
+const mockSetUserActive = vi.mocked(authApi.setUserActive);
 
 const SUPER_ADMIN: User = {
   ...TEST_USER,
@@ -155,6 +156,28 @@ describe('UserManagementPage', () => {
     await waitFor(() => {
       expect(mockUpdateUserRole).toHaveBeenCalledWith('u1', 'super_admin', null);
     });
+  });
+
+  it('désactive un compte après confirmation', async () => {
+    mockSetUserActive.mockResolvedValue(false);
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    renderWithProviders(<UserManagementPage />, { user: SUPER_ADMIN });
+
+    const row = (await screen.findByText('alice@test.com')).closest('tr')!;
+    fireEvent.click(within(row).getByRole('button', { name: 'Actif' }));
+
+    await waitFor(() => expect(within(row).getByRole('button', { name: 'Désactivé' })).toBeInTheDocument());
+    expect(mockSetUserActive).toHaveBeenCalledWith('u1', false);
+  });
+
+  it('ne désactive rien si la confirmation est refusée', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(false);
+    renderWithProviders(<UserManagementPage />, { user: SUPER_ADMIN });
+
+    const row = (await screen.findByText('alice@test.com')).closest('tr')!;
+    fireEvent.click(within(row).getByRole('button', { name: 'Actif' }));
+
+    expect(mockSetUserActive).not.toHaveBeenCalled();
   });
 
   it('affiche une erreur si la mise à jour du rôle échoue', async () => {

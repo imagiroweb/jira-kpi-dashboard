@@ -32,7 +32,7 @@ describe('authApi', () => {
         roleName: 'Utilisateur',
       };
       mockPost.mockResolvedValueOnce({
-        data: { success: true, token: 'jwt-token', user },
+        data: { success: true, user },
       });
 
       const result = await authApi.login('user@test.com', 'Password123!');
@@ -42,7 +42,6 @@ describe('authApi', () => {
         password: 'Password123!',
       });
       expect(result.success).toBe(true);
-      expect(result.token).toBe('jwt-token');
       expect(result.user).toEqual(user);
     });
 

@@ -55,7 +55,6 @@ export function resetStore(): void {
   useStore.setState({
     isAuthenticated: false,
     user: null,
-    token: null,
     currentPage: 'dashboard',
     dateRange: getDefaultDateRange(),
     selectedProjects: [],
@@ -86,6 +85,6 @@ export function resetStore(): void {
 }
 
 /** Connecte un utilisateur de test (défaut : TEST_USER) */
-export function seedAuthenticatedUser(user: User = TEST_USER, token = 'test-jwt-token'): void {
-  useStore.getState().login(token, user);
+export function seedAuthenticatedUser(user: User = TEST_USER): void {
+  useStore.getState().login(user);
 }

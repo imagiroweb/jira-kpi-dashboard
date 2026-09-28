@@ -9,7 +9,7 @@ jest.mock('../utils/logger', () => ({
 
 const mockVerifyToken = jest.fn();
 jest.mock('../application/services/AuthService', () => ({
-  authService: { verifyToken: (...args: unknown[]) => mockVerifyToken(...args) }
+  authService: { validateSession: (...args: unknown[]) => mockVerifyToken(...args) }
 }));
 
 import type { Server, Socket } from 'socket.io';
@@ -88,7 +88,7 @@ function getAuthMiddleware(io: IoMock) {
   return io.use.mock.calls[0][0] as (
     socket: SocketMock,
     next: (err?: Error) => void
-  ) => void;
+  ) => void | Promise<void>;
 }
 
 describe('socketHandler', () => {
@@ -105,43 +105,59 @@ describe('socketHandler', () => {
   });
 
   describe('authentification (io.use)', () => {
-    it('rejette une connexion sans token', () => {
+    it('rejette une connexion sans token', async () => {
       const io = makeIoMock();
       setupSocketHandlers(asServer(io));
       const middleware = getAuthMiddleware(io);
       const socket = makeSocketMock('sock-no-token');
       const next = jest.fn();
 
-      middleware(socket, next);
+      await middleware(socket, next);
 
       expect(next).toHaveBeenCalledWith(expect.any(Error));
       expect(mockVerifyToken).not.toHaveBeenCalled();
     });
 
-    it('rejette une connexion avec un token invalide', () => {
-      mockVerifyToken.mockReturnValue(null);
+    it('rejette un token invalide, un compte désactivé ou une session révoquée', async () => {
+      mockVerifyToken.mockResolvedValue(null);
       const io = makeIoMock();
       setupSocketHandlers(asServer(io));
       const middleware = getAuthMiddleware(io);
       const socket = makeSocketMock('sock-bad-token', { token: 'garbage' });
       const next = jest.fn();
 
-      middleware(socket, next);
+      await middleware(socket, next);
 
       expect(mockVerifyToken).toHaveBeenCalledWith('garbage');
       expect(next).toHaveBeenCalledWith(expect.any(Error));
     });
 
-    it('accepte une connexion avec un token valide et attache l\'utilisateur au socket', () => {
+    it('accepte le cookie de session HttpOnly envoyé au handshake', async () => {
       const user = { userId: 'u1', email: 'alice@test.com' };
-      mockVerifyToken.mockReturnValue(user);
+      mockVerifyToken.mockResolvedValue(user);
+      const io = makeIoMock();
+      setupSocketHandlers(asServer(io));
+      const middleware = getAuthMiddleware(io);
+      const socket = makeSocketMock('sock-cookie');
+      (socket.handshake as { headers?: Record<string, string> }).headers = { cookie: 'x=1; session=cookie-jwt' };
+      const next = jest.fn();
+
+      await middleware(socket, next);
+
+      expect(mockVerifyToken).toHaveBeenCalledWith('cookie-jwt');
+      expect(next).toHaveBeenCalledWith();
+    });
+
+    it('accepte une connexion avec un token valide et attache l\'utilisateur au socket', async () => {
+      const user = { userId: 'u1', email: 'alice@test.com' };
+      mockVerifyToken.mockResolvedValue(user);
       const io = makeIoMock();
       setupSocketHandlers(asServer(io));
       const middleware = getAuthMiddleware(io);
       const socket = makeSocketMock('sock-ok', { token: 'valid-jwt' });
       const next = jest.fn();
 
-      middleware(socket, next);
+      await middleware(socket, next);
 
       expect(next).toHaveBeenCalledWith();
       expect(socket.data.user).toEqual(user);

@@ -6,6 +6,7 @@ import os from 'os';
 import path from 'path';
 import multer from 'multer';
 import { logger } from '../utils/logger';
+import { clientErrorDetail } from '../utils/clientError';
 import {
   buildImportPlanFromInterviewsDir,
   ImportPlanEntry
@@ -94,7 +95,7 @@ function fail(res: Response, status: number, message: string, error?: unknown) {
   return res.status(status).json({
     success: false,
     message,
-    ...(error ? { error: error instanceof Error ? error.message : 'Unknown error' } : {})
+    ...(error ? { error: clientErrorDetail(error) } : {})
   });
 }
 

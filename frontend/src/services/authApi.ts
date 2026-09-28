@@ -6,24 +6,14 @@ const API_URL = '';
 
 const api = axios.create({
   baseURL: API_URL,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json'
   }
 });
 
-// Add auth token to requests if available (sauf callback SSO Microsoft : token local
-// potentiellement corrompu ne doit pas polluer Authorization).
-api.interceptors.request.use((config) => {
-  const url = `${config.baseURL ?? ''}${config.url ?? ''}`;
-  if (url.includes('/auth/microsoft/callback')) {
-    return config;
-  }
-  const token = localStorage.getItem('auth_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
+// Session : cookie HttpOnly posé par le backend (jamais lisible en JavaScript), envoyé
+// automatiquement par le navigateur (même origine, withCredentials).
 
 export interface IntegrationSettings {
   jiraUrl: string;
@@ -113,7 +103,6 @@ export interface UserActivityLogEntry {
 
 export interface AuthResponse {
   success: boolean;
-  token?: string;
   user?: User;
   /** True when the account was just created (first Microsoft login) */
   firstLogin?: boolean;
@@ -205,6 +194,17 @@ export const authApi = {
   },
 
   /**
+   * Déconnexion : le backend efface le cookie de session HttpOnly.
+   */
+  async logout(): Promise<void> {
+    try {
+      await api.post('/api/auth/logout');
+    } catch {
+      // non bloquant : l'état local est réinitialisé de toute façon
+    }
+  },
+
+  /**
    * Verify current token validity
    */
   async verifyToken(): Promise<boolean> {
@@ -255,6 +255,15 @@ export const authApi = {
       const msg = err.response?.data?.error || err.response?.data?.errors?.join('. ');
       return { success: false, error: msg || 'Erreur de connexion au serveur' };
     }
+  },
+
+  /**
+   * Active / désactive un compte (super_admin only). La désactivation révoque ses sessions.
+   */
+  async setUserActive(userId: string, isActive: boolean): Promise<boolean> {
+    const response = await api.patch<{ success: boolean; isActive: boolean }>(`/api/auth/users/${userId}/status`, { isActive });
+    if (!response.data.success) throw new Error((response.data as { error?: string }).error);
+    return response.data.isActive;
   },
 
   /**

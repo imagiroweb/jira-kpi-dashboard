@@ -59,7 +59,7 @@ export function useSocket(options: UseSocketOptions = {}) {
     lastPing: null,
   });
   
-  const { token, isAuthenticated } = useStore();
+  const { isAuthenticated } = useStore();
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
@@ -79,7 +79,8 @@ export function useSocket(options: UseSocketOptions = {}) {
     const socketUrl = import.meta.env.VITE_SOCKET_URL || window.location.origin;
     
     const socket = io(socketUrl, {
-      auth: { token },
+      // Cookie de session HttpOnly envoyé au handshake (même origine).
+      withCredentials: true,
       transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 10,
@@ -163,7 +164,7 @@ export function useSocket(options: UseSocketOptions = {}) {
       socket.disconnect();
       socketRef.current = null;
     };
-  }, [isAuthenticated, token]);
+  }, [isAuthenticated]);
 
   // Subscribe to a specific project
   const subscribeToProject = useCallback((projectId: string) => {

@@ -90,26 +90,25 @@ describe('useStore (auth)', () => {
     resetStore();
   });
 
-  it('login met à jour isAuthenticated, token, user et currentPage', () => {
-    useStore.getState().login('jwt-token', mockUser);
+  it('login met à jour isAuthenticated, user et currentPage (aucun jeton côté JavaScript)', () => {
+    useStore.getState().login(mockUser);
 
     expect(useStore.getState().isAuthenticated).toBe(true);
-    expect(useStore.getState().token).toBe('jwt-token');
+    expect(localStorage.getItem('auth_token')).toBeNull();
     expect(useStore.getState().user).toEqual(mockUser);
     expect(useStore.getState().currentPage).toBe('dashboard');
   });
 
   it('logout remet l’état auth à l’état initial', () => {
-    useStore.getState().login('jwt-token', mockUser);
+    useStore.getState().login(mockUser);
     useStore.getState().logout();
 
     expect(useStore.getState().isAuthenticated).toBe(false);
-    expect(useStore.getState().token).toBeNull();
     expect(useStore.getState().user).toBeNull();
   });
 
   it('logout réinitialise les caches dashboard, support, epics et users', () => {
-    useStore.getState().login('jwt-token', mockUser);
+    useStore.getState().login(mockUser);
     useStore.setState({
       dashboardStats: [{ boardId: 1, name: 'B', projectKey: 'P', color: '#fff' } as never],
       dashboardLastUpdate: new Date('2025-01-01'),
@@ -161,7 +160,7 @@ describe('useStore (auth)', () => {
   });
 
   it('updateUser conserve currentPage si la page reste visible', () => {
-    useStore.getState().login('jwt-token', mockUser);
+    useStore.getState().login(mockUser);
     useStore.getState().setCurrentPage('dashboard');
 
     useStore.getState().updateUser({
@@ -175,7 +174,7 @@ describe('useStore (auth)', () => {
   });
 
   it('updateUser redirige vers la première page visible si la page courante ne l’est plus', () => {
-    useStore.getState().login('jwt-token', {
+    useStore.getState().login({
       ...mockUser,
       visiblePages: {
         dashboard: true,

@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
-import rateLimit from 'express-rate-limit';
 import mongoose from 'mongoose';
 import { authService } from '../application/services/AuthService';
 import { authenticate, requireSuperAdmin } from '../middleware/authMiddleware';
@@ -12,20 +11,22 @@ import {
 import { Role, IPageVisibilities, PAGE_IDS } from '../domain/user/entities/Role';
 import { UserActivityLog } from '../domain/user/entities/UserActivityLog';
 import { parseRoadmapAdoria2026Filters } from '../domain/user/parseRoadmapAdoria2026Filters';
+import { clearSessionCookie, setSessionCookie } from '../config/sessionCookie';
 import { sanitizeMicrosoftAccessToken } from '../utils/sanitizeMicrosoftAccessToken';
 import { microsoftIdTokenVerifier, MicrosoftTokenError } from '../infrastructure/microsoft/MicrosoftIdTokenVerifier';
 
 import { logger } from '../utils/logger';
+import {
+  forgotPasswordLimiter,
+  invitationLimiter,
+  loginPerAccountLimiter,
+  loginPerIpLimiter,
+  publicUtilityLimiter,
+  resetPasswordLimiter,
+  ssoCallbackLimiter
+} from '../middleware/rateLimits';
 import { getIntegrationSettingsView, saveIntegrationSettings } from '../domain/settings/integrationSettings';
 
-/** Max 5 demandes de reset par IP par 15 minutes */
-const forgotPasswordLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { success: false, error: 'Trop de tentatives. Veuillez réessayer dans 15 minutes.' }
-});
 
 /** Répond 503 si MongoDB n'est pas connecté (évite le timeout de 10s des opérations bufferisées) */
 const requireMongo = (_req: Request, res: Response, next: () => void) => {
@@ -122,6 +123,8 @@ router.use(requireMongo);
  */
 router.post(
   '/login',
+  loginPerIpLimiter,
+  loginPerAccountLimiter,
   [
     body('email')
       .isEmail()
@@ -152,9 +155,10 @@ router.post(
         });
       }
 
+      // Jeton de session en cookie HttpOnly : jamais renvoyé dans le corps (inaccessible au JavaScript).
+      setSessionCookie(res, result.token!);
       res.json({
         success: true,
-        token: result.token,
         user: result.user
       });
     } catch (error) {
@@ -190,6 +194,7 @@ router.post(
  */
 router.post(
   '/validate-password',
+  publicUtilityLimiter,
   [body('password').isString().withMessage('Mot de passe requis')],
   async (req: Request, res: Response) => {
     try {
@@ -248,7 +253,7 @@ router.post(
  *       403:
  *         description: Tenant ou domaine d'email non autorisé (aucune organisation correspondante)
  */
-router.post('/microsoft/callback', async (req: Request, res: Response) => {
+router.post('/microsoft/callback', ssoCallbackLimiter, async (req: Request, res: Response) => {
   const idToken = sanitizeMicrosoftAccessToken(req.body?.idToken);
   const nonce = typeof req.body?.nonce === 'string' ? req.body.nonce : undefined;
 
@@ -279,12 +284,24 @@ router.post('/microsoft/callback', async (req: Request, res: Response) => {
     return res.status(result.status ?? 401).json({ success: false, error: result.error });
   }
 
+  setSessionCookie(res, result.token!);
   res.json({
     success: true,
-    token: result.token,
     user: result.user,
     firstLogin: result.firstLogin,
   });
+});
+
+/**
+ * @swagger
+ * /api/auth/logout:
+ *   post:
+ *     summary: Déconnexion — efface le cookie de session
+ *     tags: [Authentication]
+ */
+router.post('/logout', (_req: Request, res: Response) => {
+  clearSessionCookie(res);
+  res.json({ success: true });
 });
 
 /**
@@ -572,6 +589,7 @@ router.post(
  */
 router.post(
   '/reset-password',
+  resetPasswordLimiter,
   [
     body('token').isString().notEmpty().withMessage('Token manquant'),
     body('password')
@@ -654,6 +672,7 @@ router.post(
   '/users',
   authenticate,
   requireSuperAdmin,
+  invitationLimiter,
   [
     body('email').isEmail().withMessage('Email invalide').normalizeEmail({ gmail_remove_dots: false }),
     body('firstName').optional().trim().isLength({ min: 1, max: 50 }).withMessage('Prénom invalide'),
@@ -827,6 +846,9 @@ router.patch(
         }
       }
       await user.save();
+      // Droits modifiés : les sessions ouvertes de cet utilisateur sont révoquées (reconnexion
+      // avec les nouvelles pages visibles).
+      await authService.revokeSessions(user._id);
       const withPerms = await authService.buildUserWithPermissions(user);
       res.json({
         success: true,
@@ -847,6 +869,52 @@ router.patch(
       });
     } catch (error) {
       logger.error('Update user role error:', error);
+      res.status(500).json({ success: false, error: 'Erreur serveur' });
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/auth/users/{id}/status:
+ *   patch:
+ *     summary: Activer / désactiver un compte (super admin) — révoque immédiatement ses sessions
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.patch(
+  '/users/:id/status',
+  authenticate,
+  requireSuperAdmin,
+  [body('isActive').isBoolean().withMessage('isActive (booléen) requis')],
+  async (req: Request, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array().map((e: { msg?: string }) => e.msg) });
+      }
+      const { id } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ success: false, error: 'Identifiant invalide' });
+      }
+      if (id === req.user!.userId) {
+        return res.status(400).json({ success: false, error: 'Vous ne pouvez pas désactiver votre propre compte' });
+      }
+      const [admin, target] = await Promise.all([
+        User.findById(req.user!.userId).select('organizationId').lean(),
+        User.findById(id).select('organizationId').lean()
+      ]);
+      if (!target) return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
+      if (String(admin?.organizationId ?? '') !== String(target.organizationId ?? '')) {
+        return res.status(403).json({ success: false, error: 'Utilisateur d’une autre organisation' });
+      }
+      const isActive = req.body.isActive === true || req.body.isActive === 'true';
+      await User.updateOne({ _id: id }, { $set: { isActive }, $inc: { tokenVersion: 1 } });
+      logger.info(`Compte ${id} ${isActive ? 'réactivé' : 'désactivé'} par ${req.user!.userId}`);
+      res.json({ success: true, isActive });
+    } catch (error) {
+      logger.error('Update user status error:', error);
       res.status(500).json({ success: false, error: 'Erreur serveur' });
     }
   }

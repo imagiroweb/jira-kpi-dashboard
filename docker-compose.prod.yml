@@ -8,8 +8,9 @@ services:
       - mongo_data:/data/db
       - mongo_config:/data/configdb
     environment:
+      # Compte root : administration uniquement (création de l'utilisateur applicatif, sauvegardes).
       MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?MONGO_PASSWORD requis}
       MONGO_INITDB_DATABASE: jira-kpi
     networks:
       - jira-kpi-network
@@ -45,7 +46,9 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3001
-      - MONGODB_URI=mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/jira-kpi?authSource=admin
+      # Utilisateur applicatif à droits limités (readWrite sur jira-kpi), jamais le root :
+      # création une fois par serveur avec scripts/mongo-create-app-user.sh
+      - MONGODB_URI=mongodb://${MONGO_APP_USER:-jira_kpi_app}:${MONGO_APP_PASSWORD:?MONGO_APP_PASSWORD requis (voir scripts/mongo-create-app-user.sh)}@mongodb:27017/jira-kpi?authSource=jira-kpi
       - REDIS_URL=redis://redis:6379
       - JIRA_URL=${JIRA_URL}
       - JIRA_EMAIL=${JIRA_EMAIL}

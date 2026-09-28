@@ -147,6 +147,15 @@ describe('authRoutes — core (TI)', () => {
     });
   });
 
+  describe('POST /api/auth/logout', () => {
+    it('efface le cookie de session', async () => {
+      const res = await request(app).post('/api/auth/logout');
+
+      expect(res.status).toBe(200);
+      expect(String(res.headers['set-cookie'])).toMatch(/^session=;.*Expires=Thu, 01 Jan 1970/);
+    });
+  });
+
   describe('POST /api/auth/login', () => {
     it('retourne 401 si les identifiants sont invalides', async () => {
       mockLogin.mockResolvedValue({
@@ -164,7 +173,7 @@ describe('authRoutes — core (TI)', () => {
       expect(mockLogin).toHaveBeenCalledWith('user@test.com', 'wrong-password');
     });
 
-    it('retourne 200 avec token et user si connexion réussie', async () => {
+    it('pose le jeton en cookie HttpOnly (jamais dans le corps) si connexion réussie', async () => {
       mockLogin.mockResolvedValue({
         success: true,
         token: 'jwt-login-token',
@@ -177,7 +186,12 @@ describe('authRoutes — core (TI)', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.token).toBe('jwt-login-token');
+      expect(res.body.token).toBeUndefined();
+      const cookie = String(res.headers['set-cookie']);
+      expect(cookie).toMatch(/^session=jwt-login-token/);
+      expect(cookie).toMatch(/HttpOnly/);
+      expect(cookie).toMatch(/SameSite=Strict/);
+      expect(cookie).toMatch(/Path=\//);
       expect(res.body.user).toEqual(
         expect.objectContaining({ id: TEST_USER_ID, email: 'user@test.com' })
       );

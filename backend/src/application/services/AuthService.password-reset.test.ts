@@ -271,7 +271,9 @@ describe('AuthService — réinitialisation de mot de passe', () => {
         { _id: userId },
         {
           $set: { password: expect.any(String) },
-          $unset: { passwordResetToken: '', passwordResetExpires: '' }
+          $unset: { passwordResetToken: '', passwordResetExpires: '' },
+          // les sessions ouvertes sont révoquées
+          $inc: { tokenVersion: 1 }
         }
       );
     });

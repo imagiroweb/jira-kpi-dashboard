@@ -7,8 +7,10 @@ import { TEST_USER_ID } from '../test/fixtures/users';
 
 const mockBuildUserWithPermissions = jest.fn();
 const mockInviteLocalUser = jest.fn();
+const mockRevokeSessions = jest.fn().mockResolvedValue(undefined);
 const mockUserFindById = jest.fn();
 const mockUserFind = jest.fn();
+const mockUserUpdateOne = jest.fn().mockResolvedValue({});
 const mockRoleFind = jest.fn();
 const mockRoleFindById = jest.fn();
 const mockRoleFindOne = jest.fn();
@@ -34,6 +36,7 @@ jest.mock('../application/services/AuthService', () => ({
   authService: {
     buildUserWithPermissions: (...args: unknown[]) => mockBuildUserWithPermissions(...args),
     inviteLocalUser: (...args: unknown[]) => mockInviteLocalUser(...args),
+    revokeSessions: (...args: unknown[]) => mockRevokeSessions(...args),
     login: jest.fn(),
     validatePassword: jest.fn(),
     getUserById: jest.fn(),
@@ -58,6 +61,7 @@ jest.mock('../domain/user/entities/User', () => ({
   User: {
     findById: (...args: unknown[]) => mockUserFindById(...args),
     find: (...args: unknown[]) => mockUserFind(...args),
+    updateOne: (...args: unknown[]) => mockUserUpdateOne(...args),
     findOne: jest.fn(),
   },
 }));
@@ -150,6 +154,56 @@ describe('authRoutes — admin (TI)', () => {
       role: null,
       roleName: 'Développeur',
       visiblePages: defaultPageVisibilities,
+    });
+  });
+
+  describe('PATCH /api/auth/users/:id/status (désactivation d’un compte)', () => {
+    const TARGET = '507f1f77bcf86cd799439099';
+    const ORG = 'org-1';
+
+    function mockUsers(adminOrg: string, targetOrg: string | null) {
+      mockUserFindById.mockImplementation((id: string) => ({
+        select: () => ({
+          lean: () =>
+            Promise.resolve(
+              id === TARGET
+                ? targetOrg === null
+                  ? null
+                  : { organizationId: targetOrg }
+                : { role: isSuperAdmin ? 'super_admin' : undefined, organizationId: adminOrg }
+            ),
+        }),
+      }));
+    }
+
+    it('désactive le compte et révoque ses sessions', async () => {
+      mockUsers(ORG, ORG);
+
+      const res = await request(app).patch(`/api/auth/users/${TARGET}/status`).send({ isActive: false });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ success: true, isActive: false });
+      expect(mockUserUpdateOne).toHaveBeenCalledWith({ _id: TARGET }, { $set: { isActive: false }, $inc: { tokenVersion: 1 } });
+    });
+
+    it('refuse de désactiver son propre compte', async () => {
+      mockUsers(ORG, ORG);
+      const res = await request(app).patch(`/api/auth/users/${TEST_USER_ID}/status`).send({ isActive: false });
+      expect(res.status).toBe(400);
+      expect(mockUserUpdateOne).not.toHaveBeenCalled();
+    });
+
+    it('refuse un utilisateur d’une autre organisation', async () => {
+      mockUsers(ORG, 'org-2');
+      const res = await request(app).patch(`/api/auth/users/${TARGET}/status`).send({ isActive: false });
+      expect(res.status).toBe(403);
+      expect(mockUserUpdateOne).not.toHaveBeenCalled();
+    });
+
+    it('retourne 404 si le compte n’existe pas, 400 si isActive manque', async () => {
+      mockUsers(ORG, null);
+      expect((await request(app).patch(`/api/auth/users/${TARGET}/status`).send({ isActive: true })).status).toBe(404);
+      expect((await request(app).patch(`/api/auth/users/${TARGET}/status`).send({})).status).toBe(400);
     });
   });
 
@@ -280,6 +334,7 @@ describe('authRoutes — admin (TI)', () => {
         .patch(`/api/auth/users/${targetUserId}`)
         .send({ role: 'super_admin' });
 
+      expect(mockRevokeSessions).toHaveBeenCalled();
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(userDoc.role).toBe('super_admin');

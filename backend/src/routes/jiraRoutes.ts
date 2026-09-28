@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { worklogAppService } from '../application/services/WorklogApplicationService';
 import { logger } from '../utils/logger';
+import { clientErrorDetail } from '../utils/clientError';
 import { DashboardSprintSnapshot } from '../domain/sprint/entities/DashboardSprintSnapshot';
 import { authenticate } from '../middleware/authMiddleware';
 import { requirePage } from '../middleware/requirePage';
@@ -39,7 +40,7 @@ router.get('/configured-projects', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch configured projects',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -68,7 +69,7 @@ router.get('/configured-boards', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch configured boards',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -87,7 +88,7 @@ router.get('/sprint-burndown', requirePage('dashboard', 'pointHebdo'), async (re
     res.status(500).json({
       success: false,
       message: 'Failed to fetch sprint burndowns',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -113,7 +114,7 @@ router.get('/dashboard/sprint-issues-all', requirePage('dashboard', 'pointHebdo'
     res.status(500).json({
       success: false,
       message: 'Failed to fetch sprint issues for all boards',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -148,7 +149,7 @@ router.get('/board/:boardId/sprint-issues', requirePage('dashboard', 'pointHebdo
     res.status(500).json({
       success: false,
       message: 'Failed to fetch sprint issues for board',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -214,7 +215,7 @@ router.get('/resolved-by-day', requirePage('dashboard', 'pointHebdo'), async (re
     res.status(500).json({
       success: false,
       message: 'Failed to fetch resolved by day',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -239,7 +240,7 @@ router.get('/projects', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch projects',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -273,7 +274,7 @@ router.get('/epic-progress', requirePage('epics'), async (req: Request, res: Res
     res.status(500).json({
       success: false,
       message: 'Failed to fetch epic progress',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -305,7 +306,7 @@ router.get('/epic-search', requirePage('epics'), async (req: Request, res: Respo
     res.status(500).json({
       success: false,
       message: 'Failed to search epics',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -335,7 +336,7 @@ router.get('/epic/:epicKey/details', requirePage('epics'), async (req: Request, 
     res.status(500).json({
       success: false,
       message: 'Failed to fetch epic details',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -356,7 +357,7 @@ router.get('/epic/:epicKey/time-by-user', requirePage('epics'), async (req: Requ
     res.status(500).json({
       success: false,
       message: 'Failed to fetch epic time by user',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -377,7 +378,7 @@ router.get('/time-config', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch time tracking configuration',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -405,7 +406,7 @@ router.get('/claude-us-stats', requirePage('produit'), async (req: Request, res:
     res.status(500).json({
       success: false,
       message: 'Failed to fetch Claude US stats',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -444,7 +445,7 @@ router.get('/claude-us-issues', requirePage('produit'), async (req: Request, res
     res.status(500).json({
       success: false,
       message: 'Failed to fetch Claude US issues',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -559,7 +560,7 @@ router.get('/dashboard-snapshots', requirePage('dashboard'), async (req: Request
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la récupération des snapshots',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -599,7 +600,7 @@ router.get('/dashboard-snapshot/:id', requirePage('dashboard'), async (req: Requ
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la récupération du snapshot',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -632,7 +633,7 @@ router.delete('/dashboard-snapshot/:id', requirePage('dashboard'), async (req: R
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la suppression du snapshot',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
