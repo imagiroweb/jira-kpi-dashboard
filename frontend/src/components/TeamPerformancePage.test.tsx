@@ -166,6 +166,28 @@ describe('TeamPerformancePage', () => {
     expect(screen.getByRole('option', { name: 'Cook' })).toBeInTheDocument();
   });
 
+  it('affiche une fiche anonymisée en lecture seule, sans bouton Ouvrir', async () => {
+    seedUser({ performanceGlobalAccess: true, leadTeamIds: [] });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    mockListReviews.mockResolvedValue({
+      success: true,
+      reviews: [
+        makeReview({
+          id: 'review-anon',
+          anonymized: true,
+          user: { _id: 'anonyme-review-anon', firstName: 'Collaborateur', lastName: 'anonymisé' },
+        }),
+      ],
+    });
+
+    render(<TeamPerformancePage />);
+
+    expect(await screen.findByText('Collaborateur anonymisé')).toBeInTheDocument();
+    expect(screen.getByText('Anonymisée')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Ouvrir' })).not.toBeInTheDocument();
+  });
+
   it("affiche le score d'auto-évaluation global sur 5 dans la liste de suivi", async () => {
     seedUser({ performanceGlobalAccess: true, leadTeamIds: [] });
     mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });

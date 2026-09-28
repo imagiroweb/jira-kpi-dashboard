@@ -1022,6 +1022,35 @@ export const teamApi = {
   }
 };
 
+// Organisation — paramètres et durées de conservation (super admin)
+export interface RetentionSettings {
+  /** Logs d'activité supprimés au-delà de N mois (null = pas de purge). */
+  activityLogMonths: number | null;
+  /** Fiches de performance supprimées N années après la fin du cycle (null = pas de purge). */
+  performanceReviewYears: number | null;
+  /** Comptes désactivés anonymisés après N mois (null = jamais automatiquement). */
+  inactiveAccountMonths: number | null;
+}
+
+export interface OrganizationSettings {
+  name: string;
+  slug: string;
+  allowedEmailDomains: string[];
+  allowLocalAccounts: boolean;
+  retention: RetentionSettings;
+}
+
+export const organizationApi = {
+  async getMine(): Promise<OrganizationSettings> {
+    const { data } = await api.get('/organizations/me');
+    return data.organization;
+  },
+  async updateRetention(retention: Partial<RetentionSettings>): Promise<OrganizationSettings> {
+    const { data } = await api.patch('/organizations/me/retention', retention);
+    return data.organization;
+  }
+};
+
 export default api;
 
 /** Utilisateur de la page « Coûts horaires » (issue #44). */

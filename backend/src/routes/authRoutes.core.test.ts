@@ -91,6 +91,12 @@ jest.mock('../utils/logger', () =>
   jest.requireActual('../test/mocks/logger').loggerMockFactory()
 );
 
+const mockExportPersonalData = jest.fn();
+jest.mock('../application/services/personalDataService', () => ({
+  exportPersonalData: (...a: unknown[]) => mockExportPersonalData(...a),
+  anonymizeUser: jest.fn(),
+}));
+
 import { authRoutes } from './authRoutes';
 
 describe('authRoutes — core (TI)', () => {
@@ -297,6 +303,20 @@ describe('authRoutes — core (TI)', () => {
         .send({ roleId: 'role1' });
 
       expect(res.status).toBe(404);
+    });
+  });
+
+  describe('GET /api/auth/me/export', () => {
+    it('télécharge mes propres données (JSON en pièce jointe, non mis en cache)', async () => {
+      mockExportPersonalData.mockResolvedValue({ account: { id: TEST_USER_ID } });
+
+      const res = await request(app).get('/api/auth/me/export');
+
+      expect(res.status).toBe(200);
+      expect(mockExportPersonalData).toHaveBeenCalledWith(TEST_USER_ID);
+      expect(res.headers['content-disposition']).toMatch(/attachment/);
+      expect(res.headers['cache-control']).toBe('no-store');
+      expect(res.body.data.account.id).toBe(TEST_USER_ID);
     });
   });
 

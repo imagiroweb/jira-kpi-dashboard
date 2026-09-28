@@ -83,7 +83,7 @@ export class NodemailerEmailService {
         // En développement, afficher le lien dans les logs pour pouvoir tester sans SMTP
         logger.warn('======================================================');
         logger.warn('SMTP non configuré — MODE DÉVELOPPEMENT');
-        logger.warn(`Lien de réinitialisation pour ${to.email} :`);
+        logger.warn('Lien de réinitialisation :');
         logger.warn(resetUrl);
         logger.warn('======================================================');
         return true;
@@ -192,7 +192,7 @@ Conformément au RGPD, vos données ne sont pas partagées avec des tiers.`;
         html,
         text
       });
-      logger.info(`Email de réinitialisation envoyé à : ${to.email}`);
+      logger.info('Email de réinitialisation envoyé');
       return true;
     } catch (error) {
       logSmtpFailure('Échec envoi email SMTP', error);

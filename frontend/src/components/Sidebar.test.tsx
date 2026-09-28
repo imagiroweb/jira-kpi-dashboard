@@ -30,9 +30,12 @@ vi.mock('../services/api', () => ({
 }));
 
 const mockAuthLogout = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+const mockExportMyData = vi.hoisted(() => vi.fn());
 vi.mock('../services/authApi', () => ({
-  authApi: { logout: mockAuthLogout },
+  authApi: { logout: mockAuthLogout, exportMyData: mockExportMyData },
 }));
+const mockDownloadJson = vi.hoisted(() => vi.fn());
+vi.mock('../utils/downloadJson', () => ({ downloadJson: mockDownloadJson, personalDataFilename: () => 'donnees.json' }));
 
 vi.mock('../hooks/useSocketContext', () => ({
   useSocketContext: () => socketCtx,
@@ -168,6 +171,15 @@ describe('Sidebar', () => {
       '3 projet(s) synchronisé(s)'
     );
     expect(useStore.getState().kpiRefreshTrigger).toBeGreaterThan(initialTrigger);
+  });
+
+  it('exporte mes données personnelles (RGPD)', async () => {
+    mockExportMyData.mockResolvedValue({ account: { id: 'me' } });
+    renderWithProviders(<Sidebar currentPage="dashboard" onNavigate={onNavigate} />, { user: TEST_USER, socket: true });
+
+    fireEvent.click(screen.getByTitle('Exporter mes données personnelles'));
+
+    await waitFor(() => expect(mockDownloadJson).toHaveBeenCalledWith({ account: { id: 'me' } }, 'donnees.json'));
   });
 
   it('déconnecte l’utilisateur après confirmation (et efface le cookie de session)', async () => {

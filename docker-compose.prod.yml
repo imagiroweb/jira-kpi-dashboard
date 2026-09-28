@@ -40,6 +40,12 @@ services:
   backend:
     image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/jira-kpi-backend:latest
     container_name: jira-kpi-backend
+    # Logs console Docker bornés (volume et ancienneté limités, données personnelles minimisées)
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     restart: unless-stopped
     ports:
       - "3001:3001"

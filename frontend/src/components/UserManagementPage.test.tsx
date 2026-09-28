@@ -7,6 +7,9 @@ import { resetStore } from '@/test/mocks/store';
 import type { User } from '../store/useStore';
 
 vi.mock('../services/authApi', () => ({ authApi: createAuthApiMock() }));
+vi.mock('./RetentionSettingsPanel', () => ({ RetentionSettingsPanel: () => null }));
+const mockDownloadJson = vi.hoisted(() => vi.fn());
+vi.mock('../utils/downloadJson', () => ({ downloadJson: mockDownloadJson, personalDataFilename: () => 'donnees.json' }));
 
 import { authApi } from '../services/authApi';
 import { UserManagementPage } from './UserManagementPage';
@@ -18,6 +21,8 @@ const mockGetUserPageStats = vi.mocked(authApi.getUserPageStats);
 const mockUpdateRole = vi.mocked(authApi.updateRole);
 const mockCreateRole = vi.mocked(authApi.createRole);
 const mockSetUserActive = vi.mocked(authApi.setUserActive);
+const mockDeleteUser = vi.mocked(authApi.deleteUser);
+const mockExportUserData = vi.mocked(authApi.exportUserData);
 
 const SUPER_ADMIN: User = {
   ...TEST_USER,
@@ -227,6 +232,44 @@ describe('UserManagementPage', () => {
     const drawer = screen.getByRole('heading', { name: 'Activité utilisateur' }).closest('[aria-modal="true"]')!;
     expect(within(drawer as HTMLElement).getByText('60%')).toBeInTheDocument();
     expect(within(drawer as HTMLElement).getByText('Logs de navigation')).toBeInTheDocument();
+  });
+
+  async function openAliceDrawer() {
+    mockGetUserLogs.mockResolvedValue([]);
+    mockGetUserPageStats.mockResolvedValue({ pages: {}, total: 0, percentages: {}, daily: [] });
+    renderWithProviders(<UserManagementPage />, { user: SUPER_ADMIN });
+    fireEvent.click(await screen.findByText('alice@test.com'));
+    await screen.findByRole('heading', { name: 'Activité utilisateur' });
+  }
+
+  it('exporte les données d’un collaborateur depuis le drawer', async () => {
+    mockExportUserData.mockResolvedValue({ account: { email: 'alice@test.com' } });
+    await openAliceDrawer();
+
+    fireEvent.click(screen.getByRole('button', { name: /exporter ses données/i }));
+
+    await waitFor(() => expect(mockDownloadJson).toHaveBeenCalledWith({ account: { email: 'alice@test.com' } }, 'donnees.json'));
+    expect(mockExportUserData).toHaveBeenCalledWith('u1');
+  });
+
+  it('efface un compte après ressaisie de son email et le retire de la liste', async () => {
+    mockDeleteUser.mockResolvedValue(undefined);
+    vi.spyOn(window, 'prompt').mockReturnValue(' alice@test.com ');
+    await openAliceDrawer();
+
+    fireEvent.click(screen.getByRole('button', { name: /effacer le compte/i }));
+
+    await waitFor(() => expect(mockDeleteUser).toHaveBeenCalledWith('u1', 'alice@test.com'));
+    await waitFor(() => expect(screen.queryByText('alice@test.com')).not.toBeInTheDocument());
+  });
+
+  it('n’efface rien si la confirmation est annulée', async () => {
+    vi.spyOn(window, 'prompt').mockReturnValue(null);
+    await openAliceDrawer();
+
+    fireEvent.click(screen.getByRole('button', { name: /effacer le compte/i }));
+
+    expect(mockDeleteUser).not.toHaveBeenCalled();
   });
 
   it('ouvre la modale de toutes les connexions depuis le drawer', async () => {

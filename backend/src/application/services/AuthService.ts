@@ -385,7 +385,7 @@ export class AuthService {
       });
       const userWithPerms = await this.buildUserWithPermissions(user);
 
-      logger.info(`User logged in: ${email}`);
+      logger.info(`Connexion (mot de passe) : utilisateur ${user._id}`);
 
       return {
         success: true,
@@ -710,7 +710,7 @@ export class AuthService {
         meta: { emailSent: true }
       });
 
-      logger.info(`Demande de réinitialisation de mot de passe pour : ${user.email}`);
+      logger.info(`Demande de réinitialisation de mot de passe : utilisateur ${user._id}`);
       return { success: true };
     } catch (error) {
       logger.error('requestPasswordReset error:', error);
@@ -761,7 +761,7 @@ export class AuthService {
         timestamp: new Date()
       });
 
-      logger.info(`Mot de passe réinitialisé pour : ${user.email}`);
+      logger.info(`Mot de passe réinitialisé : utilisateur ${userId}`);
       return { success: true };
     } catch (error) {
       logger.error('resetPassword error:', error);
