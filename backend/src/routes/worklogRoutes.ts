@@ -600,7 +600,7 @@ router.post('/support-snapshot', requirePage('support'), async (req: Request, re
       notes
     });
 
-    logger.info(`Support snapshot saved: ${sprintName} by ${req.user!.email}`);
+    logger.info(`Support snapshot saved: ${sprintName} by user ${req.user!.userId}`);
 
     res.status(201).json({
       success: true,
@@ -719,7 +719,7 @@ router.delete('/support-snapshot/:id', requirePage('support'), async (req: Reque
       });
     }
 
-    logger.info(`Support snapshot deleted: ${snapshot.sprintName} by ${req.user!.email}`);
+    logger.info(`Support snapshot deleted: ${snapshot.sprintName} by user ${req.user!.userId}`);
 
     res.json({
       success: true,

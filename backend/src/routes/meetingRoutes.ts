@@ -149,7 +149,7 @@ router.get('/latest', authenticate, async (req: Request, res: Response) => {
       ...buildDefaultMeeting(today()),
       createdBy: author(req)
     });
-    logger.info(`Weekly meeting created (first one) by ${req.user!.email}`);
+    logger.info(`Weekly meeting created (first one) by user ${req.user!.userId}`);
     res.status(201).json({ success: true, meeting: serialize(created) });
   } catch (error) {
     logger.error('Error fetching latest weekly meeting:', error);
@@ -189,7 +189,7 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       createdBy: author(req)
     });
 
-    logger.info(`Weekly meeting created by ${req.user!.email}`);
+    logger.info(`Weekly meeting created by user ${req.user!.userId}`);
     res.status(201).json({ success: true, meeting: serialize(meeting) });
   } catch (error) {
     logger.error('Error creating weekly meeting:', error);
@@ -217,7 +217,7 @@ router.post('/:id/next', authenticate, async (req: Request, res: Response) => {
       createdBy: author(req)
     });
 
-    logger.info(`Weekly meeting rolled over by ${req.user!.email}`);
+    logger.info(`Weekly meeting rolled over by user ${req.user!.userId}`);
     res.status(201).json({ success: true, meeting: serialize(meeting) });
   } catch (error) {
     logger.error('Error rolling over weekly meeting:', error);
@@ -300,7 +300,7 @@ router.delete('/:id', authenticate, async (req: Request, res: Response) => {
     if (!meeting) {
       return fail(res, 404, 'Point hebdo non trouvé');
     }
-    logger.info(`Weekly meeting deleted by ${req.user!.email}`);
+    logger.info(`Weekly meeting deleted by user ${req.user!.userId}`);
     res.json({ success: true, message: 'Point hebdo supprimé avec succès' });
   } catch (error) {
     logger.error('Error deleting weekly meeting:', error);

@@ -496,7 +496,7 @@ router.post('/dashboard-snapshot', requirePage('dashboard'), async (req: Request
       notes
     });
 
-    logger.info(`Dashboard snapshot saved: ${sprintName} by ${req.user!.email}`);
+    logger.info(`Dashboard snapshot saved: ${sprintName} by user ${req.user!.userId}`);
 
     res.status(201).json({
       success: true,
@@ -622,7 +622,7 @@ router.delete('/dashboard-snapshot/:id', requirePage('dashboard'), async (req: R
       });
     }
 
-    logger.info(`Dashboard snapshot deleted: ${snapshot.sprintName} by ${req.user!.email}`);
+    logger.info(`Dashboard snapshot deleted: ${snapshot.sprintName} by user ${req.user!.userId}`);
 
     res.json({
       success: true,

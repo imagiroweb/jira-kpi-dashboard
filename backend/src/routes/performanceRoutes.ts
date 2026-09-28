@@ -261,7 +261,7 @@ router.get('/reviews/me', authenticate, async (req: Request, res: Response) => {
       team: user?.teamId ?? undefined,
       createdBy: author(req)
     });
-    logger.info(`Performance review created for ${req.user!.email} (cycle ${cycle.label})`);
+    logger.info(`Performance review created for user ${req.user!.userId} (cycle ${cycle.label})`);
 
     res.status(201).json({ success: true, review: serialize(created) });
   } catch (error) {
