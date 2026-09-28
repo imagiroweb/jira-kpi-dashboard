@@ -57,6 +57,13 @@ jest.mock('../middleware/authMiddleware', () => {
   };
 });
 
+const mockExportPersonalData = jest.fn();
+const mockAnonymizeUser = jest.fn();
+jest.mock('../application/services/personalDataService', () => ({
+  exportPersonalData: (...a: unknown[]) => mockExportPersonalData(...a),
+  anonymizeUser: (...a: unknown[]) => mockAnonymizeUser(...a),
+}));
+
 jest.mock('../domain/user/entities/User', () => ({
   User: {
     findById: (...args: unknown[]) => mockUserFindById(...args),
@@ -154,6 +161,70 @@ describe('authRoutes — admin (TI)', () => {
       role: null,
       roleName: 'Développeur',
       visiblePages: defaultPageVisibilities,
+    });
+  });
+
+  describe('Droits des personnes : export et effacement (super admin)', () => {
+    const TARGET = '507f1f77bcf86cd799439088';
+
+    function mockUsers(targetOrg: string | null, target: Record<string, unknown> = {}) {
+      mockUserFindById.mockImplementation((id: string) => ({
+        select: () => ({
+          lean: () =>
+            Promise.resolve(
+              id === TARGET
+                ? targetOrg === null
+                  ? null
+                  : { organizationId: targetOrg, email: 'Marie@Adoria.com', anonymizedAt: null, ...target }
+                : { role: isSuperAdmin ? 'super_admin' : undefined, organizationId: 'org-1' }
+            ),
+        }),
+      }));
+    }
+
+    it('GET /users/:id/export télécharge les données du collaborateur', async () => {
+      mockUsers('org-1');
+      mockExportPersonalData.mockResolvedValue({ account: { email: 'marie@adoria.com' } });
+
+      const res = await request(app).get(`/api/auth/users/${TARGET}/export`);
+
+      expect(res.status).toBe(200);
+      expect(res.headers['content-disposition']).toMatch(/attachment; filename="donnees-personnelles-/);
+      expect(res.body.data).toEqual({ account: { email: 'marie@adoria.com' } });
+    });
+
+    it('GET /users/:id/export refuse un compte d’une autre organisation', async () => {
+      mockUsers('org-2');
+      expect((await request(app).get(`/api/auth/users/${TARGET}/export`)).status).toBe(403);
+      expect(mockExportPersonalData).not.toHaveBeenCalled();
+    });
+
+    it('DELETE /users/:id anonymise après confirmation par l’email', async () => {
+      mockUsers('org-1');
+      mockAnonymizeUser.mockResolvedValue({ userId: TARGET, activityLogsDeleted: 3, performanceReviewsDeleted: 1 });
+
+      const res = await request(app).delete(`/api/auth/users/${TARGET}`).send({ confirmEmail: 'marie@adoria.com' });
+
+      expect(res.status).toBe(200);
+      expect(mockAnonymizeUser).toHaveBeenCalledWith(TARGET, 'request');
+      expect(res.body.report.performanceReviewsDeleted).toBe(1);
+    });
+
+    it('DELETE /users/:id refuse un email de confirmation erroné, son propre compte, un compte déjà effacé', async () => {
+      mockUsers('org-1');
+      expect((await request(app).delete(`/api/auth/users/${TARGET}`).send({ confirmEmail: 'autre@adoria.com' })).status).toBe(400);
+      expect((await request(app).delete(`/api/auth/users/${TEST_USER_ID}`).send({ confirmEmail: 'x@y.fr' })).status).toBe(400);
+      expect((await request(app).delete(`/api/auth/users/${TARGET}`).send({})).status).toBe(400);
+      mockUsers('org-1', { anonymizedAt: new Date() });
+      expect((await request(app).delete(`/api/auth/users/${TARGET}`).send({ confirmEmail: 'marie@adoria.com' })).status).toBe(409);
+      expect(mockAnonymizeUser).not.toHaveBeenCalled();
+    });
+
+    it('réservé au super admin', async () => {
+      isSuperAdmin = false;
+      mockUsers('org-1');
+      expect((await request(app).delete(`/api/auth/users/${TARGET}`).send({ confirmEmail: 'marie@adoria.com' })).status).toBe(403);
+      expect((await request(app).get(`/api/auth/users/${TARGET}/export`)).status).toBe(403);
     });
   });
 

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { ShieldCheck, Users, Loader2, Save, Plus, X, LogIn, ChevronRight, BarChart3, LayoutDashboard, KeyRound, CheckCircle2, XCircle, Mail, Archive } from 'lucide-react';
+import { ShieldCheck, Users, Loader2, Save, Plus, X, LogIn, ChevronRight, BarChart3, LayoutDashboard, KeyRound, CheckCircle2, XCircle, Mail, Archive, Download, Trash2 } from 'lucide-react';
 import {
   BarChart,
   Bar,
@@ -14,6 +14,7 @@ import { IntegrationSettingsPanel } from './IntegrationSettingsPanel';
 import { useStore } from '../store/useStore';
 import { InviteLocalUserForm } from './InviteLocalUserForm';
 import { RetentionSettingsPanel } from './RetentionSettingsPanel';
+import { downloadJson, personalDataFilename } from '../utils/downloadJson';
 
 const PAGE_LABELS: Record<keyof VisiblePages, string> = {
   dashboard: 'Dashboard',
@@ -145,6 +146,33 @@ export function UserManagementPage() {
   useEffect(() => {
     if (isSuperAdmin) load();
   }, [isSuperAdmin]);
+
+  const handleExportUser = async (u: UserWithRoleDto) => {
+    try {
+      downloadJson(await authApi.exportUserData(u.id), personalDataFilename());
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } }; message?: string };
+      setError(err?.response?.data?.error || err?.message || 'Export impossible');
+    }
+  };
+
+  /** Droit à l'effacement : anonymisation irréversible, confirmée en ressaisissant l'email. */
+  const handleDeleteUser = async (u: UserWithRoleDto) => {
+    const typed = window.prompt(
+      `Effacer définitivement le compte ${u.email} ?\n\n` +
+        'Son identité est anonymisée, ses fiches de performance et ses logs d’activité sont supprimés. ' +
+        'Cette action est irréversible.\n\nPour confirmer, saisissez son email :'
+    );
+    if (typed === null) return;
+    try {
+      await authApi.deleteUser(u.id, typed.trim());
+      setUsers((prev) => prev.filter((x) => x.id !== u.id));
+      closeDrawer();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } }; message?: string };
+      setError(err?.response?.data?.error || err?.message || 'Effacement impossible');
+    }
+  };
 
   const handleToggleActive = async (u: UserWithRoleDto) => {
     const next = !u.isActive;
@@ -547,6 +575,26 @@ export function UserManagementPage() {
               >
                 <X className="w-5 h-5" />
               </button>
+            </div>
+            <div className="px-4 py-3 border-b border-surface-700/50 flex flex-wrap gap-2" aria-label="Données personnelles">
+              <button
+                type="button"
+                onClick={() => void handleExportUser(drawerUser)}
+                className="btn-secondary px-3 py-1.5 text-xs"
+              >
+                <Download className="w-4 h-4" />
+                Exporter ses données
+              </button>
+              {drawerUser.id !== user?.id && (
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteUser(drawerUser)}
+                  className="px-3 py-1.5 text-xs rounded-lg border border-red-500/40 text-red-400 hover:bg-red-500/10 inline-flex items-center gap-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Effacer le compte
+                </button>
+              )}
             </div>
             <div className="flex-1 overflow-y-auto p-4">
               {drawerLogsLoading ? (

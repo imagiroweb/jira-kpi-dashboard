@@ -258,6 +258,30 @@ export const authApi = {
   },
 
   /**
+   * Export de mes données personnelles (RGPD, accès / portabilité).
+   */
+  async exportMyData(): Promise<Record<string, unknown>> {
+    const response = await api.get<{ success: boolean; data: Record<string, unknown> }>('/api/auth/me/export');
+    return response.data.data;
+  },
+
+  /**
+   * Export des données d'un collaborateur (super_admin only, demande d'accès).
+   */
+  async exportUserData(userId: string): Promise<Record<string, unknown>> {
+    const response = await api.get<{ success: boolean; data: Record<string, unknown> }>(`/api/auth/users/${userId}/export`);
+    return response.data.data;
+  },
+
+  /**
+   * Effacement d'un compte : anonymisation irréversible (super_admin only). `confirmEmail` doit
+   * être l'email du compte (garde-fou).
+   */
+  async deleteUser(userId: string, confirmEmail: string): Promise<void> {
+    await api.delete(`/api/auth/users/${userId}`, { data: { confirmEmail } });
+  },
+
+  /**
    * Active / désactive un compte (super_admin only). La désactivation révoque ses sessions.
    */
   async setUserActive(userId: string, isActive: boolean): Promise<boolean> {

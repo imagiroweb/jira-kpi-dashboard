@@ -13,6 +13,9 @@ export function createAuthApiMock() {
     getUsersAndRoles: vi.fn(),
     updateUserRole: vi.fn(),
     setUserActive: vi.fn(),
+    exportMyData: vi.fn(),
+    exportUserData: vi.fn(),
+    deleteUser: vi.fn(),
     getRoles: vi.fn(),
     getIntegrationSettings: vi.fn().mockResolvedValue({
       jiraUrl: '',

@@ -12,6 +12,7 @@ import { Role, IPageVisibilities, PAGE_IDS } from '../domain/user/entities/Role'
 import { UserActivityLog } from '../domain/user/entities/UserActivityLog';
 import { parseRoadmapAdoria2026Filters } from '../domain/user/parseRoadmapAdoria2026Filters';
 import { clearSessionCookie, setSessionCookie } from '../config/sessionCookie';
+import { anonymizeUser, exportPersonalData } from '../application/services/personalDataService';
 import { sanitizeMicrosoftAccessToken } from '../utils/sanitizeMicrosoftAccessToken';
 import { microsoftIdTokenVerifier, MicrosoftTokenError } from '../infrastructure/microsoft/MicrosoftIdTokenVerifier';
 
@@ -620,7 +621,8 @@ router.post(
  */
 router.get('/users', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
-    const users = await User.find().select('-password').populate('roleId', 'name').lean();
+    // Comptes anonymisés (effacés) exclus de la liste
+    const users = await User.find({ anonymizedAt: null }).select('-password').populate('roleId', 'name').lean();
     const roles = await Role.find().lean();
     const list = users.map((u: {
       _id: { toString: () => string };
@@ -874,6 +876,114 @@ router.patch(
   }
 );
 
+/** Un super admin n'agit que sur les comptes de sa propre organisation. */
+async function checkSameOrganization(adminId: string, targetId: string): Promise<'ok' | 'not_found' | 'other_org'> {
+  const [admin, target] = await Promise.all([
+    User.findById(adminId).select('organizationId').lean(),
+    User.findById(targetId).select('organizationId').lean()
+  ]);
+  if (!target) return 'not_found';
+  if (String(admin?.organizationId ?? '') !== String(target.organizationId ?? '')) return 'other_org';
+  return 'ok';
+}
+
+function sendOrganizationCheckError(res: Response, check: 'not_found' | 'other_org') {
+  return check === 'not_found'
+    ? res.status(404).json({ success: false, error: 'Utilisateur non trouvé' })
+    : res.status(403).json({ success: false, error: 'Utilisateur d’une autre organisation' });
+}
+
+function sendPersonalDataExport(res: Response, data: Record<string, unknown>) {
+  const date = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Disposition', `attachment; filename="donnees-personnelles-${date}.json"`);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ success: true, data });
+}
+
+/**
+ * @swagger
+ * /api/auth/me/export:
+ *   get:
+ *     summary: Export de mes données personnelles (RGPD, droits d'accès et de portabilité)
+ *     tags: [Authentication]
+ */
+router.get('/me/export', authenticate, async (req: Request, res: Response) => {
+  try {
+    const data = await exportPersonalData(req.user!.userId);
+    if (!data) return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
+    logger.info(`Export des données personnelles par l'utilisateur ${req.user!.userId}`);
+    sendPersonalDataExport(res, data);
+  } catch (error) {
+    logger.error('Personal data export error:', error);
+    res.status(500).json({ success: false, error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/auth/users/{id}/export:
+ *   get:
+ *     summary: Export des données personnelles d'un collaborateur (super admin, demande d'accès)
+ *     tags: [Admin]
+ */
+router.get('/users/:id/export', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ success: false, error: 'Identifiant invalide' });
+    const check = await checkSameOrganization(req.user!.userId, id);
+    if (check !== 'ok') return sendOrganizationCheckError(res, check);
+    const data = await exportPersonalData(id);
+    if (!data) return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
+    logger.info(`Export des données personnelles du compte ${id} par ${req.user!.userId}`);
+    sendPersonalDataExport(res, data);
+  } catch (error) {
+    logger.error('Personal data export (admin) error:', error);
+    res.status(500).json({ success: false, error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/auth/users/{id}:
+ *   delete:
+ *     summary: Effacement d'un compte (anonymisation irréversible, RGPD art. 17) — super admin
+ *     description: Le corps doit contenir `confirmEmail` égal à l'email du compte (garde-fou).
+ *     tags: [Admin]
+ */
+router.delete(
+  '/users/:id',
+  authenticate,
+  requireSuperAdmin,
+  [body('confirmEmail').isString().notEmpty().withMessage('confirmEmail requis')],
+  async (req: Request, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array().map((e: { msg?: string }) => e.msg) });
+      }
+      const { id } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ success: false, error: 'Identifiant invalide' });
+      if (id === req.user!.userId) {
+        return res.status(400).json({ success: false, error: 'Vous ne pouvez pas effacer votre propre compte' });
+      }
+      const check = await checkSameOrganization(req.user!.userId, id);
+      if (check !== 'ok') return sendOrganizationCheckError(res, check);
+      const target = await User.findById(id).select('email anonymizedAt').lean();
+      if (!target) return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
+      if (target.anonymizedAt) return res.status(409).json({ success: false, error: 'Compte déjà anonymisé' });
+      if (String(req.body.confirmEmail).trim().toLowerCase() !== target.email.toLowerCase()) {
+        return res.status(400).json({ success: false, error: 'L’email de confirmation ne correspond pas au compte' });
+      }
+      const report = await anonymizeUser(id, 'request');
+      logger.info(`Effacement du compte ${id} demandé par ${req.user!.userId}`);
+      res.json({ success: true, report });
+    } catch (error) {
+      logger.error('Delete user error:', error);
+      res.status(500).json({ success: false, error: 'Erreur serveur' });
+    }
+  }
+);
+
 /**
  * @swagger
  * /api/auth/users/{id}/status:
@@ -901,14 +1011,8 @@ router.patch(
       if (id === req.user!.userId) {
         return res.status(400).json({ success: false, error: 'Vous ne pouvez pas désactiver votre propre compte' });
       }
-      const [admin, target] = await Promise.all([
-        User.findById(req.user!.userId).select('organizationId').lean(),
-        User.findById(id).select('organizationId').lean()
-      ]);
-      if (!target) return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
-      if (String(admin?.organizationId ?? '') !== String(target.organizationId ?? '')) {
-        return res.status(403).json({ success: false, error: 'Utilisateur d’une autre organisation' });
-      }
+      const check = await checkSameOrganization(req.user!.userId, id);
+      if (check !== 'ok') return sendOrganizationCheckError(res, check);
       const isActive = req.body.isActive === true || req.body.isActive === 'true';
       await User.updateOne(
         { _id: id },
