@@ -27,7 +27,7 @@ import { teamRoutes } from './routes/teamRoutes';
 import { costRoutes } from './routes/costRoutes';
 import { organizationRoutes } from './routes/organizationRoutes';
 import { registerAccountAnonymizer, startRetentionSchedule } from './application/services/retentionService';
-import { anonymizeUser } from './application/services/personalDataService';
+import { anonymizePerformanceReviews, anonymizeUser } from './application/services/personalDataService';
 import { setupSocketHandlers } from './websocket/socketHandler';
 import { createOriginCheck } from './middleware/originCheck';
 import { describeMongoUri } from './config/mongoUri';
@@ -260,7 +260,7 @@ httpServer.listen(PORT, HOST, () => {
   schedulerService.initialize(io);
 
   // Purge quotidienne selon les durées de conservation de chaque organisation (RGPD)
-  registerAccountAnonymizer(anonymizeUser);
+  registerAccountAnonymizer(anonymizeUser, anonymizePerformanceReviews);
   startRetentionSchedule();
 
   void emailService.verify();

@@ -9,6 +9,7 @@ import { PerformanceCycle } from '../../domain/performance/entities/PerformanceC
 import { DashboardSprintSnapshot } from '../../domain/sprint/entities/DashboardSprintSnapshot';
 import { SupportSprintSnapshot } from '../../domain/support/entities/SupportSprintSnapshot';
 import { WeeklySprintMeeting } from '../../domain/meeting/entities/WeeklySprintMeeting';
+import { anonymizeReviewContent } from '../../domain/performance/anonymizeReview';
 import { logger } from '../../utils/logger';
 
 /**
@@ -100,7 +101,27 @@ export async function exportPersonalData(userId: string): Promise<Record<string,
 export interface AnonymizationReport {
   userId: string;
   activityLogsDeleted: number;
-  performanceReviewsDeleted: number;
+  performanceReviewsAnonymized: number;
+}
+
+/**
+ * Anonymise les fiches de performance correspondant au filtre, sans les supprimer (statistiques
+ * des cycles passés conservées) : texte libre effacé, lien vers le compte rompu (identifiant
+ * aléatoire), nom de la personne remplacé là où elle est autrice. Voir `anonymizeReviewContent`.
+ */
+export async function anonymizePerformanceReviews(filter: Record<string, unknown>): Promise<number> {
+  const reviews = await PerformanceReview.find({ ...filter, anonymizedAt: null }).lean();
+  const now = new Date();
+  for (const review of reviews) {
+    const newUserId = new mongoose.Types.ObjectId();
+    const content = anonymizeReviewContent(
+      review as unknown as Parameters<typeof anonymizeReviewContent>[0],
+      String(review.user),
+      String(newUserId)
+    );
+    await PerformanceReview.updateOne({ _id: review._id }, { $set: { ...content, user: newUserId, anonymizedAt: now } });
+  }
+  return reviews.length;
 }
 
 /**
@@ -108,8 +129,8 @@ export interface AnonymizationReport {
  * désactivé). Irréversible :
  *  - compte : identité, email, identifiant SSO, mot de passe, coûts horaires et préférences
  *    effacés ; compte désactivé et sessions révoquées ; retiré des leads d'équipe ;
- *  - logs d'activité et fiches de performance de la personne supprimés (elles contiennent des
- *    évaluations et bilans en texte libre, non anonymisables de façon fiable) ;
+ *  - logs d'activité supprimés ; fiches de performance anonymisées (texte libre effacé, lien
+ *    vers le compte rompu) et conservées pour les statistiques des cycles passés ;
  *  - dans les contenus rédigés par la personne (fiches d'autres collaborateurs, points hebdo,
  *    snapshots), son nom est remplacé par « Utilisateur supprimé ».
  * Les champs en texte libre saisis par d'autres (ex. « responsable » d'une action) ne sont pas
@@ -154,7 +175,7 @@ export async function anonymizeUser(userId: string, reason: 'request' | 'retenti
 
   await Team.updateMany({ leadIds: oid }, { $pull: { leadIds: oid } });
   const logs = await UserActivityLog.deleteMany({ userId: oid });
-  const reviews = await PerformanceReview.deleteMany({ user: oid });
+  const reviewsAnonymized = await anonymizePerformanceReviews({ user: oid });
 
   // Nom de l'auteur remplacé dans les contenus rédigés pour d'autres.
   const anon = ANONYMIZED_AUTHOR_NAME;
@@ -205,11 +226,11 @@ export async function anonymizeUser(userId: string, reason: 'request' | 'retenti
   const report: AnonymizationReport = {
     userId,
     activityLogsDeleted: logs.deletedCount ?? 0,
-    performanceReviewsDeleted: reviews.deletedCount ?? 0
+    performanceReviewsAnonymized: reviewsAnonymized
   };
   logger.info(
     `Compte ${userId} anonymisé (${reason === 'request' ? 'demande d’effacement' : 'fin de durée de conservation'}) : ` +
-      `${report.activityLogsDeleted} log(s), ${report.performanceReviewsDeleted} fiche(s) supprimé(s)`
+      `${report.activityLogsDeleted} log(s) supprimé(s), ${report.performanceReviewsAnonymized} fiche(s) anonymisée(s)`
   );
   return report;
 }

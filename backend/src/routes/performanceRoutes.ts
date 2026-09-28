@@ -6,6 +6,7 @@ import os from 'os';
 import path from 'path';
 import multer from 'multer';
 import { logger } from '../utils/logger';
+import { ANONYMIZED_REVIEW_SUBJECT } from '../domain/performance/anonymizeReview';
 import { clientErrorDetail } from '../utils/clientError';
 import {
   buildImportPlanFromInterviewsDir,
@@ -105,7 +106,10 @@ function serialize(
 ) {
   return {
     id: review._id,
-    user: review.user,
+    // Fiche anonymisée : plus de compte lié (populate → null), libellé générique à l'affichage et
+    // identifiant propre à la fiche (jamais celui d'un compte).
+    user: review.user ?? { _id: `anonyme-${review._id}`, ...ANONYMIZED_REVIEW_SUBJECT },
+    anonymized: Boolean(review.anonymizedAt),
     cycle: review.cycle,
     team: teamOverride?.team ?? toIdString(review.team),
     teamNameSnapshot: teamOverride?.teamNameSnapshot ?? review.teamNameSnapshot,

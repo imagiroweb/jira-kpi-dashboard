@@ -186,6 +186,9 @@ export interface IPerformanceReview extends Document {
   definedBy?: IReviewAuthor;
   createdBy: IReviewAuthor;
   updatedBy?: IReviewAuthor;
+  /** Fiche anonymisée (effacement du compte ou fin de durée de conservation) : plus de texte libre
+   * ni de lien vers le compte de la personne ; conservée pour les statistiques. */
+  anonymizedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -322,7 +325,8 @@ const PerformanceReviewSchema = new Schema<IPerformanceReview>(
     status: { type: String, enum: PERFORMANCE_REVIEW_STATUSES, default: 'dossier_manquant' },
     definedBy: { type: ReviewAuthorSchema },
     createdBy: { type: ReviewAuthorSchema, required: true },
-    updatedBy: { type: ReviewAuthorSchema }
+    updatedBy: { type: ReviewAuthorSchema },
+    anonymizedAt: { type: Date, default: null }
   },
   { timestamps: true }
 );

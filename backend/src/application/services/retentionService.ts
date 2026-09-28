@@ -4,7 +4,6 @@ import { computeRetentionCutoffs } from '../../domain/organization/retention';
 import { User } from '../../domain/user/entities/User';
 import { UserActivityLog } from '../../domain/user/entities/UserActivityLog';
 import { PerformanceCycle } from '../../domain/performance/entities/PerformanceCycle';
-import { PerformanceReview } from '../../domain/performance/entities/PerformanceReview';
 import { logger } from '../../utils/logger';
 
 /**
@@ -14,15 +13,18 @@ import { logger } from '../../utils/logger';
 export interface OrganizationPurgeReport {
   organization: string;
   activityLogsDeleted: number;
-  performanceReviewsDeleted: number;
+  performanceReviewsAnonymized: number;
   accountsAnonymized: number;
 }
 
 /** Anonymisation d'un compte — branchée par le service d'effacement (évite une dépendance circulaire). */
 type AnonymizeFn = (userId: string, reason: 'retention') => Promise<unknown>;
+type AnonymizeReviewsFn = (filter: Record<string, unknown>) => Promise<number>;
 let anonymizeAccount: AnonymizeFn | null = null;
-export function registerAccountAnonymizer(fn: AnonymizeFn): void {
+let anonymizeReviews: AnonymizeReviewsFn | null = null;
+export function registerAccountAnonymizer(fn: AnonymizeFn, reviewsFn?: AnonymizeReviewsFn): void {
   anonymizeAccount = fn;
+  if (reviewsFn) anonymizeReviews = reviewsFn;
 }
 
 export async function purgeExpiredData(now: Date = new Date()): Promise<OrganizationPurgeReport[]> {
@@ -34,7 +36,7 @@ export async function purgeExpiredData(now: Date = new Date()): Promise<Organiza
     const report: OrganizationPurgeReport = {
       organization: org.slug,
       activityLogsDeleted: 0,
-      performanceReviewsDeleted: 0,
+      performanceReviewsAnonymized: 0,
       accountsAnonymized: 0
     };
     const userIds = (await User.find({ organizationId: org._id }).distinct('_id')) as mongoose.Types.ObjectId[];
@@ -44,11 +46,11 @@ export async function purgeExpiredData(now: Date = new Date()): Promise<Organiza
       report.activityLogsDeleted = res.deletedCount ?? 0;
     }
 
-    if (cutoffs.performanceCyclesEndedBefore && userIds.length) {
+    // Fiches des cycles anciens : anonymisées (et non supprimées) pour garder les statistiques.
+    if (cutoffs.performanceCyclesEndedBefore && userIds.length && anonymizeReviews) {
       const cycleIds = await PerformanceCycle.find({ endDate: { $lt: cutoffs.performanceCyclesEndedBefore } }).distinct('_id');
       if (cycleIds.length) {
-        const res = await PerformanceReview.deleteMany({ user: { $in: userIds }, cycle: { $in: cycleIds } });
-        report.performanceReviewsDeleted = res.deletedCount ?? 0;
+        report.performanceReviewsAnonymized = await anonymizeReviews({ user: { $in: userIds }, cycle: { $in: cycleIds } });
       }
     }
 
@@ -65,10 +67,10 @@ export async function purgeExpiredData(now: Date = new Date()): Promise<Organiza
       }
     }
 
-    if (report.activityLogsDeleted || report.performanceReviewsDeleted || report.accountsAnonymized) {
+    if (report.activityLogsDeleted || report.performanceReviewsAnonymized || report.accountsAnonymized) {
       logger.info(
         `Purge conservation (${org.slug}) : ${report.activityLogsDeleted} log(s) d'activité, ` +
-          `${report.performanceReviewsDeleted} fiche(s) de performance, ${report.accountsAnonymized} compte(s) anonymisé(s)`
+          `${report.performanceReviewsAnonymized} fiche(s) de performance anonymisée(s), ${report.accountsAnonymized} compte(s) anonymisé(s)`
       );
     }
     reports.push(report);

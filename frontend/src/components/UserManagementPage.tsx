@@ -160,7 +160,8 @@ export function UserManagementPage() {
   const handleDeleteUser = async (u: UserWithRoleDto) => {
     const typed = window.prompt(
       `Effacer définitivement le compte ${u.email} ?\n\n` +
-        'Son identité est anonymisée, ses fiches de performance et ses logs d’activité sont supprimés. ' +
+        'Son identité est effacée, ses logs d’activité supprimés et ses fiches de performance anonymisées ' +
+        '(textes libres effacés, statistiques conservées). ' +
         'Cette action est irréversible.\n\nPour confirmer, saisissez son email :'
     );
     if (typed === null) return;

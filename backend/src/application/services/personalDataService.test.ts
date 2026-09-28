@@ -14,6 +14,7 @@ const m = {
   reviewFind: jest.fn(),
   reviewDeleteMany: jest.fn(),
   reviewUpdateMany: jest.fn(),
+  reviewUpdateOne: jest.fn(),
   cycleFind: jest.fn(),
   logFind: jest.fn(),
   logDeleteMany: jest.fn(),
@@ -48,7 +49,8 @@ jest.mock('../../domain/performance/entities/PerformanceReview', () => ({
   PerformanceReview: {
     find: (...a: unknown[]) => chain(m.reviewFind)(...a),
     deleteMany: (...a: unknown[]) => m.reviewDeleteMany(...a),
-    updateMany: (...a: unknown[]) => m.reviewUpdateMany(...a)
+    updateMany: (...a: unknown[]) => m.reviewUpdateMany(...a),
+    updateOne: (...a: unknown[]) => m.reviewUpdateOne(...a)
   }
 }));
 jest.mock('../../domain/performance/entities/PerformanceCycle', () => ({
@@ -127,12 +129,32 @@ describe('exportPersonalData', () => {
 });
 
 describe('anonymizeUser', () => {
-  it('efface l’identité, révoque les sessions, supprime logs et fiches, et renomme l’auteur', async () => {
+  it('efface l’identité, révoque les sessions, supprime les logs, anonymise les fiches et renomme l’auteur', async () => {
     m.userFindById.mockResolvedValue({ _id: USER_ID });
+    m.reviewFind.mockResolvedValue([
+      {
+        _id: 'rv-old',
+        user: USER_ID,
+        cycle: 'c-2025',
+        objectives: [{ id: 'o1', title: 'Objectif', managerAssessment: { status: 'atteint', comment: 'Très bien' } }],
+        qualitative: { successes: { self: 'Mon bilan' } },
+        createdBy: { id: USER_ID, name: 'Jean Dupont' }
+      },
+      { _id: 'rv-new', user: USER_ID, cycle: 'c-2026', objectives: [], qualitative: {}, createdBy: { id: 'lead', name: 'Lead' } }
+    ]);
 
     const report = await anonymizeUser(USER_ID, 'request');
 
-    expect(report).toEqual({ userId: USER_ID, activityLogsDeleted: 7, performanceReviewsDeleted: 2 });
+    expect(report).toEqual({ userId: USER_ID, activityLogsDeleted: 7, performanceReviewsAnonymized: 2 });
+    // fiches conservées (jamais supprimées) mais anonymisées et détachées du compte
+    expect(m.reviewDeleteMany).not.toHaveBeenCalled();
+    const [reviewFilter, reviewUpdate] = m.reviewUpdateOne.mock.calls[0];
+    expect(reviewFilter).toEqual({ _id: 'rv-old' });
+    expect(reviewUpdate.$set.user).toBeInstanceOf(mongoose.Types.ObjectId);
+    expect(String(reviewUpdate.$set.user)).not.toBe(USER_ID);
+    expect(reviewUpdate.$set.anonymizedAt).toBeInstanceOf(Date);
+    expect(JSON.stringify(reviewUpdate.$set)).not.toMatch(/Très bien|Mon bilan|Jean Dupont/);
+    expect(reviewUpdate.$set.objectives[0]).toEqual(expect.objectContaining({ title: 'Objectif', managerAssessment: { status: 'atteint' } }));
     const [filter, update] = m.userUpdateOne.mock.calls[0];
     expect(filter).toEqual({ _id: USER_ID });
     expect(update.$set).toEqual(
@@ -144,7 +166,7 @@ describe('anonymizeUser', () => {
     expect(update.$inc).toEqual({ tokenVersion: 1 });
     expect(m.teamUpdateMany).toHaveBeenCalledWith({ leadIds: USER_ID }, { $pull: { leadIds: USER_ID } });
     expect(m.logDeleteMany).toHaveBeenCalledWith({ userId: USER_ID });
-    expect(m.reviewDeleteMany).toHaveBeenCalledWith({ user: USER_ID });
+    expect(m.reviewFind).toHaveBeenCalledWith({ user: USER_ID, anonymizedAt: null });
     expect(m.reviewUpdateMany).toHaveBeenCalledWith({ 'createdBy.id': USER_ID }, { $set: { 'createdBy.name': ANONYMIZED_AUTHOR_NAME } });
     expect(m.reviewUpdateMany).toHaveBeenCalledWith(
       { 'objectives.krs.progressHistory.updatedBy.id': USER_ID },

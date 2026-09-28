@@ -16,7 +16,7 @@ const FIELDS: Array<{ key: FieldKey; label: string; unit: string; help: string; 
     key: 'performanceReviewYears',
     label: 'Fiches de performance',
     unit: 'années après la fin du cycle',
-    help: 'Objectifs, évaluations et bilans supprimés à l’échéance.',
+    help: 'Anonymisées à l’échéance : textes libres effacés, lien au collaborateur rompu, statistiques conservées.',
     max: 50
   },
   {

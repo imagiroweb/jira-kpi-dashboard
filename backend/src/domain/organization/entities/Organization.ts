@@ -26,7 +26,7 @@ export interface IOrganizationSso {
 export interface IOrganizationRetention {
   /** Logs d'activité (connexions, pages vues) : supprimés au-delà de N mois. */
   activityLogMonths: number | null;
-  /** Fiches de performance : supprimées N années après la fin de leur cycle. */
+  /** Fiches de performance : anonymisées (texte libre effacé, lien au compte rompu) N années après la fin de leur cycle. */
   performanceReviewYears: number | null;
   /** Comptes désactivés : anonymisés N mois après leur désactivation. */
   inactiveAccountMonths: number | null;
