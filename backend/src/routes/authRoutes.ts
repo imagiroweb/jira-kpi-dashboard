@@ -910,7 +910,10 @@ router.patch(
         return res.status(403).json({ success: false, error: 'Utilisateur d’une autre organisation' });
       }
       const isActive = req.body.isActive === true || req.body.isActive === 'true';
-      await User.updateOne({ _id: id }, { $set: { isActive }, $inc: { tokenVersion: 1 } });
+      await User.updateOne(
+        { _id: id },
+        { $set: { isActive, deactivatedAt: isActive ? null : new Date() }, $inc: { tokenVersion: 1 } }
+      );
       logger.info(`Compte ${id} ${isActive ? 'réactivé' : 'désactivé'} par ${req.user!.userId}`);
       res.json({ success: true, isActive });
     } catch (error) {

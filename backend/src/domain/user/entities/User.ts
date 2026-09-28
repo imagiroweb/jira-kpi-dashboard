@@ -55,6 +55,10 @@ export interface IUser extends Document {
   /** Version des sessions : incrémentée pour révoquer tous les JWT émis (désactivation,
    * changement de rôle, réinitialisation du mot de passe). Comparée au claim `tv` du jeton. */
   tokenVersion?: number;
+  /** Date de désactivation du compte : point de départ de la durée de conservation avant anonymisation. */
+  deactivatedAt?: Date | null;
+  /** Compte anonymisé (droit à l'effacement ou fin de durée de conservation) : plus aucune donnée personnelle. */
+  anonymizedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -192,6 +196,14 @@ const UserSchema = new Schema<IUser>(
     tokenVersion: {
       type: Number,
       default: 0
+    },
+    deactivatedAt: {
+      type: Date,
+      default: null
+    },
+    anonymizedAt: {
+      type: Date,
+      default: null
     }
   },
   {

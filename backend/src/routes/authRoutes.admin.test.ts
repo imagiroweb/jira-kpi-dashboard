@@ -183,7 +183,10 @@ describe('authRoutes — admin (TI)', () => {
 
       expect(res.status).toBe(200);
       expect(res.body).toEqual({ success: true, isActive: false });
-      expect(mockUserUpdateOne).toHaveBeenCalledWith({ _id: TARGET }, { $set: { isActive: false }, $inc: { tokenVersion: 1 } });
+      expect(mockUserUpdateOne).toHaveBeenCalledWith(
+        { _id: TARGET },
+        { $set: { isActive: false, deactivatedAt: expect.any(Date) }, $inc: { tokenVersion: 1 } }
+      );
     });
 
     it('refuse de désactiver son propre compte', async () => {

@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { ShieldCheck, Users, Loader2, Save, Plus, X, LogIn, ChevronRight, BarChart3, LayoutDashboard, KeyRound, CheckCircle2, XCircle, Mail } from 'lucide-react';
+import { ShieldCheck, Users, Loader2, Save, Plus, X, LogIn, ChevronRight, BarChart3, LayoutDashboard, KeyRound, CheckCircle2, XCircle, Mail, Archive } from 'lucide-react';
 import {
   BarChart,
   Bar,
@@ -13,6 +13,7 @@ import { authApi, UserWithRoleDto, RoleDto, VisiblePages, UserActivityLogEntry }
 import { IntegrationSettingsPanel } from './IntegrationSettingsPanel';
 import { useStore } from '../store/useStore';
 import { InviteLocalUserForm } from './InviteLocalUserForm';
+import { RetentionSettingsPanel } from './RetentionSettingsPanel';
 
 const PAGE_LABELS: Record<keyof VisiblePages, string> = {
   dashboard: 'Dashboard',
@@ -53,7 +54,7 @@ export function UserManagementPage() {
   const [allLogsLoading, setAllLogsLoading] = useState(false);
   const [pageStats, setPageStats] = useState<{ pages: Record<string, number>; total: number; percentages: Record<string, number> } | null>(null);
   const [pageStatsLoading, setPageStatsLoading] = useState(false);
-  const [sectionFilter, setSectionFilter] = useState<'users' | 'rights' | 'connections' | null>(null);
+  const [sectionFilter, setSectionFilter] = useState<'users' | 'rights' | 'connections' | 'privacy' | null>(null);
 
   const isSuperAdmin = user?.role === 'super_admin' || user?.visiblePages?.gestionUtilisateurs;
 
@@ -289,6 +290,13 @@ export function UserManagementPage() {
                 activeClass: 'bg-cyan-500/20 border-cyan-500/50 text-cyan-200',
                 iconClass: 'text-cyan-400',
               },
+              {
+                id: 'privacy' as const,
+                label: 'Données personnelles',
+                Icon: Archive,
+                activeClass: 'bg-emerald-500/20 border-emerald-500/50 text-emerald-200',
+                iconClass: 'text-emerald-400',
+              },
             ]
           ).map((section) => {
             const selected = sectionFilter === section.id;
@@ -496,6 +504,14 @@ export function UserManagementPage() {
         <div hidden={sectionFilter !== null && sectionFilter !== 'connections'}>
           <IntegrationSettingsPanel />
         </div>
+
+        <section className="mt-10" hidden={sectionFilter !== null && sectionFilter !== 'privacy'}>
+          <h2 className="text-lg font-semibold text-surface-200 mb-4 flex items-center gap-2">
+            <Archive className="w-5 h-5 text-emerald-400" />
+            Données personnelles
+          </h2>
+          <RetentionSettingsPanel />
+        </section>
       </div>
 
               {/* Drawer activité utilisateur */}

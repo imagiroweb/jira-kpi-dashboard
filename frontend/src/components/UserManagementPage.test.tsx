@@ -7,6 +7,7 @@ import { resetStore } from '@/test/mocks/store';
 import type { User } from '../store/useStore';
 
 vi.mock('../services/authApi', () => ({ authApi: createAuthApiMock() }));
+vi.mock('./RetentionSettingsPanel', () => ({ RetentionSettingsPanel: () => null }));
 
 import { authApi } from '../services/authApi';
 import { UserManagementPage } from './UserManagementPage';

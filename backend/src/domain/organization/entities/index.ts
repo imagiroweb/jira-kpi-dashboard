@@ -1,2 +1,2 @@
-export { Organization, isTenantId } from './Organization';
-export type { IOrganization, IOrganizationSso, SsoProvider } from './Organization';
+export { Organization, isTenantId, DEFAULT_RETENTION } from './Organization';
+export type { IOrganization, IOrganizationSso, IOrganizationRetention, SsoProvider } from './Organization';

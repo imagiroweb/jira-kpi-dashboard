@@ -25,6 +25,8 @@ import { meetingRoutes } from './routes/meetingRoutes';
 import { performanceRoutes } from './routes/performanceRoutes';
 import { teamRoutes } from './routes/teamRoutes';
 import { costRoutes } from './routes/costRoutes';
+import { organizationRoutes } from './routes/organizationRoutes';
+import { startRetentionSchedule } from './application/services/retentionService';
 import { setupSocketHandlers } from './websocket/socketHandler';
 import { createOriginCheck } from './middleware/originCheck';
 import { describeMongoUri } from './config/mongoUri';
@@ -223,6 +225,7 @@ app.use('/api/meetings', meetingRoutes);
 app.use('/api/performance', performanceRoutes);
 app.use('/api/teams', teamRoutes);
 app.use('/api/costs', costRoutes);
+app.use('/api/organizations', organizationRoutes);
 
 // Setup WebSocket handlers
 setupSocketHandlers(io);
@@ -254,6 +257,9 @@ httpServer.listen(PORT, HOST, () => {
   
   // Initialize scheduler for automatic sync with WebSocket notifications
   schedulerService.initialize(io);
+
+  // Purge quotidienne selon les durées de conservation de chaque organisation (RGPD)
+  startRetentionSchedule();
 
   void emailService.verify();
 });

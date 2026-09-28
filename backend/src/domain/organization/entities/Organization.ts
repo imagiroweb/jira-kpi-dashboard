@@ -19,6 +19,25 @@ export interface IOrganizationSso {
   tenantId: string;
 }
 
+/**
+ * Durées de conservation (RGPD art. 5.1.e), propres à chaque organisation. `null` = pas de purge
+ * automatique (durée non encore fixée par l'organisation : à définir avec les RH / le DPO).
+ */
+export interface IOrganizationRetention {
+  /** Logs d'activité (connexions, pages vues) : supprimés au-delà de N mois. */
+  activityLogMonths: number | null;
+  /** Fiches de performance : supprimées N années après la fin de leur cycle. */
+  performanceReviewYears: number | null;
+  /** Comptes désactivés : anonymisés N mois après leur désactivation. */
+  inactiveAccountMonths: number | null;
+}
+
+export const DEFAULT_RETENTION: IOrganizationRetention = {
+  activityLogMonths: 12,
+  performanceReviewYears: null,
+  inactiveAccountMonths: null
+};
+
 export interface IOrganization extends Document {
   name: string;
   /** Identifiant stable et lisible (ex. `adoria`), utilisé par les scripts d'administration. */
@@ -30,6 +49,7 @@ export interface IOrganization extends Document {
   allowedEmailDomains: string[];
   /** Autorise la connexion par email/mot de passe (comptes créés par un administrateur). */
   allowLocalAccounts: boolean;
+  retention: IOrganizationRetention;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -70,7 +90,12 @@ const OrganizationSchema = new Schema<IOrganization>(
       type: [{ type: String, trim: true, lowercase: true }],
       default: []
     },
-    allowLocalAccounts: { type: Boolean, default: false }
+    allowLocalAccounts: { type: Boolean, default: false },
+    retention: {
+      activityLogMonths: { type: Number, min: 1, max: 120, default: DEFAULT_RETENTION.activityLogMonths },
+      performanceReviewYears: { type: Number, min: 1, max: 50, default: DEFAULT_RETENTION.performanceReviewYears },
+      inactiveAccountMonths: { type: Number, min: 1, max: 120, default: DEFAULT_RETENTION.inactiveAccountMonths }
+    }
   },
   { timestamps: true }
 );
