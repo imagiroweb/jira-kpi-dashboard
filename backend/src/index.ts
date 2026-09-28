@@ -33,6 +33,7 @@ import { createOriginCheck } from './middleware/originCheck';
 import { describeMongoUri } from './config/mongoUri';
 import { resolveMasterKey } from './config/dataEncryption';
 import { initKeyring } from './infrastructure/crypto/keyringService';
+import { migrateLegacyPlaintext } from './application/services/encryptionMigration';
 import { decryptingJsonReplacer } from './infrastructure/crypto/mongooseEncryption';
 
 // Clé maître de chiffrement des données : obligatoire, le serveur ne démarre pas sans.
@@ -53,8 +54,10 @@ const connectMongoDB = async () => {
     logger.info('MongoDB connected successfully');
     try {
       await initKeyring(dataMasterKey);
+      // Données historiques en clair → chiffrées (idempotent) ; requis avant toute connexion (emailHash).
+      await migrateLegacyPlaintext();
     } catch (error) {
-      // Mauvaise clé maître : ne jamais servir de requêtes (données illisibles / clés incohérentes).
+      // Mauvaise clé maître ou migration impossible : ne jamais servir de requêtes (données incohérentes).
       logger.error(`Chiffrement : ${(error as Error).message}`);
       process.exit(1);
     }

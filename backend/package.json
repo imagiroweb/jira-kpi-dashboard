@@ -18,7 +18,9 @@
     "import:general-assessment:run": "ts-node src/scripts/import-okr/runGeneralAssessmentImport.ts",
     "import:general-assessment-referential:seed": "ts-node src/scripts/import-okr/seedGeneralAssessmentReferential.ts",
     "organization:upsert": "ts-node src/scripts/admin/upsertOrganization.ts",
-    "admin:bootstrap": "ts-node src/scripts/admin/bootstrapAdmin.ts"
+    "admin:bootstrap": "ts-node src/scripts/admin/bootstrapAdmin.ts",
+    "encryption:status": "ts-node src/scripts/admin/encryptionStatus.ts",
+    "encryption:rotate-master-key": "ts-node src/scripts/admin/rotateMasterKey.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",
