@@ -1,4 +1,9 @@
 import mongoose, { Document, Schema } from 'mongoose';
+import {
+  decryptOnSerialize,
+  encryptedString,
+  withEncryptedFields
+} from '../../../infrastructure/crypto/mongooseEncryption';
 
 /**
  * Fiche de performance d'un collaborateur pour un cycle donné (une par
@@ -205,8 +210,8 @@ const ReviewAuthorSchema = new Schema<IReviewAuthor>(
 const ProgressUpdateSchema = new Schema<IProgressUpdate>(
   {
     value: { type: Number, required: true, min: 0, max: 100 },
-    note: { type: String, trim: true },
-    evidenceUrl: { type: String, trim: true },
+    note: encryptedString({ trim: true }),
+    evidenceUrl: encryptedString({ trim: true }),
     updatedBy: { type: ReviewAuthorSchema, required: true },
     updatedAt: { type: Date, required: true, default: Date.now }
   },
@@ -227,8 +232,8 @@ const KeyResultSchema = new Schema<IKeyResult>(
 const ObjectiveAssessmentSchema = new Schema<IObjectiveAssessment>(
   {
     status: { type: String, enum: OBJECTIVE_ASSESSMENT_STATUSES },
-    comment: { type: String, trim: true },
-    coachingAction: { type: String, trim: true }
+    comment: encryptedString({ trim: true }),
+    coachingAction: encryptedString({ trim: true })
   },
   { _id: false }
 );
@@ -236,7 +241,7 @@ const ObjectiveAssessmentSchema = new Schema<IObjectiveAssessment>(
 const ObjectiveActionSchema = new Schema<IObjectiveAction>(
   {
     id: { type: String, required: true },
-    label: { type: String, required: true, trim: true },
+    label: { ...encryptedString({ trim: true }), required: true },
     status: { type: String, enum: OBJECTIVE_ACTION_STATUSES, default: 'a_faire' },
     dueDate: { type: Date },
     createdBy: { type: ReviewAuthorSchema, required: true },
@@ -265,8 +270,8 @@ const ObjectiveSchema = new Schema<IObjective>(
 
 const QualitativeEntrySchema = new Schema<IQualitativeEntry>(
   {
-    self: { type: String, trim: true },
-    manager: { type: String, trim: true }
+    self: encryptedString({ trim: true }),
+    manager: encryptedString({ trim: true })
   },
   { _id: false }
 );
@@ -330,6 +335,18 @@ const PerformanceReviewSchema = new Schema<IPerformanceReview>(
   },
   { timestamps: true }
 );
+
+// Appréciations et commentaires libres chiffrés (AES-256-GCM) ; titres d'objectifs, KR et
+// référentiel restent en clair. Déchiffrement automatique en lecture (lean, toObject/toJSON).
+for (const schema of [
+  ProgressUpdateSchema,
+  ObjectiveAssessmentSchema,
+  ObjectiveActionSchema,
+  QualitativeEntrySchema
+]) {
+  decryptOnSerialize(schema);
+}
+withEncryptedFields(PerformanceReviewSchema);
 
 // Une seule fiche par collaborateur et par cycle.
 PerformanceReviewSchema.index({ user: 1, cycle: 1 }, { unique: true });

@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import { User } from '../../domain/user/entities/User';
+import { emailHashOf } from '../../domain/user/emailHash';
 import { Role } from '../../domain/user/entities/Role';
 import { UserActivityLog } from '../../domain/user/entities/UserActivityLog';
 import { Team } from '../../domain/team/entities/Team';
@@ -148,6 +149,7 @@ export async function anonymizeUser(userId: string, reason: 'request' | 'retenti
     {
       $set: {
         email: anonymizedEmail(userId),
+        emailHash: emailHashOf(anonymizedEmail(userId)),
         isActive: false,
         anonymizedAt: now,
         deactivatedAt: now,

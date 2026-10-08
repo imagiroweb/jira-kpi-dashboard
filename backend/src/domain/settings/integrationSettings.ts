@@ -2,6 +2,7 @@ import mongoose, { Schema } from 'mongoose';
 import { Container } from '../../infrastructure/Container';
 import { resetMondayClient } from '../../infrastructure/monday/MondayClient';
 import { logger } from '../../utils/logger';
+import { encryptedString, withEncryptedFields } from '../../infrastructure/crypto/mongooseEncryption';
 
 const SETTINGS_KEY = 'default';
 
@@ -22,14 +23,17 @@ const IntegrationSettingsSchema = new Schema<IIntegrationSettings>(
     key: { type: String, required: true, unique: true, default: SETTINGS_KEY },
     jiraUrl: { type: String, default: '' },
     jiraEmail: { type: String, default: '' },
-    jiraApiToken: { type: String, default: '' },
-    mondayApiKey: { type: String, default: '' },
+    // Secrets d'intégration chiffrés en base (jamais renvoyés au navigateur, voir la vue).
+    jiraApiToken: { ...encryptedString({ trim: true }), default: '' },
+    mondayApiKey: { ...encryptedString({ trim: true }), default: '' },
     boardsConfigured: { type: Boolean, default: false },
     dashboardBoardIds: { type: [Number], default: [] },
     qaBoardIds: { type: [Number], default: [] }
   },
   { timestamps: true }
 );
+
+withEncryptedFields(IntegrationSettingsSchema);
 
 export const IntegrationSettings = mongoose.model<IIntegrationSettings>(
   'IntegrationSettings',

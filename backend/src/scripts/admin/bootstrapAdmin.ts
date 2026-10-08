@@ -1,4 +1,5 @@
 import { User } from '../../domain/user/entities/User';
+import { emailHashOf } from '../../domain/user/emailHash';
 import { Organization } from '../../domain/organization/entities/Organization';
 import { parseArgs, runWithMongo } from './cli';
 
@@ -18,7 +19,7 @@ async function main() {
   const email = typeof args.email === 'string' ? args.email.trim().toLowerCase() : '';
   if (!email) throw new Error('--email requis');
 
-  const user = await User.findOne({ email });
+  const user = await User.findOne({ emailHash: emailHashOf(email) });
   if (!user) {
     throw new Error(`Aucun compte pour ${email} : la personne doit d'abord se connecter (SSO) ou être invitée.`);
   }
