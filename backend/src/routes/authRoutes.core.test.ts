@@ -1,17 +1,16 @@
 /**
- * TI — Routes auth (core) : register, login, validate-password, roles/for-signup, me, verify, requireMongo
+ * TI — Routes auth (core) : login, validate-password, me, verify, requireMongo ;
+ * routes supprimées pour raisons de sécurité : register, roles/for-signup, me/role
  */
 import request from 'supertest';
 import { Request } from 'express';
 import { createTestApp } from '../test/createTestApp';
 import { TEST_USER, TEST_USER_ID } from '../test/fixtures/users';
 
-const mockRegister = jest.fn();
 const mockLogin = jest.fn();
 const mockValidatePassword = jest.fn();
 const mockGetUserById = jest.fn();
 const mockBuildUserWithPermissions = jest.fn();
-const mockSetMyRole = jest.fn();
 
 const mockRoleFind = jest.fn();
 
@@ -35,12 +34,10 @@ jest.mock('express-rate-limit', () =>
 
 jest.mock('../application/services/AuthService', () => ({
   authService: {
-    register: (...args: unknown[]) => mockRegister(...args),
     login: (...args: unknown[]) => mockLogin(...args),
     validatePassword: (...args: unknown[]) => mockValidatePassword(...args),
     getUserById: (...args: unknown[]) => mockGetUserById(...args),
     buildUserWithPermissions: (...args: unknown[]) => mockBuildUserWithPermissions(...args),
-    setMyRole: (...args: unknown[]) => mockSetMyRole(...args),
     handleMicrosoftSSO: jest.fn(),
     requestPasswordReset: jest.fn(),
     resetPassword: jest.fn(),
@@ -94,6 +91,12 @@ jest.mock('../utils/logger', () =>
   jest.requireActual('../test/mocks/logger').loggerMockFactory()
 );
 
+const mockExportPersonalData = jest.fn();
+jest.mock('../application/services/personalDataService', () => ({
+  exportPersonalData: (...a: unknown[]) => mockExportPersonalData(...a),
+  anonymizeUser: jest.fn(),
+}));
+
 import { authRoutes } from './authRoutes';
 
 describe('authRoutes — core (TI)', () => {
@@ -140,62 +143,22 @@ describe('authRoutes — core (TI)', () => {
     });
   });
 
-  describe('POST /api/auth/register', () => {
-    it('retourne 400 si la validation échoue (email ou mot de passe invalide)', async () => {
+  describe('POST /api/auth/register (supprimée — sécurité)', () => {
+    it('retourne 404 : l’inscription libre n’existe plus', async () => {
       const res = await request(app)
         .post('/api/auth/register')
-        .send({ email: 'invalid', password: 'short' });
+        .send({ email: 'new@test.com', password: 'MonMotDePasse123!' });
 
-      expect(res.status).toBe(400);
-      expect(res.body.success).toBe(false);
-      expect(Array.isArray(res.body.errors)).toBe(true);
-      expect(mockRegister).not.toHaveBeenCalled();
+      expect(res.status).toBe(404);
     });
+  });
 
-    it('retourne 201 avec token et user si inscription réussie', async () => {
-      mockRegister.mockResolvedValue({
-        success: true,
-        token: 'jwt-token',
-        user: { id: TEST_USER_ID, email: 'new@test.com' },
-        firstLogin: true,
-      });
+  describe('POST /api/auth/logout', () => {
+    it('efface le cookie de session', async () => {
+      const res = await request(app).post('/api/auth/logout');
 
-      const res = await request(app)
-        .post('/api/auth/register')
-        .send({
-          email: 'new@test.com',
-          password: 'MonMotDePasse123!',
-          firstName: 'New',
-          lastName: 'User',
-        });
-
-      expect(res.status).toBe(201);
-      expect(res.body.success).toBe(true);
-      expect(res.body.token).toBe('jwt-token');
-      expect(res.body.user).toEqual({ id: TEST_USER_ID, email: 'new@test.com' });
-      expect(res.body.firstLogin).toBe(true);
-      expect(mockRegister).toHaveBeenCalledWith(
-        'new@test.com',
-        'MonMotDePasse123!',
-        'New',
-        'User',
-        undefined
-      );
-    });
-
-    it('retourne 400 si l’email est déjà utilisé', async () => {
-      mockRegister.mockResolvedValue({
-        success: false,
-        error: 'Un compte existe déjà avec cet email',
-      });
-
-      const res = await request(app)
-        .post('/api/auth/register')
-        .send({ email: 'existing@test.com', password: 'MonMotDePasse123!' });
-
-      expect(res.status).toBe(400);
-      expect(res.body.success).toBe(false);
-      expect(res.body.error).toContain('existe déjà');
+      expect(res.status).toBe(200);
+      expect(String(res.headers['set-cookie'])).toMatch(/^session=;.*Expires=Thu, 01 Jan 1970/);
     });
   });
 
@@ -216,7 +179,7 @@ describe('authRoutes — core (TI)', () => {
       expect(mockLogin).toHaveBeenCalledWith('user@test.com', 'wrong-password');
     });
 
-    it('retourne 200 avec token et user si connexion réussie', async () => {
+    it('pose le jeton en cookie HttpOnly (jamais dans le corps) si connexion réussie', async () => {
       mockLogin.mockResolvedValue({
         success: true,
         token: 'jwt-login-token',
@@ -229,7 +192,12 @@ describe('authRoutes — core (TI)', () => {
 
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
-      expect(res.body.token).toBe('jwt-login-token');
+      expect(res.body.token).toBeUndefined();
+      const cookie = String(res.headers['set-cookie']);
+      expect(cookie).toMatch(/^session=jwt-login-token/);
+      expect(cookie).toMatch(/HttpOnly/);
+      expect(cookie).toMatch(/SameSite=Strict/);
+      expect(cookie).toMatch(/Path=\//);
       expect(res.body.user).toEqual(
         expect.objectContaining({ id: TEST_USER_ID, email: 'user@test.com' })
       );
@@ -284,17 +252,12 @@ describe('authRoutes — core (TI)', () => {
     });
   });
 
-  describe('GET /api/auth/roles/for-signup', () => {
-    it('retourne 200 avec la liste des rôles (id, name)', async () => {
+  describe('GET /api/auth/roles/for-signup (supprimée — sécurité)', () => {
+    it('retourne 404 : la liste des rôles n’est plus exposée sans authentification', async () => {
       const res = await request(app).get('/api/auth/roles/for-signup');
 
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.roles).toEqual([
-        { id: 'role1', name: 'Développeur' },
-        { id: 'role2', name: 'Product' },
-      ]);
-      expect(mockRoleFind).toHaveBeenCalled();
+      expect(res.status).toBe(404);
+      expect(mockRoleFind).not.toHaveBeenCalled();
     });
   });
 
@@ -333,30 +296,27 @@ describe('authRoutes — core (TI)', () => {
     });
   });
 
-  describe('PATCH /api/auth/me/role', () => {
-    it('retourne 400 si roleId est absent', async () => {
-      const res = await request(app).patch('/api/auth/me/role').send({});
-
-      expect(res.status).toBe(400);
-      expect(res.body.success).toBe(false);
-      expect(Array.isArray(res.body.errors)).toBe(true);
-      expect(mockSetMyRole).not.toHaveBeenCalled();
-    });
-
-    it('retourne 200 si le rôle est mis à jour', async () => {
-      mockSetMyRole.mockResolvedValue({
-        success: true,
-        user: { id: TEST_USER_ID, roleName: 'Développeur' },
-      });
-
+  describe('PATCH /api/auth/me/role (supprimée — sécurité)', () => {
+    it('retourne 404 : un utilisateur ne peut pas s’attribuer un rôle lui-même', async () => {
       const res = await request(app)
         .patch('/api/auth/me/role')
         .send({ roleId: 'role1' });
 
+      expect(res.status).toBe(404);
+    });
+  });
+
+  describe('GET /api/auth/me/export', () => {
+    it('télécharge mes propres données (JSON en pièce jointe, non mis en cache)', async () => {
+      mockExportPersonalData.mockResolvedValue({ account: { id: TEST_USER_ID } });
+
+      const res = await request(app).get('/api/auth/me/export');
+
       expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.user).toEqual({ id: TEST_USER_ID, roleName: 'Développeur' });
-      expect(mockSetMyRole).toHaveBeenCalledWith(TEST_USER_ID, 'role1');
+      expect(mockExportPersonalData).toHaveBeenCalledWith(TEST_USER_ID);
+      expect(res.headers['content-disposition']).toMatch(/attachment/);
+      expect(res.headers['cache-control']).toBe('no-store');
+      expect(res.body.data.account.id).toBe(TEST_USER_ID);
     });
   });
 

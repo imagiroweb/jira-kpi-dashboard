@@ -8,8 +8,9 @@ services:
       - mongo_data:/data/db
       - mongo_config:/data/configdb
     environment:
+      # Compte root : administration uniquement (création de l'utilisateur applicatif, sauvegardes).
       MONGO_INITDB_ROOT_USERNAME: admin
-      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_PASSWORD:?MONGO_PASSWORD requis}
       MONGO_INITDB_DATABASE: jira-kpi
     networks:
       - jira-kpi-network
@@ -39,13 +40,21 @@ services:
   backend:
     image: ${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/jira-kpi-backend:latest
     container_name: jira-kpi-backend
+    # Logs console Docker bornés (volume et ancienneté limités, données personnelles minimisées)
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"
     restart: unless-stopped
     ports:
       - "3001:3001"
     environment:
       - NODE_ENV=production
       - PORT=3001
-      - MONGODB_URI=mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/jira-kpi?authSource=admin
+      # Utilisateur applicatif à droits limités (readWrite sur jira-kpi), jamais le root :
+      # création une fois par serveur avec scripts/mongo-create-app-user.sh
+      - MONGODB_URI=mongodb://${MONGO_APP_USER:-jira_kpi_app}:${MONGO_APP_PASSWORD:?MONGO_APP_PASSWORD requis (voir scripts/mongo-create-app-user.sh)}@mongodb:27017/jira-kpi?authSource=jira-kpi
       - REDIS_URL=redis://redis:6379
       - JIRA_URL=${JIRA_URL}
       - JIRA_EMAIL=${JIRA_EMAIL}
@@ -57,10 +66,18 @@ services:
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - CORS_ORIGIN=${CORS_ORIGIN:-http://localhost}
       - JWT_SECRET=${JWT_SECRET:-}
+      # Clé maître du chiffrement des données (lot 4) : propre à chaque environnement, conservée dans le coffre.
+      - DATA_ENCRYPTION_KEY=${DATA_ENCRYPTION_KEY:?DATA_ENCRYPTION_KEY requis (openssl rand -hex 32)}
       - JWT_EXPIRES_IN=${JWT_EXPIRES_IN:-24h}
       - MICROSOFT_CLIENT_ID=${MICROSOFT_CLIENT_ID:-}
-      - MICROSOFT_TENANT_ID=${MICROSOFT_TENANT_ID:-common}
+      - MICROSOFT_TENANT_ID=${MICROSOFT_TENANT_ID:-}
+      - MICROSOFT_AUTHORITY_TENANT=${MICROSOFT_AUTHORITY_TENANT:-}
       - MICROSOFT_REDIRECT_URI=${MICROSOFT_REDIRECT_URI:-}
+      # Organisation par défaut (créée au premier démarrage si aucune n'existe) — voir env.prod.template
+      - DEFAULT_ORG_NAME=${DEFAULT_ORG_NAME:-Adoria}
+      - DEFAULT_ORG_TENANT_ID=${DEFAULT_ORG_TENANT_ID:-}
+      - DEFAULT_ORG_EMAIL_DOMAINS=${DEFAULT_ORG_EMAIL_DOMAINS:-}
+      - DEFAULT_ORG_ALLOW_LOCAL_ACCOUNTS=${DEFAULT_ORG_ALLOW_LOCAL_ACCOUNTS:-true}
       # Réinitialisation mot de passe (Nodemailer) — requis en prod si comptes locaux
       - APP_BASE_URL=${APP_BASE_URL:-}
       - SMTP_HOST=${SMTP_HOST:-}

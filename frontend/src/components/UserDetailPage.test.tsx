@@ -83,7 +83,7 @@ describe('UserDetailPage', () => {
     expect(screen.getByText('Détail Utilisateurs')).toBeInTheDocument();
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/worklog/report?'));
+      expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/worklog/report?'), expect.anything());
     });
 
     await waitFor(() => {
@@ -110,7 +110,7 @@ describe('UserDetailPage', () => {
     render(<UserDetailPage />);
 
     await waitFor(() => {
-      expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/worklog/report?'));
+      expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/worklog/report?'), expect.anything());
     });
 
     expect(document.querySelector('.animate-pulse')).toBeTruthy();

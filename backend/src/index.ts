@@ -25,11 +25,24 @@ import { meetingRoutes } from './routes/meetingRoutes';
 import { performanceRoutes } from './routes/performanceRoutes';
 import { teamRoutes } from './routes/teamRoutes';
 import { costRoutes } from './routes/costRoutes';
+import { organizationRoutes } from './routes/organizationRoutes';
+import { registerAccountAnonymizer, startRetentionSchedule } from './application/services/retentionService';
+import { anonymizePerformanceReviews, anonymizeUser } from './application/services/personalDataService';
 import { setupSocketHandlers } from './websocket/socketHandler';
+import { createOriginCheck } from './middleware/originCheck';
+import { describeMongoUri } from './config/mongoUri';
+import { resolveMasterKey } from './config/dataEncryption';
+import { initKeyring } from './infrastructure/crypto/keyringService';
+import { migrateLegacyPlaintext } from './application/services/encryptionMigration';
+import { decryptingJsonReplacer } from './infrastructure/crypto/mongooseEncryption';
+
+// Clé maître de chiffrement des données : obligatoire, le serveur ne démarre pas sans.
+const dataMasterKey = resolveMasterKey();
 import { swaggerSpec } from './config/swagger';
 import { schedulerService } from './services/schedulerService';
 import { Role } from './domain/user/entities/Role';
 import { emailService } from './infrastructure/email/NodemailerEmailService';
+import { ensureDefaultOrganization } from './application/services/organizationBootstrap';
 import { applyStoredIntegrationSettings } from './domain/settings/integrationSettings';
 
 // MongoDB connection
@@ -39,6 +52,21 @@ const connectMongoDB = async () => {
   try {
     await mongoose.connect(mongoUri, opts);
     logger.info('MongoDB connected successfully');
+    try {
+      await initKeyring(dataMasterKey);
+      // Données historiques en clair → chiffrées (idempotent) ; requis avant toute connexion (emailHash).
+      await migrateLegacyPlaintext();
+    } catch (error) {
+      // Mauvaise clé maître ou migration impossible : ne jamais servir de requêtes (données incohérentes).
+      logger.error(`Chiffrement : ${(error as Error).message}`);
+      process.exit(1);
+    }
+    if (process.env.NODE_ENV === 'production' && describeMongoUri(mongoUri).usesRootAccount) {
+      logger.warn(
+        'MongoDB : connexion avec le compte root. Créez l’utilisateur applicatif (scripts/mongo-create-app-user.sh) ' +
+          'et renseignez MONGO_APP_USER / MONGO_APP_PASSWORD.'
+      );
+    }
     // Seed default roles (create or update)
     const defaultRoles = [
       {
@@ -130,6 +158,7 @@ const connectMongoDB = async () => {
       );
     }
     logger.info('Default roles seeded: Utilisateur, Dev, PO, Product, Marketing');
+    await ensureDefaultOrganization();
     await applyStoredIntegrationSettings();
   } catch (error) {
     logger.error('MongoDB connection error:', error);
@@ -141,6 +170,8 @@ const connectMongoDB = async () => {
 connectMongoDB();
 
 const app = express();
+// Aucune valeur chiffrée ne doit sortir telle quelle dans une réponse JSON.
+app.set('json replacer', decryptingJsonReplacer);
 // Derrière Traefik / un reverse proxy, X-Forwarded-For est présent : requis pour express-rate-limit (sinon ValidationError).
 if (process.env.NODE_ENV === 'production') {
   const hops = Number(process.env.TRUST_PROXY_HOPS);
@@ -181,20 +212,26 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// Swagger Documentation
-app.use(
-  '/api-docs',
-  swaggerUi.serve as unknown as express.RequestHandler,
-  swaggerUi.setup(swaggerSpec, {
-    customCss: '.swagger-ui .topbar { display: none }',
-    customSiteTitle: 'Jira KPI Dashboard API'
-  }) as unknown as express.RequestHandler
-);
+// CSRF : les requêtes qui modifient des données avec le cookie de session doivent venir de l'application.
+app.use('/api/', createOriginCheck(allowedOrigins));
 
-app.get('/api-docs.json', (req, res) => {
-  res.setHeader('Content-Type', 'application/json');
-  res.send(swaggerSpec);
-});
+// Swagger Documentation — désactivée en production (cartographie complète de l'API), sauf
+// ENABLE_API_DOCS=true.
+if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_API_DOCS === 'true') {
+  app.use(
+    '/api-docs',
+    swaggerUi.serve as unknown as express.RequestHandler,
+    swaggerUi.setup(swaggerSpec, {
+      customCss: '.swagger-ui .topbar { display: none }',
+      customSiteTitle: 'Jira KPI Dashboard API'
+    }) as unknown as express.RequestHandler
+  );
+
+  app.get('/api-docs.json', (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    res.send(swaggerSpec);
+  });
+}
 
 // Routes
 app.use('/api/health', healthRoutes);
@@ -207,6 +244,7 @@ app.use('/api/meetings', meetingRoutes);
 app.use('/api/performance', performanceRoutes);
 app.use('/api/teams', teamRoutes);
 app.use('/api/costs', costRoutes);
+app.use('/api/organizations', organizationRoutes);
 
 // Setup WebSocket handlers
 setupSocketHandlers(io);
@@ -230,12 +268,18 @@ httpServer.listen(PORT, HOST, () => {
   logger.info(`Server running on port ${PORT}`);
   logger.info(`WebSocket server ready`);
   logger.info(`Environment: ${process.env.NODE_ENV || 'development'}`);
-  logger.info(`API docs available at http://${HOST}:${PORT}/api-docs`);
+  if (process.env.NODE_ENV !== 'production' || process.env.ENABLE_API_DOCS === 'true') {
+    logger.info(`API docs available at http://${HOST}:${PORT}/api-docs`);
+  }
   logger.info(`Jira URL configured: ${process.env.JIRA_URL ? '✓' : '✗ MISSING'}`);
   logger.info(`Jira Projects: ${process.env.JIRA_PROJECT_KEY || 'Not configured'}`);
   
   // Initialize scheduler for automatic sync with WebSocket notifications
   schedulerService.initialize(io);
+
+  // Purge quotidienne selon les durées de conservation de chaque organisation (RGPD)
+  registerAccountAnonymizer(anonymizeUser, anonymizePerformanceReviews);
+  startRetentionSchedule();
 
   void emailService.verify();
 });

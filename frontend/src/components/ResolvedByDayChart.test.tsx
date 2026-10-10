@@ -59,7 +59,7 @@ describe('ResolvedByDayChart', () => {
     expect(screen.getByText(/Résultat de la requête/i)).toBeInTheDocument();
     expect(screen.getByTestId('recharts-responsive-container')).toBeInTheDocument();
     expect(mockFetch).toHaveBeenCalledWith(
-      expect.stringContaining('/jira/resolved-by-day?')
+      expect.stringContaining('/jira/resolved-by-day?'), expect.anything()
     );
   });
 

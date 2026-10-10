@@ -77,3 +77,6 @@ tmp/
 temp/
 *.tmp
 
+
+# Sauvegardes chiffrées locales (scripts/mongo-backup-encrypted.sh)
+backups/

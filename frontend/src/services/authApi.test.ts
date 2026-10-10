@@ -32,7 +32,7 @@ describe('authApi', () => {
         roleName: 'Utilisateur',
       };
       mockPost.mockResolvedValueOnce({
-        data: { success: true, token: 'jwt-token', user },
+        data: { success: true, user },
       });
 
       const result = await authApi.login('user@test.com', 'Password123!');
@@ -42,7 +42,6 @@ describe('authApi', () => {
         password: 'Password123!',
       });
       expect(result.success).toBe(true);
-      expect(result.token).toBe('jwt-token');
       expect(result.user).toEqual(user);
     });
 
@@ -67,47 +66,22 @@ describe('authApi', () => {
     });
   });
 
-  describe('register', () => {
-    it('retourne success et user après inscription', async () => {
-      const user = {
-        id: '2',
-        email: 'new@test.com',
-        provider: 'local' as const,
-      };
-      mockPost.mockResolvedValueOnce({
-        data: { success: true, token: 'jwt-new', user },
-      });
+  describe('inviteLocalUser', () => {
+    it('envoie POST /api/auth/users et retourne le résultat', async () => {
+      mockPost.mockResolvedValueOnce({ data: { success: true, userId: 'u1', emailSent: true } });
 
-      const result = await authApi.register(
-        'new@test.com',
-        'SecurePass123!',
-        'Jean',
-        'Dupont',
-        'role-id'
-      );
+      const result = await authApi.inviteLocalUser({ email: 'marie@adoria.com', firstName: 'Marie' });
 
-      expect(mockPost).toHaveBeenCalledWith('/api/auth/register', {
-        email: 'new@test.com',
-        password: 'SecurePass123!',
-        firstName: 'Jean',
-        lastName: 'Dupont',
-        roleId: 'role-id',
-      });
-      expect(result.success).toBe(true);
-      expect(result.user).toEqual(user);
+      expect(mockPost).toHaveBeenCalledWith('/api/auth/users', { email: 'marie@adoria.com', firstName: 'Marie' });
+      expect(result).toEqual({ success: true, userId: 'u1', emailSent: true });
     });
 
-    it('retourne les erreurs de validation du serveur', async () => {
-      mockPost.mockRejectedValueOnce({
-        response: {
-          data: { errors: ['Le mot de passe doit contenir au moins 12 caractères'] },
-        },
-      });
+    it('retourne l’erreur du serveur', async () => {
+      mockPost.mockRejectedValueOnce({ response: { data: { error: 'Domaine d’email non autorisé' } } });
 
-      const result = await authApi.register('new@test.com', 'short', 'Jean', 'Dupont');
+      const result = await authApi.inviteLocalUser({ email: 'x@gmail.com' });
 
-      expect(result.success).toBe(false);
-      expect(result.error).toContain('12 caractères');
+      expect(result).toEqual({ success: false, error: 'Domaine d’email non autorisé' });
     });
   });
 
@@ -228,10 +202,11 @@ describe('authApi', () => {
         data: { success: true, token: 'ms-token', user },
       });
 
-      const result = await authApi.microsoftCallback('ms-access-token');
+      const result = await authApi.microsoftCallback('ms-id-token', 'nonce-1');
 
       expect(mockPost).toHaveBeenCalledWith('/api/auth/microsoft/callback', {
-        accessToken: 'ms-access-token',
+        idToken: 'ms-id-token',
+        nonce: 'nonce-1',
       });
       expect(result.success).toBe(true);
       expect(result.user).toEqual(user);
@@ -242,31 +217,10 @@ describe('authApi', () => {
         response: { data: { error: 'Token invalide' } },
       });
 
-      const result = await authApi.microsoftCallback('bad-token');
+      const result = await authApi.microsoftCallback('bad-token', 'n');
 
       expect(result.success).toBe(false);
       expect(result.error).toBe('Token invalide');
-    });
-  });
-
-  describe('getRolesForSignup', () => {
-    it('retourne la liste des rôles', async () => {
-      const roles = [
-        { id: 'r1', name: 'Utilisateur' },
-        { id: 'r2', name: 'Admin' },
-      ];
-      mockGet.mockResolvedValueOnce({ data: { success: true, roles } });
-
-      const result = await authApi.getRolesForSignup();
-
-      expect(mockGet).toHaveBeenCalledWith('/api/auth/roles/for-signup');
-      expect(result).toEqual(roles);
-    });
-
-    it('lance une erreur si success false', async () => {
-      mockGet.mockResolvedValueOnce({ data: { success: false, error: 'Forbidden' } });
-
-      await expect(authApi.getRolesForSignup()).rejects.toThrow('Forbidden');
     });
   });
 

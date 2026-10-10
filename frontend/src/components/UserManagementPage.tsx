@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import { ShieldCheck, Users, Loader2, Save, Plus, X, LogIn, ChevronRight, BarChart3, LayoutDashboard, KeyRound, CheckCircle2, XCircle, Mail } from 'lucide-react';
+import { ShieldCheck, Users, Loader2, Save, Plus, X, LogIn, ChevronRight, BarChart3, LayoutDashboard, KeyRound, CheckCircle2, XCircle, Mail, Archive, Download, Trash2 } from 'lucide-react';
 import {
   BarChart,
   Bar,
@@ -12,6 +12,9 @@ import {
 import { authApi, UserWithRoleDto, RoleDto, VisiblePages, UserActivityLogEntry } from '../services/authApi';
 import { IntegrationSettingsPanel } from './IntegrationSettingsPanel';
 import { useStore } from '../store/useStore';
+import { InviteLocalUserForm } from './InviteLocalUserForm';
+import { RetentionSettingsPanel } from './RetentionSettingsPanel';
+import { downloadJson, personalDataFilename } from '../utils/downloadJson';
 
 const PAGE_LABELS: Record<keyof VisiblePages, string> = {
   dashboard: 'Dashboard',
@@ -43,6 +46,7 @@ export function UserManagementPage() {
   const [editingRoleId, setEditingRoleId] = useState<string | null>(null);
   const [newRoleName, setNewRoleName] = useState('');
   const [showNewRole, setShowNewRole] = useState(false);
+  const [showInvite, setShowInvite] = useState(false);
   const [drawerUser, setDrawerUser] = useState<UserWithRoleDto | null>(null);
   const [drawerLogs, setDrawerLogs] = useState<UserActivityLogEntry[]>([]);
   const [drawerLogsLoading, setDrawerLogsLoading] = useState(false);
@@ -51,7 +55,7 @@ export function UserManagementPage() {
   const [allLogsLoading, setAllLogsLoading] = useState(false);
   const [pageStats, setPageStats] = useState<{ pages: Record<string, number>; total: number; percentages: Record<string, number> } | null>(null);
   const [pageStatsLoading, setPageStatsLoading] = useState(false);
-  const [sectionFilter, setSectionFilter] = useState<'users' | 'rights' | 'connections' | null>(null);
+  const [sectionFilter, setSectionFilter] = useState<'users' | 'rights' | 'connections' | 'privacy' | null>(null);
 
   const isSuperAdmin = user?.role === 'super_admin' || user?.visiblePages?.gestionUtilisateurs;
 
@@ -128,9 +132,65 @@ export function UserManagementPage() {
     }
   };
 
+  /** Rafraîchit la liste sans l'écran de chargement (garde le formulaire d'invitation affiché). */
+  const refreshUsers = () => {
+    authApi
+      .getUsersAndRoles()
+      .then((data) => {
+        setUsers(data.users);
+        setRoles(data.roles);
+      })
+      .catch(() => {});
+  };
+
   useEffect(() => {
     if (isSuperAdmin) load();
   }, [isSuperAdmin]);
+
+  const handleExportUser = async (u: UserWithRoleDto) => {
+    try {
+      downloadJson(await authApi.exportUserData(u.id), personalDataFilename());
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } }; message?: string };
+      setError(err?.response?.data?.error || err?.message || 'Export impossible');
+    }
+  };
+
+  /** Droit à l'effacement : anonymisation irréversible, confirmée en ressaisissant l'email. */
+  const handleDeleteUser = async (u: UserWithRoleDto) => {
+    const typed = window.prompt(
+      `Effacer définitivement le compte ${u.email} ?\n\n` +
+        'Son identité est effacée, ses logs d’activité supprimés et ses fiches de performance anonymisées ' +
+        '(textes libres effacés, statistiques conservées). ' +
+        'Cette action est irréversible.\n\nPour confirmer, saisissez son email :'
+    );
+    if (typed === null) return;
+    try {
+      await authApi.deleteUser(u.id, typed.trim());
+      setUsers((prev) => prev.filter((x) => x.id !== u.id));
+      closeDrawer();
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } }; message?: string };
+      setError(err?.response?.data?.error || err?.message || 'Effacement impossible');
+    }
+  };
+
+  const handleToggleActive = async (u: UserWithRoleDto) => {
+    const next = !u.isActive;
+    if (!next && !window.confirm(`Désactiver le compte ${u.email} ? Ses sessions ouvertes seront fermées immédiatement.`)) {
+      return;
+    }
+    setSavingUserId(u.id);
+    try {
+      const isActive = await authApi.setUserActive(u.id, next);
+      setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, isActive } : x)));
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { error?: string } }; message?: string };
+      setError(err?.response?.data?.error || err?.message || 'Erreur mise à jour');
+    } finally {
+      setSavingUserId(null);
+    }
+  };
 
   const handleUserRoleChange = async (userId: string, role: 'super_admin' | null, roleId: string | null) => {
     setSavingUserId(userId);
@@ -259,6 +319,13 @@ export function UserManagementPage() {
                 activeClass: 'bg-cyan-500/20 border-cyan-500/50 text-cyan-200',
                 iconClass: 'text-cyan-400',
               },
+              {
+                id: 'privacy' as const,
+                label: 'Données personnelles',
+                Icon: Archive,
+                activeClass: 'bg-emerald-500/20 border-emerald-500/50 text-emerald-200',
+                iconClass: 'text-emerald-400',
+              },
             ]
           ).map((section) => {
             const selected = sectionFilter === section.id;
@@ -284,10 +351,25 @@ export function UserManagementPage() {
 
         {/* Liste des utilisateurs */}
         <section className="mb-10" hidden={sectionFilter !== null && sectionFilter !== 'users'}>
-          <h2 className="text-lg font-semibold text-surface-200 mb-4 flex items-center gap-2">
-            <Users className="w-5 h-5 text-primary-400" />
-            Utilisateurs
-          </h2>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold text-surface-200 flex items-center gap-2">
+              <Users className="w-5 h-5 text-primary-400" />
+              Utilisateurs
+            </h2>
+            {!showInvite && (
+              <button
+                type="button"
+                onClick={() => setShowInvite(true)}
+                className="btn-secondary px-3 py-2 text-sm"
+              >
+                <Plus className="w-4 h-4" />
+                Inviter un compte local
+              </button>
+            )}
+          </div>
+          {showInvite && (
+            <InviteLocalUserForm roles={roles} onInvited={refreshUsers} onClose={() => setShowInvite(false)} />
+          )}
           <div className="rounded-xl border border-surface-700/50 bg-surface-900/50 overflow-hidden">
             <table className="w-full text-left">
               <thead>
@@ -296,6 +378,7 @@ export function UserManagementPage() {
                   <th className="p-4 text-xs font-medium text-surface-500 uppercase tracking-wider">Nom</th>
                   <th className="p-4 text-xs font-medium text-surface-500 uppercase tracking-wider">Connexion</th>
                   <th className="p-4 text-xs font-medium text-surface-500 uppercase tracking-wider">Rôle</th>
+                  <th className="p-4 text-xs font-medium text-surface-500 uppercase tracking-wider">Statut</th>
                 </tr>
               </thead>
               <tbody>
@@ -334,6 +417,21 @@ export function UserManagementPage() {
                         {savingUserId === u.id && <Loader2 className="w-4 h-4 animate-spin text-primary-400" />}
                         <ChevronRight className="w-4 h-4 text-surface-500 group-hover:text-primary-400 shrink-0" aria-hidden />
                       </div>
+                    </td>
+                    <td className="p-4" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        type="button"
+                        onClick={() => void handleToggleActive(u)}
+                        disabled={savingUserId === u.id || u.id === user?.id}
+                        title={u.id === user?.id ? 'Vous ne pouvez pas désactiver votre propre compte' : undefined}
+                        className={`px-3 py-1 rounded-lg text-xs font-medium border disabled:opacity-40 ${
+                          u.isActive
+                            ? 'border-emerald-500/40 text-emerald-400 hover:bg-emerald-500/10'
+                            : 'border-red-500/40 text-red-400 hover:bg-red-500/10'
+                        }`}
+                      >
+                        {u.isActive ? 'Actif' : 'Désactivé'}
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -435,6 +533,14 @@ export function UserManagementPage() {
         <div hidden={sectionFilter !== null && sectionFilter !== 'connections'}>
           <IntegrationSettingsPanel />
         </div>
+
+        <section className="mt-10" hidden={sectionFilter !== null && sectionFilter !== 'privacy'}>
+          <h2 className="text-lg font-semibold text-surface-200 mb-4 flex items-center gap-2">
+            <Archive className="w-5 h-5 text-emerald-400" />
+            Données personnelles
+          </h2>
+          <RetentionSettingsPanel />
+        </section>
       </div>
 
               {/* Drawer activité utilisateur */}
@@ -470,6 +576,26 @@ export function UserManagementPage() {
               >
                 <X className="w-5 h-5" />
               </button>
+            </div>
+            <div className="px-4 py-3 border-b border-surface-700/50 flex flex-wrap gap-2" aria-label="Données personnelles">
+              <button
+                type="button"
+                onClick={() => void handleExportUser(drawerUser)}
+                className="btn-secondary px-3 py-1.5 text-xs"
+              >
+                <Download className="w-4 h-4" />
+                Exporter ses données
+              </button>
+              {drawerUser.id !== user?.id && (
+                <button
+                  type="button"
+                  onClick={() => void handleDeleteUser(drawerUser)}
+                  className="px-3 py-1.5 text-xs rounded-lg border border-red-500/40 text-red-400 hover:bg-red-500/10 inline-flex items-center gap-2"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Effacer le compte
+                </button>
+              )}
             </div>
             <div className="flex-1 overflow-y-auto p-4">
               {drawerLogsLoading ? (

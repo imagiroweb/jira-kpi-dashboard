@@ -92,7 +92,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "docker-compose.prod.yml,docker-compose.prod.ghcr.yml,docker-compose.prod.scaleway.yml"
+          source: "docker-compose.prod.yml,docker-compose.prod.ghcr.yml,docker-compose.prod.scaleway.yml,scripts/mongo-create-app-user.sh,scripts/mongo-backup-encrypted.sh"
           target: ${{ vars.SSH_DEPLOY_PATH || '/opt/jira-kpi-dashboard' }}
 
       - name: Deploy on server
@@ -105,11 +105,14 @@ jobs:
             set -e
             cd ${{ vars.SSH_DEPLOY_PATH || '/opt/jira-kpi-dashboard' }}
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            # Garde-fou : configuration valide (variables obligatoires présentes dans .env) et images
+            # récupérées AVANT de supprimer quoi que ce soit — en cas d'échec, la version en place continue de tourner.
+            docker compose -f docker-compose.prod.yml -f docker-compose.prod.ghcr.yml -f docker-compose.prod.scaleway.yml config -q
+            docker compose -f docker-compose.prod.yml -f docker-compose.prod.ghcr.yml -f docker-compose.prod.scaleway.yml pull
             # Supprimer les containers existants s'ils appartiennent à un autre projet (ex: Portainer)
             for name in jira-kpi-frontend jira-kpi-backend jira-kpi-mongodb jira-kpi-redis; do
               docker rm -f $name 2>/dev/null || true
             done
-            docker compose -f docker-compose.prod.yml -f docker-compose.prod.ghcr.yml -f docker-compose.prod.scaleway.yml pull
             docker compose -f docker-compose.prod.yml -f docker-compose.prod.ghcr.yml -f docker-compose.prod.scaleway.yml up -d --remove-orphans
 
   # --- Préprod : push sur develop, même DEPLOY_METHOD que la prod, autre chemin / webhook ---
@@ -128,7 +131,7 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "docker-compose.prod.yml,docker-compose.prod.ghcr.yml,docker-compose.prod.scaleway.yml,docker-compose.prod.preprod.yml"
+          source: "docker-compose.prod.yml,docker-compose.prod.ghcr.yml,docker-compose.prod.scaleway.yml,docker-compose.prod.preprod.yml,scripts/mongo-create-app-user.sh,scripts/mongo-backup-encrypted.sh"
           target: ${{ vars.SSH_DEPLOY_PATH_PREPROD || '/opt/jira-kpi-dashboard-preprod' }}
 
       - name: Deploy preprod on server
@@ -141,10 +144,12 @@ jobs:
             set -e
             cd ${{ vars.SSH_DEPLOY_PATH_PREPROD || '/opt/jira-kpi-dashboard-preprod' }}
             echo "${{ secrets.GHCR_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            # Garde-fou : configuration valide et images récupérées avant toute suppression (voir job prod).
+            docker compose -p jira-kpi-preprod -f docker-compose.prod.yml -f docker-compose.prod.ghcr.yml -f docker-compose.prod.scaleway.yml -f docker-compose.prod.preprod.yml config -q
+            docker compose -p jira-kpi-preprod -f docker-compose.prod.yml -f docker-compose.prod.ghcr.yml -f docker-compose.prod.scaleway.yml -f docker-compose.prod.preprod.yml pull
             for name in jira-kpi-preprod-frontend jira-kpi-preprod-backend jira-kpi-preprod-mongodb jira-kpi-preprod-redis; do
               docker rm -f $name 2>/dev/null || true
             done
-            docker compose -p jira-kpi-preprod -f docker-compose.prod.yml -f docker-compose.prod.ghcr.yml -f docker-compose.prod.scaleway.yml -f docker-compose.prod.preprod.yml pull
             docker compose -p jira-kpi-preprod -f docker-compose.prod.yml -f docker-compose.prod.ghcr.yml -f docker-compose.prod.scaleway.yml -f docker-compose.prod.preprod.yml up -d --remove-orphans
 
   deploy-portainer-preprod:

@@ -75,7 +75,7 @@ describe('PerformanceReview', () => {
                 {
                   value: 60,
                   evidenceUrl: 'https://jira.adoria.fr/DEV-1',
-                  updatedBy: { id: 'u1', name: 'Maxime Andres', role: 'collaborateur' },
+                  updatedBy: { id: 'u1', name: 'Maxime Laurent', role: 'collaborateur' },
                   updatedAt: new Date()
                 }
               ]
