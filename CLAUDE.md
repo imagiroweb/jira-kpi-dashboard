@@ -32,7 +32,7 @@ Frontend : la logique de calcul vit dans `frontend/src/domain/`, les composants 
 - Code, commentaires et documentation en français.
 - Toute nouvelle logique métier va dans `domain/` avec ses tests ; toute nouvelle route a son test de route.
 - Ne jamais committer de secrets (`.env`, `env.prod.template` sont ignorés).
-- Une branche par tâche (`claude/<sujet>` pour Claude), PR vers `main`, revue humaine obligatoire avant merge.
+- Une branche par tâche (`claude/<sujet>` pour Claude), PR vers `develop` (déployée en préprod sur `jira-kpi-preprod.imagiro.fr`), puis `develop` → `main` pour la prod. Revue humaine obligatoire avant tout merge.
 
 ## Workflow agentique
 
