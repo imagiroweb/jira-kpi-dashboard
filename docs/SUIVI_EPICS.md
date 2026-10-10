@@ -1,54 +1,81 @@
-# Suivi des épics (frontend)
+# Suivi des épics
 
-Ce document décrit l’écran **Suivi épics** du tableau de bord : progression, KPI et détail des story points par statut.
+## 1. Objectif
 
-## Accès
+Suivre l'avancement des épics et légendes Jira : temps passé contre estimation, story points (SP) par statut, équipes concernées, et temps / coût par personne. Public : rôles ayant la page `epics` (PO par défaut).
 
-- Menu / navigation interne vers la page `EpicProgressPage` (composant React).
-- Données : API `epicApi` (`/jira/epic-progress`, `/jira/epic/:key/details`, `/jira/epic-search`).
+## 2. Parcours utilisateur
 
-## Indicateurs principaux
+| Action | Détail |
+|---|---|
+| Liste d'épics | Pagination (20 par page, 100 max), filtres par type (épic / légende / tous), statut Jira (tous / terminé / à faire / en cours) et préfixe de clé (`INT`, `FAC`, `CLI`, `OPT`, `NIM`). Un board est obligatoire. |
+| Recherche | Autocomplétion par clé ou titre (20 résultats). |
+| Ligne de la liste | Temps (estimé / passé), SP agrégés, barre de progression, dépassement éventuel, équipes. |
+| Détail d'un épic (modale) | Arborescence des tickets enfants, sous-totaux, barres « Tickets par statut » et « Story points par statut ». |
+| Détail « Story points par statut » | Depuis la fiche épic : « Voir le détail » (données déjà chargées). Depuis la liste : clic sur la zone SP (chargement du détail puis même modale). |
+| Temps par personne | Panneau dans la fiche épic : heures, part en %, poste et, selon les droits, taux et coût. |
+| Clavier | Échap ferme d'abord la modale « détail story points », un second appui ferme la modale épic. |
 
-- **Liste d’épics** : pagination, filtres par type (epic / légende), statut Jira, préfixe de clé (`INT`, `FAC`, `CLI`, `OPT`, `NIM`).
-- **Pour chaque ligne** : temps (estimé / passé), story points agrégés, barre de progression, dépassement éventuel, équipes.
-- **Détail d’un épic** (modale) : arborescence des tickets enfants, sous-totaux, barres **Tickets par statut** et **Story points par statut**.
+## 3. Règles métier
 
-## Catégories de statut Jira
+### Catégories de statut
 
-La logique métier regroupe les tickets selon `statusCategoryKey` :
+| Catégorie Jira | Libellé | Remarque |
+|---|---|---|
+| `new` | À faire / reste à faire | |
+| `indeterminate` | En cours | |
+| `done` | Terminé | |
+| vide ou autre | En cours | même règle pour les tickets et les SP |
 
-| Clé API | Libellé UI |
-|---------|------------|
-| `new` | À faire / reste à faire |
-| `indeterminate` | En cours |
-| `done` | Terminé |
-| `null` ou autre | Traités comme **En cours** (même règle que `indeterminate` pour les agrégats liste détail SP). |
+Les pourcentages des barres empilées sont des entiers dont la somme fait 100 % (le segment « en cours » absorbe l'arrondi).
 
-Les **pourcentages** affichés sur les barres empilées sont calculés via `ticketStatusPercents` (arrondis entiers, ajustement du segment « en cours » pour que la somme fasse 100 %).
+### Détail des SP par statut
 
-## Détail « Story points par statut »
+La modale liste tous les nœuds de l'arbre (pas seulement les feuilles), par section : Reste à faire, En cours, Terminé. Dans chaque section : points décroissants, puis clé (ordre alphabétique français).
 
-- **Depuis la fiche épic** : la carte KPI « Story points par statut » propose **Voir le détail**. Les données proviennent des enfants déjà chargés (`getDetails`), sans requête supplémentaire.
-- **Depuis la liste** : clic sur la zone story points d’une ligne → chargement `getDetails(epicKey)` puis ouverture de la même modale de détail.
+### Progression
 
-La modale liste **tous les nœuds** de l’arbre (pas seulement les feuilles), dans l’ordre :
+| Indicateur | Règle |
+|---|---|
+| Référence | macro chiffrage de l'épic si > 0 (en jours-homme convertis en heures, 7,5 h par jour par défaut), sinon estimation originale |
+| Progression | `arrondi(temps passé / référence x 100)` ; 0 si la référence est nulle |
+| Dépassement | temps passé > référence |
+| Légende | enfants = épics rattachées, puis leurs US |
+| Temps / estimation d'une US | valeurs agrégées ou propres, plus sous-tâches ; si le temps passé est 0, repli sur la somme des worklogs de chaque ticket |
+| Équipes | champ équipe de l'épic et de ses descendants |
 
-1. Reste à faire  
-2. En cours  
-3. Terminé  
+Types recherchés : Epic, Legend ; « tous » ajoute Feature et Initiative.
 
-Dans chaque section, tri : **points décroissants**, puis **clé** (`localeCompare` `fr`).
+### Temps par personne (issue #44)
 
-La logique pure est centralisée dans `frontend/src/domain/epicProgress.ts` (`buildStoryPointsDetailRows`, agrégats SP, comptage feuilles, etc.), couverte par `frontend/src/domain/epicProgress.test.ts`.
+- Worklogs de tous les tickets de l'arbre, agrégés par auteur Jira. Cache 15 min.
+- Rattachement à un utilisateur de l'application par email, sinon par nom normalisé (« Prénom Nom » ou « Nom Prénom ») ; les homonymes ne sont pas rattachés. Le poste affiché est le nom du rôle.
+- Coût = somme (secondes du jour / 3600 x taux en vigueur ce jour), arrondi au centime. Part (`percent`) arrondie à 0,1.
+- Droits : le coût total est visible de tous les utilisateurs de la page ; le détail par personne et par rôle (taux, coût) est réservé au super admin et aux rôles ayant la page `couts`.
+- « Personnes sans coût » = nombre de personnes sans taux. Voir [Coûts et taux horaires](couts-horaires.md).
 
-## Raccourcis clavier
+## 4. Données
 
-- **Échappement** : ferme d’abord la modale « détail story points » si elle est ouverte ; un second appui peut fermer la modale épic selon le flux (détail liste géré au niveau page pour éviter de tout fermer d’un coup).
+| Entité | Champs |
+|---|---|
+| Épic / légende | clé, titre, statut et catégorie, équipes, temps estimé / passé, macro chiffrage, SP |
+| Ticket enfant | clé, type, statut, SP, temps, enfants |
+| Temps par personne | auteur, heures, part, poste, taux, coût |
 
-## Tests
+Source : Jira (champ macro chiffrage `customfield_10992` par défaut, champ équipe `customfield_10001`). Lots de lecture de 3 à 12 épics (8 par défaut).
 
-```bash
-cd frontend && yarn test src/domain/epicProgress.test.ts
-```
+## 5. Limites connues
 
-Ou toute la suite : `yarn test`.
+- Rattachement des auteurs Jira aux utilisateurs par nom : fragile en cas d'homonymes ou de noms différents.
+- Un ticket sans catégorie est compté « en cours ».
+- Le préfixe de clé est limité à cinq valeurs fixes.
+- Temps passé 0 sur un parent : repli sur les worklogs, plus coûteux (lecture ticket par ticket).
+
+## 6. Références code
+
+- `frontend/src/components/EpicProgressPage.tsx` : page et modales.
+- `frontend/src/components/EpicTimeByUserPanel.tsx` : temps par personne.
+- `frontend/src/domain/epicProgress.ts` (+ `epicProgress.test.ts`) : agrégats, pourcentages, lignes de détail.
+- `backend/src/routes/jiraRoutes.ts` : `/epic-progress`, `/epic-search`, `/epic/:key/details`, `/epic/:key/time-by-user`.
+- `backend/src/application/services/WorklogApplicationService.ts` : calculs de progression et de coût.
+- Tests : `cd frontend && yarn test src/domain/epicProgress.test.ts`.

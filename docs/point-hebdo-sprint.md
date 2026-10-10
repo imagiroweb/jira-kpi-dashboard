@@ -4,6 +4,17 @@ Documentation fonctionnelle et technique de la page **Point hebdo** (`PointHebdo
 document de réunion partagé, éditable et persisté, qui sert de support au point hebdomadaire entre
 les leads Dev et QA.
 
+## Synthèse (plan documentaire)
+
+| Rubrique | Contenu |
+|----------|---------|
+| Objectif | Support partagé du point hebdomadaire de 60 min entre leads Dev et QA : chiffres du sprint, blocages, interactions, amélioration continue. |
+| Parcours utilisateur | Voir « Déroulé de la séance », « Contenu du document », « Nouveau point » et « Compte-rendu » ci-dessous. |
+| Règles métier | Phases 20 / 15 / 10 / 15 min ; préremplissage Jira jamais destructif pour une saisie manuelle ; reconduction des éléments non clos ; sauvegarde 500 ms avec fusion par ligne. |
+| Données | Document `WeeklySprintMeeting` (équipes, indicateurs, blocages, interactions, actions, rétro) ; sources Jira (sprint, burndown). |
+| Limites connues | Voir la section « Limites connues » en fin de page. |
+| Références code | Section « Backend » et rubrique « Tests ». |
+
 ## FR — Vue d’ensemble
 
 Contrairement aux autres pages de l’application, qui affichent des données calculées en lecture
@@ -167,6 +178,18 @@ La page est déclarée sous l’identifiant `pointHebdo` dans `PAGE_IDS` (`Role.
 du store, la `Sidebar` et le rendu de `App.tsx`. Le seed des rôles l’active pour Dev, PO et Product,
 et la laisse désactivée pour Utilisateur et Marketing. Les rôles déjà en base sont mis à jour au
 démarrage du backend, la clé étant réécrite par le seed.
+
+Toutes les routes `/api/meetings` ne vérifient que la connexion : un utilisateur connecté sans la page `pointHebdo` peut les appeler directement. La salle temps réel d'un point (`subscribe:meeting`) est décrite dans [Temps réel et planificateur](temps-reel-planificateur.md).
+
+## Limites connues
+
+- Pas de contrôle de la page `pointHebdo` côté API (voir ci-dessus).
+- Minuteur local au navigateur, non partagé entre participants.
+- Même ligne éditée par deux personnes en même temps : le dernier enregistrement gagne.
+- Le préremplissage Jira dépend du libellé exact des indicateurs.
+- Burndown : idéal en jours ouvrés sans jours fériés, périmètre fixé 2 h après le début du sprint.
+- Export papier : les longs textes ne s'étendent pas à l'impression ; préférer le compte-rendu texte.
+- Aucune limite de durée imposée : le minuteur n'est qu'indicatif.
 
 ## Tests
 
