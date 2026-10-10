@@ -1,0 +1,10 @@
+---
+description: Contexte et conventions du projet, partagés avec Claude Code
+alwaysApply: true
+---
+
+Les instructions du projet sont dans CLAUDE.md (source unique, partagée avec Claude Code). Respecte-les :
+
+@CLAUDE.md
+
+Rôles disponibles dans le chat : @analyste-metier, @documentaliste, @reviewer. Sans rôle mentionné, tu es le Dev : tu implémentes une spec validée et tu mets à jour la page concernée de docs/.
