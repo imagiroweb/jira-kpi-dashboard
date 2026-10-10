@@ -160,7 +160,7 @@ volumineux.
   complète. Chaque blocage / interaction / action porte `createdBy` / `updatedBy` (affichage,
   pas de verrou).
 - **Routes** (`backend/src/routes/meetingRoutes.ts`, montées sur `/api/meetings`) : toutes derrière
-  `authenticate`.
+  `authenticate` et `requirePage('pointHebdo')` ; la suppression exige en plus le super admin.
 
 | Verbe | Chemin | Rôle |
 |-------|--------|------|
@@ -170,7 +170,7 @@ volumineux.
 | `POST` | `/api/meetings` | nouveau point vierge |
 | `POST` | `/api/meetings/:id/next` | point suivant, avec reconduction |
 | `PATCH` | `/api/meetings/:id` | mise à jour partielle (sauvegarde automatique) |
-| `DELETE` | `/api/meetings/:id` | suppression |
+| `DELETE` | `/api/meetings/:id` | suppression (super admin uniquement, non proposée dans l’interface) |
 
 ## Permissions
 
@@ -179,11 +179,10 @@ du store, la `Sidebar` et le rendu de `App.tsx`. Le seed des rôles l’active p
 et la laisse désactivée pour Utilisateur et Marketing. Les rôles déjà en base sont mis à jour au
 démarrage du backend, la clé étant réécrite par le seed.
 
-Toutes les routes `/api/meetings` ne vérifient que la connexion : un utilisateur connecté sans la page `pointHebdo` peut les appeler directement. La salle temps réel d'un point (`subscribe:meeting`) est décrite dans [Temps réel et planificateur](temps-reel-planificateur.md).
+Toutes les routes `/api/meetings` exigent la page `pointHebdo` dans le rôle (`requirePage`, droits relus en base à chaque requête) : sans elle, l'API répond 403. La suppression d'un point est réservée au super admin. L'abonnement temps réel à un point (`subscribe:meeting`) fait le même contrôle (`userCanSeePage`) et répond `subscribed:meeting` avec `success: false` en cas de refus ; la salle est décrite dans [Temps réel et planificateur](temps-reel-planificateur.md).
 
 ## Limites connues
 
-- Pas de contrôle de la page `pointHebdo` côté API (voir ci-dessus).
 - Minuteur local au navigateur, non partagé entre participants.
 - Même ligne éditée par deux personnes en même temps : le dernier enregistrement gagne.
 - Le préremplissage Jira dépend du libellé exact des indicateurs.
@@ -194,7 +193,7 @@ Toutes les routes `/api/meetings` ne vérifient que la connexion : un utilisateu
 ## Tests
 
 - **Backend** : `weeklySprintMeeting.test.ts` (structure, reconduction, validation) et
-  `meetingRoutes.test.ts` (routes, codes 400/401/404/500).
+  `meetingRoutes.test.ts` (routes, codes 400/401/403/404/500).
 - **Frontend** : `pointHebdoSprint.test.ts` (minuteur, avancement, préremplissage, burndown,
   compte-rendu) et `PointHebdoPage.test.tsx` (affichage, sauvegarde automatique, édition des
   sections, minuteur, préremplissage, burndown, historique, nouveau point).
