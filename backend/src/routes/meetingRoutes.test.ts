@@ -6,6 +6,19 @@ import { createTestApp } from '../test/createTestApp';
 import { TEST_USER, TEST_USER_ID } from '../test/fixtures/users';
 
 let authMode: 'pass' | 'deny' = 'pass';
+let mockSuperAdmin = true;
+let mockPageAccess = 'allow' as 'allow' | 'deny';
+const mockRequirePageArgs: string[][] = [];
+
+// Contrôle par page testé à part (middleware/requirePage.test.ts) : ici, laisse passer
+// sauf si mockPageAccess = 'deny'.
+jest.mock('../middleware/requirePage', () => ({
+  requirePage: (...pages: string[]) => {
+    mockRequirePageArgs.push(pages);
+    return (_req: unknown, res: { status: (c: number) => { json: (b: unknown) => void } }, next: () => void) =>
+      mockPageAccess === 'deny' ? res.status(403).json({ success: false, error: 'Accès non autorisé pour votre rôle' }) : next();
+  },
+}));
 
 jest.mock('../middleware/authMiddleware', () => {
   const auth = jest.requireActual<typeof import('../test/mocks/authMiddleware')>(
@@ -22,7 +35,16 @@ jest.mock('../middleware/authMiddleware', () => {
       }
       return auth.mockAuthenticate()(req, res, next);
     },
-    requireSuperAdmin: auth.mockRequireSuperAdmin,
+    requireSuperAdmin: (
+      req: import('express').Request,
+      res: import('express').Response,
+      next: import('express').NextFunction
+    ) => {
+      if (!mockSuperAdmin) {
+        return res.status(403).json({ success: false, error: 'Accès réservé aux super administrateurs' });
+      }
+      return auth.mockRequireSuperAdmin(req, res, next);
+    },
   };
 });
 
@@ -118,6 +140,8 @@ describe('meetingRoutes — point hebdo (TI)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     authMode = 'pass';
+    mockSuperAdmin = true;
+    mockPageAccess = 'allow';
 
     mockWeeklySprintMeeting.create.mockResolvedValue(mockMeetingDoc());
     mockWeeklySprintMeeting.findById.mockResolvedValue(mockMeetingDoc());
@@ -126,6 +150,38 @@ describe('meetingRoutes — point hebdo (TI)', () => {
     mockWeeklySprintMeeting.findByIdAndDelete.mockResolvedValue(mockMeetingDoc());
     mockFindChain([mockMeetingDoc()]);
     mockFindOneChain(mockMeetingDoc());
+  });
+
+  describe('contrôle d\'accès', () => {
+    it('exige la page pointHebdo sur toutes les routes', () => {
+      expect(mockRequirePageArgs).toContainEqual(['pointHebdo']);
+    });
+
+    it.each([
+      ['get', '/api/meetings'],
+      ['get', '/api/meetings/latest'],
+      ['get', `/api/meetings/${MEETING_ID}`],
+      ['post', '/api/meetings'],
+      ['post', `/api/meetings/${MEETING_ID}/next`],
+      ['patch', `/api/meetings/${MEETING_ID}`],
+      ['delete', `/api/meetings/${MEETING_ID}`],
+    ] as const)('retourne 403 sur %s %s sans la page pointHebdo', async (method, path) => {
+      mockPageAccess = 'deny';
+
+      const res = await request(app)[method](path);
+
+      expect(res.status).toBe(403);
+      expect(mockWeeklySprintMeeting.findById).not.toHaveBeenCalled();
+      expect(mockWeeklySprintMeeting.findByIdAndDelete).not.toHaveBeenCalled();
+    });
+
+    it('retourne 401 sans connexion', async () => {
+      authMode = 'deny';
+
+      const res = await request(app).get('/api/meetings');
+
+      expect(res.status).toBe(401);
+    });
   });
 
   describe('GET /api/meetings', () => {
@@ -404,6 +460,15 @@ describe('meetingRoutes — point hebdo (TI)', () => {
 
       expect(res.status).toBe(200);
       expect(mockWeeklySprintMeeting.findByIdAndDelete).toHaveBeenCalledWith(MEETING_ID);
+    });
+
+    it('retourne 403 si l\'utilisateur n\'est pas super admin', async () => {
+      mockSuperAdmin = false;
+
+      const res = await request(app).delete(`/api/meetings/${MEETING_ID}`);
+
+      expect(res.status).toBe(403);
+      expect(mockWeeklySprintMeeting.findByIdAndDelete).not.toHaveBeenCalled();
     });
 
     it('retourne 404 si le point n\'existe pas', async () => {

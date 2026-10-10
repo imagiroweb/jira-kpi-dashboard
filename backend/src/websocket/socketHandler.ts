@@ -2,6 +2,7 @@ import { Server, Socket } from 'socket.io';
 import { logger } from '../utils/logger';
 import { authService } from '../application/services/AuthService';
 import { readSessionCookie } from '../config/sessionCookie';
+import { userCanSeePage } from '../middleware/requirePage';
 
 interface ConnectedClient {
   id: string;
@@ -76,9 +77,22 @@ export function setupSocketHandlers(io: Server): void {
     });
 
     // Subscribe to live updates for a specific weekly meeting (Point hebdo)
-    socket.on('subscribe:meeting', (meetingId: string) => {
+    socket.on('subscribe:meeting', async (meetingId: string) => {
       if (typeof meetingId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(meetingId)) {
         logger.warn(`Client ${socket.id} sent an invalid meetingId for subscribe:meeting`);
+        return;
+      }
+      // Même droit que l'API REST : la page « Point hebdo » doit être visible pour le rôle.
+      const userId = socket.data.user?.userId;
+      let allowed = false;
+      try {
+        allowed = typeof userId === 'string' && (await userCanSeePage(userId, 'pointHebdo'));
+      } catch (error) {
+        logger.error('subscribe:meeting access check failed:', error);
+      }
+      if (!allowed) {
+        logger.warn(`Client ${socket.id} denied subscribe:meeting (no pointHebdo access)`);
+        socket.emit('subscribed:meeting', { meetingId, success: false });
         return;
       }
       socket.join(`meeting:${meetingId}`);

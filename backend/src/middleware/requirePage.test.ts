@@ -14,7 +14,7 @@ jest.mock('../application/services/AuthService', () => ({
 }));
 jest.mock('../utils/logger', () => ({ logger: { error: jest.fn() } }));
 
-import { requirePage } from './requirePage';
+import { requirePage, userCanSeePage } from './requirePage';
 
 function run(mw: ReturnType<typeof requirePage>, user?: { userId: string }) {
   const req = { user } as unknown as Request;
@@ -66,5 +66,32 @@ describe('requirePage', () => {
   it('retourne 500 en cas d’erreur base', async () => {
     mockFindById.mockRejectedValue(new Error('db'));
     expect((await run(requirePage('users'), { userId: 'u1' })).res.status).toHaveBeenCalledWith(500);
+  });
+});
+
+describe('userCanSeePage', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('vrai si le compte actif voit la page', async () => {
+    mockFindById.mockResolvedValue({ isActive: true });
+    mockGetVisiblePages.mockResolvedValue({ pointHebdo: true });
+
+    await expect(userCanSeePage('u1', 'pointHebdo')).resolves.toBe(true);
+  });
+
+  it('faux si la page est masquée pour le rôle', async () => {
+    mockFindById.mockResolvedValue({ isActive: true });
+    mockGetVisiblePages.mockResolvedValue({ pointHebdo: false });
+
+    await expect(userCanSeePage('u1', 'pointHebdo')).resolves.toBe(false);
+  });
+
+  it('faux pour un compte désactivé ou introuvable', async () => {
+    mockFindById.mockResolvedValue({ isActive: false });
+    await expect(userCanSeePage('u1', 'pointHebdo')).resolves.toBe(false);
+
+    mockFindById.mockResolvedValue(null);
+    await expect(userCanSeePage('u1', 'pointHebdo')).resolves.toBe(false);
+    expect(mockGetVisiblePages).not.toHaveBeenCalled();
   });
 });

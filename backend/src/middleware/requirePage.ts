@@ -12,6 +12,17 @@ import { logger } from '../utils/logger';
  * Les droits sont relus en base à chaque requête : un changement de rôle s'applique tout de
  * suite, sans attendre l'expiration du JWT.
  */
+/**
+ * Même contrôle que `requirePage`, hors Express (ex. abonnement Socket.io) : vrai si le compte
+ * existe, est actif et voit au moins une des pages.
+ */
+export async function userCanSeePage(userId: string, ...pages: PageId[]): Promise<boolean> {
+  const user = await User.findById(userId).select('role roleId isActive');
+  if (!user || !user.isActive) return false;
+  const visible = await authService.getVisiblePages(user);
+  return pages.some((page) => visible[page] === true);
+}
+
 export function requirePage(...pages: PageId[]) {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
