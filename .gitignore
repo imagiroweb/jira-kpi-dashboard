@@ -80,3 +80,7 @@ temp/
 
 # Sauvegardes chiffrées locales (scripts/mongo-backup-encrypted.sh)
 backups/
+
+# Playwright
+e2e/playwright-report/
+e2e/test-results/

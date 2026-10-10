@@ -12,3 +12,4 @@ cd "$CLAUDE_PROJECT_DIR"
 yarn install --frozen-lockfile --silent
 yarn --cwd backend install --frozen-lockfile --silent
 yarn --cwd frontend install --frozen-lockfile --silent
+yarn --cwd e2e install --frozen-lockfile --silent
