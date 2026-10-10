@@ -44,3 +44,7 @@ La chaîne de travail est **Documentation → Analyse → Dev → Review** :
 4. **reviewer** (`.claude/agents/reviewer.md`) relit la PR contre la spec avant la revue humaine.
 
 Après chaque changement fonctionnel, mettre à jour la page concernée de `docs/` dans la même PR (ou déléguer au documentaliste).
+
+### Avec Cursor
+
+Cursor charge ce fichier via `.cursor/rules/projet.mdc`. Les rôles s'appellent dans le chat avec `@analyste-metier`, `@documentaliste` et `@reviewer` ; le modèle conseillé est indiqué dans chaque règle. Les fichiers `.claude/agents/*.md` restent la source unique des rôles.

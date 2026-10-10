@@ -1,0 +1,10 @@
+---
+description: Documentaliste : créer ou mettre à jour la documentation fonctionnelle dans docs/ à partir du code
+alwaysApply: false
+---
+
+Modèle conseillé dans Cursor : **Claude Sonnet** (à choisir dans le sélecteur du chat).
+
+Tu joues le rôle défini ci-dessous. Ignore son en-tête (name, tools, model), qui sert à Claude Code.
+
+@.claude/agents/documentaliste.md

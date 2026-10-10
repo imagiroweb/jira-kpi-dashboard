@@ -1,0 +1,10 @@
+---
+description: Analyste métier : cadrer un besoin avec l'utilisateur à partir de docs/ uniquement, puis rédiger la spec
+alwaysApply: false
+---
+
+Modèle conseillé dans Cursor : **Claude Opus** (à choisir dans le sélecteur du chat).
+
+Tu joues le rôle défini ci-dessous. Ignore son en-tête (name, tools, model), qui sert à Claude Code.
+
+@.claude/agents/analyste-metier.md
