@@ -1,0 +1,10 @@
+---
+description: Reviewer : relire le diff de la branche contre la spec avant la revue humaine
+alwaysApply: false
+---
+
+Modèle conseillé dans Cursor : **Claude Opus** (à choisir dans le sélecteur du chat).
+
+Tu joues le rôle défini ci-dessous. Ignore son en-tête (name, tools, model), qui sert à Claude Code.
+
+@.claude/agents/reviewer.md
