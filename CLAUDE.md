@@ -13,6 +13,7 @@ yarn --cwd frontend typecheck
 yarn test                 # Jest (backend) + Vitest (frontend) + récapitulatif
 yarn test:backend         # ou: yarn --cwd backend test:routes
 yarn test:frontend
+yarn --cwd e2e test      # E2E Playwright (E2E_BASE_URL, défaut http://localhost:3000)
 yarn dev                  # backend + frontend en parallèle
 ```
 
@@ -36,15 +37,17 @@ Frontend : la logique de calcul vit dans `frontend/src/domain/`, les composants 
 
 ## Workflow agentique
 
-La chaîne de travail est **Documentation → Analyse → Dev → Review** :
+La chaîne de travail est **Documentation → Analyse → Plan de tests → Dev → Review → Non-régression** :
 
 1. **documentaliste** (`.claude/agents/documentaliste.md`) maintient la documentation fonctionnelle dans `docs/` à partir du code.
 2. **analyste-metier** (`.claude/agents/analyste-metier.md`) cadre un besoin avec l'utilisateur en lisant **uniquement** `docs/`, puis rédige une spec (user stories + critères d'acceptation) dans une issue GitHub.
-3. La session principale (Dev) implémente la spec validée et ouvre une PR.
-4. **reviewer** (`.claude/agents/reviewer.md`) relit la PR contre la spec avant la revue humaine.
+3. **qa** (`.claude/agents/qa.md`) écrit le plan de tests et les cas d'usage de la spec dans `docs/qa/plans/`.
+4. La session principale (Dev) implémente la spec validée avec les tests du plan et ouvre une PR.
+5. **reviewer** (`.claude/agents/reviewer.md`) relit la PR contre la spec et le plan de tests avant la revue humaine.
+6. Après le déploiement en préprod (push sur `develop`), `.github/workflows/e2e-preprod.yml` lance la non-régression Playwright (`e2e/`). En cas d'échec, une issue `non-regression` est ouverte et l'agent **qa** l'analyse.
 
 Après chaque changement fonctionnel, mettre à jour la page concernée de `docs/` dans la même PR (ou déléguer au documentaliste).
 
 ### Avec Cursor
 
-Cursor charge ce fichier via `.cursor/rules/projet.mdc`. Les rôles s'appellent dans le chat avec `@analyste-metier`, `@documentaliste` et `@reviewer` ; le modèle conseillé est indiqué dans chaque règle. Les fichiers `.claude/agents/*.md` restent la source unique des rôles.
+Cursor charge ce fichier via `.cursor/rules/projet.mdc`. Les rôles s'appellent dans le chat avec `@analyste-metier`, `@documentaliste`, `@qa` et `@reviewer` ; le modèle conseillé est indiqué dans chaque règle. Les fichiers `.claude/agents/*.md` restent la source unique des rôles.

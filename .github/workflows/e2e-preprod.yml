@@ -1,0 +1,85 @@
+# Non-régression E2E (Playwright) contre la préprod
+#   - après chaque CD réussi sur develop (déploiement de la préprod)
+#   - chaque nuit, et à la demande
+# Secrets : E2E_USER_EMAIL, E2E_USER_PASSWORD (compte de test dédié à la préprod).
+# Variable optionnelle : E2E_BASE_URL (défaut : https://jira-kpi-preprod.imagiro.fr).
+name: E2E préprod
+
+on:
+  workflow_run:
+    workflows: [CD]
+    types: [completed]
+    branches: [develop]
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  NODE_VERSION: "20"
+  E2E_BASE_URL: ${{ vars.E2E_BASE_URL || 'https://jira-kpi-preprod.imagiro.fr' }}
+
+jobs:
+  e2e:
+    name: Non-régression préprod
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./e2e
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: develop
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: yarn
+          cache-dependency-path: e2e/yarn.lock
+
+      - name: Install
+        run: |
+          yarn install --frozen-lockfile
+          npx playwright install --with-deps chromium
+
+      - name: Attendre que la préprod réponde
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS "$E2E_BASE_URL/api/health" > /dev/null; then exit 0; fi
+            sleep 10
+          done
+          echo "La préprod ne répond pas sur $E2E_BASE_URL/api/health" && exit 1
+
+      - name: Tests E2E
+        env:
+          CI: "true"
+          E2E_USER_EMAIL: ${{ secrets.E2E_USER_EMAIL }}
+          E2E_USER_PASSWORD: ${{ secrets.E2E_USER_PASSWORD }}
+        run: yarn test
+
+      - name: Rapport Playwright
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: e2e/playwright-report
+          retention-days: 14
+
+      - name: Ouvrir une issue en cas d'échec
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          gh label create non-regression --color B60205 --description "Échec des tests E2E en préprod" 2>/dev/null || true
+          gh issue create \
+            --title "Non-régression préprod en échec ($(date -u +%F))" \
+            --label non-regression \
+            --body "Les tests E2E ont échoué contre $E2E_BASE_URL. Rapport et traces : $RUN_URL"
