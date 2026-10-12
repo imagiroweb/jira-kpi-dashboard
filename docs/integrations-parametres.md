@@ -20,7 +20,7 @@ Brancher l'application sur Jira, Monday et Brevo, choisir les boards suivis et r
 | Jira Cloud | sprints, worklogs, épics, support | URL, email, jeton, projets, boards |
 | Monday.com | roadmap produit | clé API |
 | Brevo | marketing | clé API (variable d'environnement uniquement) |
-| SMTP | emails d'invitation et de reset | variables d'environnement |
+| SMTP | emails d'invitation et de reset | variables d'environnement ; Mailcow sur le même serveur : `MAILCOW_DOCKER_NETWORK` dans `.env` (voir `docker-compose.prod.mailcow.yml`) |
 | Microsoft Entra | connexion SSO | identifiant client, tenant, URL de retour |
 | IA | non implémentée | voir Limites |
 
