@@ -119,7 +119,7 @@ services:
     environment:
       - NODE_ENV=production
       - PORT=3001
-      - MONGODB_URI=mongodb://admin:${MONGO_PASSWORD}@mongodb:27017/jira-kpi?authSource=admin
+      - MONGODB_URI=mongodb://${MONGO_APP_USER:-jira_kpi_app}:${MONGO_APP_PASSWORD}@mongodb:27017/jira-kpi?authSource=jira-kpi
       - REDIS_URL=redis://redis:6379
       - JIRA_URL=${JIRA_URL}
       - JIRA_EMAIL=${JIRA_EMAIL}
@@ -183,7 +183,8 @@ volumes:
 
 4. Dans **Environment variables** de la stack, ajouter les variables nécessaires (elles seront injectées dans les services via `${VAR}`). Le fichier **`env.prod.template`** à la racine du repo est une **référence** (checklist) : il n’est **pas chargé automatiquement** par Docker/Portainer ; il faut saisir les variables dans l’interface Portainer (ou dans un `.env` si vous lancez `docker compose` en ligne de commande) :
 
-- `MONGO_PASSWORD`
+- `MONGO_PASSWORD` (compte root `admin`, administration uniquement)
+- `MONGO_APP_USER` (défaut `jira_kpi_app`) et `MONGO_APP_PASSWORD` : utilisateur applicatif du backend, à créer dans MongoDB (voir [section 6](#6-utilisateur-mongodb-applicatif))
 - `JIRA_URL`, `JIRA_EMAIL`, `JIRA_API_TOKEN`, `JIRA_PROJECT_KEY`, `JIRA_BOARD_ID`
 - `JIRA_QA_BOARD_ID` (boards QA pour le point hebdo, ex. `946` — séparés de `JIRA_BOARD_ID`)
 - `CORS_ORIGIN` (ex. `https://ton-domaine.com`)
@@ -254,7 +255,8 @@ La préprod a ses propres conteneurs, volumes MongoDB/Redis et son réseau. `SYN
 ```bash
 sudo mkdir -p /opt/jira-kpi-dashboard-preprod
 sudo cp /opt/jira-kpi-dashboard/.env /opt/jira-kpi-dashboard-preprod/.env
-# Éditer JWT_SECRET et MONGO_PASSWORD dans le .env préprod
+# Éditer JWT_SECRET, MONGO_PASSWORD et MONGO_APP_PASSWORD dans le .env préprod
+# puis créer l'utilisateur applicatif (section 6) avec le conteneur jira-kpi-preprod-mongodb
 ```
 
 3. Azure Entra → l’app registration existante → **Authentication** → **Single-page application** → ajouter  
@@ -276,3 +278,25 @@ Les fichiers compose sont copiés par la CD au premier push sur `develop` si `DE
 ### 5.2 Ensuite
 
 Merger sur `develop` déploie la préprod. Merger `develop` dans `main` déploie la prod. Ne pas pointer la préprod sur le tag `latest`.
+
+---
+
+## 6. Utilisateur MongoDB applicatif
+
+Le backend ne se connecte plus avec le compte root `admin` : il utilise un utilisateur à droits limités (`readWrite` sur la base `jira-kpi`), défini par `MONGO_APP_USER` et `MONGO_APP_PASSWORD`. `MONGO_APP_PASSWORD` est **obligatoire** : sans lui, `docker compose config` échoue avec `required variable MONGO_APP_PASSWORD is missing a value` et la CD s'arrête **avant** de toucher aux conteneurs (la version en place continue de tourner).
+
+À faire **une fois par serveur** (prod, puis préprod avec son propre mot de passe), avant le déploiement qui introduit cette variable :
+
+```bash
+cd /opt/jira-kpi-dashboard                       # ou /opt/jira-kpi-dashboard-preprod
+# 1. Ajouter les variables au .env (hexadécimal : rien à encoder dans l'URI)
+echo "MONGO_APP_USER=jira_kpi_app" >> .env
+echo "MONGO_APP_PASSWORD=$(openssl rand -hex 32)" >> .env
+# 2. Créer l'utilisateur dans le conteneur MongoDB en cours d'exécution (idempotent)
+bash scripts/mongo-create-app-user.sh                            # prod : jira-kpi-mongodb
+bash scripts/mongo-create-app-user.sh jira-kpi-preprod-mongodb   # préprod
+```
+
+Le script est copié sur le serveur par la CD ; s'il manque, le récupérer depuis le dépôt (`scripts/mongo-create-app-user.sh`). Relancer ensuite le job CD en échec (**Actions → CD → Re-run failed jobs**) ou pousser sur la branche.
+
+Avec Portainer : ajouter `MONGO_APP_USER` et `MONGO_APP_PASSWORD` aux variables de la stack, puis lancer le script sur le serveur avec ces deux variables exportées (il les lit dans l'environnement avant le `.env`).
