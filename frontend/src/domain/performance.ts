@@ -198,6 +198,8 @@ export interface PerformanceReviewUserRef {
 
 export interface PerformanceReview {
   id: string;
+  /** Fiche anonymisée (compte effacé ou durée de conservation dépassée) : lecture seule, sans texte libre. */
+  anonymized?: boolean;
   /** ObjectId brut sur `GET/PATCH .../me...` ; objet peuplé sur les listes/détail lead-CTO. */
   user: string | PerformanceReviewUserRef;
   cycle: string;

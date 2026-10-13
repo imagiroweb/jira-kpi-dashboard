@@ -299,6 +299,22 @@ describe('performanceRoutes — portée équipe/CTO (TI)', () => {
       expect(mockReviewFind).toHaveBeenCalledWith({ cycle: ACTIVE_CYCLE._id });
     });
 
+    it('affiche une fiche anonymisée (compte détaché) avec un libellé générique', async () => {
+      mockUserFindById.mockReturnValue({
+        select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })
+      });
+      mockCycleFindOne.mockResolvedValue(ACTIVE_CYCLE);
+      mockReviewFind.mockReturnValue({
+        populate: () => ({ sort: () => Promise.resolve([makeReviewDoc({ user: null, anonymizedAt: new Date() })]) })
+      });
+
+      const res = await request(app).get('/api/performance/reviews');
+
+      expect(res.status).toBe(200);
+      expect(res.body.reviews[0].user).toEqual({ _id: expect.stringMatching(/^anonyme-/), firstName: 'Collaborateur', lastName: 'anonymisé' });
+      expect(res.body.reviews[0].anonymized).toBe(true);
+    });
+
     it("renseigne l'équipe depuis User.teamId si la fiche n'en a pas", async () => {
       mockUserFindById.mockReturnValue({
         select: () => ({ lean: () => Promise.resolve(actorLean({ role: 'super_admin' })) })

@@ -51,15 +51,15 @@ describe('useSocket', () => {
     expect(socketHarness.mockIo).not.toHaveBeenCalled();
   });
 
-  it('connecte le socket avec le token et s’abonne aux KPI à la connexion', async () => {
-    seedAuthenticatedUser(undefined, 'jwt-test-token');
+  it('connecte le socket avec le cookie de session et s’abonne aux KPI à la connexion', async () => {
+    seedAuthenticatedUser();
 
     const { result } = renderHook(() => useSocket());
 
     expect(socketHarness.mockIo).toHaveBeenCalledWith(
       expect.any(String),
       expect.objectContaining({
-        auth: { token: 'jwt-test-token' },
+        withCredentials: true,
         transports: ['websocket', 'polling'],
       })
     );
@@ -76,7 +76,7 @@ describe('useSocket', () => {
   });
 
   it('déconnecte le socket quand l’authentification est perdue', async () => {
-    seedAuthenticatedUser(undefined, 'jwt-test-token');
+    seedAuthenticatedUser();
 
     const { rerender } = renderHook(() => useSocket());
 

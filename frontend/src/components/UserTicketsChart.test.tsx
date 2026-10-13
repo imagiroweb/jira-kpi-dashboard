@@ -91,6 +91,6 @@ describe('UserTicketsChart', () => {
     });
 
     expect(screen.getByText('Corriger le dashboard')).toBeInTheDocument();
-    expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/worklog/search?'));
+    expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('/worklog/search?'), expect.anything());
   });
 });

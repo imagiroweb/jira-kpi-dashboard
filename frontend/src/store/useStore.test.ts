@@ -90,33 +90,25 @@ describe('useStore (auth)', () => {
     resetStore();
   });
 
-  it('login met à jour isAuthenticated, token, user et currentPage', () => {
-    useStore.getState().login('jwt-token', mockUser);
+  it('login met à jour isAuthenticated, user et currentPage (aucun jeton côté JavaScript)', () => {
+    useStore.getState().login(mockUser);
 
     expect(useStore.getState().isAuthenticated).toBe(true);
-    expect(useStore.getState().token).toBe('jwt-token');
+    expect(localStorage.getItem('auth_token')).toBeNull();
     expect(useStore.getState().user).toEqual(mockUser);
     expect(useStore.getState().currentPage).toBe('dashboard');
   });
 
-  it('login avec firstLogin met pendingRoleSelection à true', () => {
-    useStore.getState().login('jwt-token', mockUser, true);
-
-    expect(useStore.getState().pendingRoleSelection).toBe(true);
-  });
-
   it('logout remet l’état auth à l’état initial', () => {
-    useStore.getState().login('jwt-token', mockUser);
+    useStore.getState().login(mockUser);
     useStore.getState().logout();
 
     expect(useStore.getState().isAuthenticated).toBe(false);
-    expect(useStore.getState().token).toBeNull();
     expect(useStore.getState().user).toBeNull();
-    expect(useStore.getState().pendingRoleSelection).toBe(false);
   });
 
   it('logout réinitialise les caches dashboard, support, epics et users', () => {
-    useStore.getState().login('jwt-token', mockUser);
+    useStore.getState().login(mockUser);
     useStore.setState({
       dashboardStats: [{ boardId: 1, name: 'B', projectKey: 'P', color: '#fff' } as never],
       dashboardLastUpdate: new Date('2025-01-01'),
@@ -168,7 +160,7 @@ describe('useStore (auth)', () => {
   });
 
   it('updateUser conserve currentPage si la page reste visible', () => {
-    useStore.getState().login('jwt-token', mockUser);
+    useStore.getState().login(mockUser);
     useStore.getState().setCurrentPage('dashboard');
 
     useStore.getState().updateUser({
@@ -182,7 +174,7 @@ describe('useStore (auth)', () => {
   });
 
   it('updateUser redirige vers la première page visible si la page courante ne l’est plus', () => {
-    useStore.getState().login('jwt-token', {
+    useStore.getState().login({
       ...mockUser,
       visiblePages: {
         dashboard: true,
@@ -252,7 +244,9 @@ describe('useStore (persist)', () => {
     expect(persisted.dashboardLastUpdate).toBe(iso);
     expect(persisted.supportKpiLastUpdate).toBe(iso);
     expect(persisted.epicsProgressLastUpdate).toBe(iso);
-    expect(persisted.usersReportLastUpdate).toBe(iso);
+    // rapport nominatif « Utilisateurs » : non persisté (minimisation)
+    expect(persisted).not.toHaveProperty('usersReportLastUpdate');
+    expect(persisted).not.toHaveProperty('usersReportPayload');
   });
 
   it('merge reconvertit les dates ISO persistées en objets Date', () => {
@@ -281,5 +275,15 @@ describe('useStore (persist)', () => {
     const current = useStore.getState();
 
     expect(merge(null, current)).toBe(current);
+  });
+
+  it('ne persiste jamais le rapport nominatif « Utilisateurs » dans le localStorage', () => {
+    useStore.setState({ usersReportPayload: { rows: [{ author: 'Jean Dupont', seconds: 3600 }] }, usersReportLastUpdate: new Date() });
+
+    const persisted = Object.keys(localStorage)
+      .map((k) => localStorage.getItem(k) ?? '')
+      .join('');
+    expect(persisted).not.toContain('Jean Dupont');
+    expect(persisted).not.toContain('usersReportPayload');
   });
 });

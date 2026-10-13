@@ -2,6 +2,43 @@
 
 Documentation fonctionnelle et technique pour la section **Produit** (`ProduitDashboard.tsx`) et la logique **Roadmap Adoria 2026** connectée à Monday.com.
 
+## Synthèse (plan documentaire)
+
+| Rubrique | Contenu |
+|----------|---------|
+| Objectif | Piloter la roadmap produit Adoria 2026 (board Monday) : filtres, répartitions, contrôles qualité « Sans … », kanban, plus l'indicateur « US Claude » (voir ci-dessous). Public : rôle ayant la page `produit` (Product par défaut). |
+| Parcours utilisateur | Filtrer par trimestre / statut / team, enregistrer ses filtres par défaut, ouvrir un encart pour voir les lignes concernées. |
+| Règles métier | Voir « Vue d'ensemble » et le tableau des 13 encarts. |
+| Données | Items et colonnes du board Monday ; préférence utilisateur des filtres ; tickets Jira pour l'indicateur Claude. |
+| Limites connues | Section « Limites connues » ci-dessous. |
+| Références code | Section « Fichiers concernés ». |
+
+## Indicateur « US Claude » (Jira)
+
+Droit `produit`. Compte, sur un trimestre (Q1 à Q4) ou l'année, les US passées à « Terminé » et les US créées, en distinguant celles portant le label Claude (défaut `claude-us`, ou un filtre Jira prioritaire) des autres.
+
+| Règle | Détail |
+|-------|--------|
+| Types comptés | US par défaut (configurable) |
+| Périmètre | union des filtres des boards dashboard et QA ; repli sur le projet configuré |
+| Pourcentage | part Claude, arrondie à 0,1 ; totaux dédoublonnés par clé ; détail par équipe |
+| Détail d'un ticket | date d'ajout du label (dernier ajout dans l'historique Jira) ; « résolu » = date de résolution, sinon date de changement de catégorie de statut |
+| Cache | 15 min |
+
+Fichiers : `frontend/src/components/ClaudeUsKpiPanel.tsx`, `ClaudeUsDetailModal.tsx`, routes `/api/jira/claude-us-stats` et `/claude-us-issues` dans `backend/src/routes/jiraRoutes.ts`.
+
+## Accès à Monday
+
+Les routes `/api/monday/...` (statut, profil, espaces de travail, boards, vues) ne vérifient que la connexion, pas la page `produit`. Clé `MONDAY_API_KEY` ou saisie dans [Intégrations et paramètres](integrations-parametres.md). Lecture seule, 100 items par board par défaut (500 max).
+
+## Limites connues
+
+- Les compteurs des encarts peuvent différer de ceux des vues Monday (restrictions de vue non reprises).
+- Dépendance aux titres de colonnes Monday : renommer une colonne désactive l'encart ou le filtre correspondant.
+- Les routes Monday ne sont pas protégées par la page `produit`.
+- Filtre trimestre : uniquement la colonne « Trimestre » ; une ligne sans valeur Q1 à Q4 est exclue quand un trimestre est choisi.
+- Lecture seule : aucune écriture vers Monday.
+
 ## FR — Vue d’ensemble
 
 - **Données** : board Monday (par défaut ID `5191064770`), items et colonnes via l’API interne.

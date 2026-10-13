@@ -1,4 +1,12 @@
 import mongoose, { Document, Schema } from 'mongoose';
+import { safeDecrypt } from '../../../infrastructure/crypto/fieldEncryption';
+import { emailHashOf } from '../emailHash';
+
+import { encryptedJson, encryptedString, withEncryptedFields } from '../../../infrastructure/crypto/mongooseEncryption';
+
+function isValidEmail(email: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+}
 
 /** Filtres par défaut Roadmap Adoria 2026 (page Produit) */
 export type RoadmapAdoriaQuarterFilter = 'all' | 'Q1' | 'Q2' | 'Q3' | 'Q4';
@@ -17,6 +25,8 @@ export interface IUserPreferences {
 
 export interface IUser extends Document {
   email: string;
+  /** Empreinte de recherche de l'email (voir `emailHashOf`). */
+  emailHash?: string;
   password?: string;
   firstName?: string;
   lastName?: string;
@@ -26,6 +36,13 @@ export interface IUser extends Document {
   /** 'super_admin' = full access + gestion utilisateurs; otherwise use roleId */
   role?: 'super_admin';
   roleId?: mongoose.Types.ObjectId;
+  /** Organisation de rattachement (voir domain/organization). Posée pour le multi-entreprises ;
+   * le cloisonnement complet des données par organisation fera l'objet d'un lot dédié. */
+  organizationId?: mongoose.Types.ObjectId;
+  /** Administrateur de la plateforme (éditeur) : gère les organisations et leur SSO.
+   * Distinct de `role: 'super_admin'`, qui administre une organisation. Jamais attribué
+   * automatiquement : uniquement via le script d'amorçage. */
+  isPlatformAdmin?: boolean;
   /** Équipe actuelle du collaborateur — modifiable (changement d'équipe) ; voir domain/team/entities/Team */
   teamId?: mongoose.Types.ObjectId;
   /** Droit délégué par le CTO/super_admin : permet à ce lead de rattacher un collaborateur à SA PROPRE
@@ -45,6 +62,13 @@ export interface IUser extends Document {
   passwordResetToken?: string;
   /** Date d'expiration du token (1h après génération) */
   passwordResetExpires?: Date;
+  /** Version des sessions : incrémentée pour révoquer tous les JWT émis (désactivation,
+   * changement de rôle, réinitialisation du mot de passe). Comparée au claim `tv` du jeton. */
+  tokenVersion?: number;
+  /** Date de désactivation du compte : point de départ de la durée de conservation avant anonymisation. */
+  deactivatedAt?: Date | null;
+  /** Compte anonymisé (droit à l'effacement ou fin de durée de conservation) : plus aucune donnée personnelle. */
+  anonymizedAt?: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -65,19 +89,27 @@ export const DEFAULT_ROADMAP_ADORIA_2026_FILTERS: IRoadmapAdoria2026Filters = {
 
 const UserSchema = new Schema<IUser>(
   {
+    // Email chiffré en base (AES-256-GCM) ; la recherche et l'unicité passent par `emailHash`.
     email: {
-      type: String,
+      ...encryptedString({ trim: true, lowercase: true }),
       required: true,
-      unique: true,
-      lowercase: true,
-      trim: true,
       validate: {
-        validator: (email: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email),
+        // Le validateur reçoit la valeur stockée (chiffrée) : on valide la valeur en clair.
+        validator: (stored: string) => isValidEmail(String(safeDecrypt(stored, ''))),
         message: 'Email invalide'
       }
     },
+    /** Empreinte HMAC-SHA256 (clé d'index) de l'email normalisé : recherche exacte et unicité
+     * sans stocker l'email en clair. Calculée automatiquement (voir hook `validate`). */
+    emailHash: {
+      type: String,
+      unique: true,
+      sparse: true
+    },
     password: {
       type: String,
+      // Hash bcrypt jamais renvoyé par défaut : à demander explicitement (`.select('+password')`).
+      select: false,
       required: function(this: IUser) {
         return this.provider === 'local';
       },
@@ -115,6 +147,15 @@ const UserSchema = new Schema<IUser>(
       ref: 'Role',
       default: null
     },
+    organizationId: {
+      type: Schema.Types.ObjectId,
+      ref: 'Organization',
+      default: null
+    },
+    isPlatformAdmin: {
+      type: Boolean,
+      default: false
+    },
     teamId: {
       type: Schema.Types.ObjectId,
       ref: 'Team',
@@ -124,18 +165,8 @@ const UserSchema = new Schema<IUser>(
       type: Boolean,
       default: false
     },
-    hourlyRates: {
-      type: [
-        new Schema(
-          {
-            startDate: { type: String, default: null },
-            rate: { type: Number, required: true, min: 0 }
-          },
-          { _id: false }
-        )
-      ],
-      default: undefined
-    },
+    // Coûts horaires chiffrés (donnée salariale) : validés côté domaine (domain/user/hourlyRates).
+    hourlyRates: encryptedJson<Array<{ startDate: string | null; rate: number }>>(),
     includedInCosts: {
       type: Boolean,
       default: false
@@ -167,6 +198,18 @@ const UserSchema = new Schema<IUser>(
     passwordResetExpires: {
       type: Date,
       select: false
+    },
+    tokenVersion: {
+      type: Number,
+      default: 0
+    },
+    deactivatedAt: {
+      type: Date,
+      default: null
+    },
+    anonymizedAt: {
+      type: Date,
+      default: null
     }
   },
   {
@@ -174,10 +217,19 @@ const UserSchema = new Schema<IUser>(
   }
 );
 
+UserSchema.pre('validate', function (next) {
+  if (this.isModified('email') || !this.emailHash) {
+    const plain = String(safeDecrypt(this.get('email', null, { getters: false }), ''));
+    if (plain) this.emailHash = emailHashOf(plain);
+  }
+  next();
+});
+
+withEncryptedFields(UserSchema);
+
 // Index pour améliorer les performances de recherche
-UserSchema.index({ email: 1 });
-UserSchema.index({ microsoftId: 1 });
 UserSchema.index({ teamId: 1 });
+UserSchema.index({ organizationId: 1 });
 
 export const User = mongoose.model<IUser>('User', UserSchema);
 

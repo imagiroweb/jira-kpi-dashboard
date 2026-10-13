@@ -74,7 +74,7 @@ describe('POST /api/performance/import-okr', () => {
     });
     const res = await request(app)
       .post('/api/performance/import-okr')
-      .attach('files', Buffer.from('x'), 'Perf-Eval-H1-26-Adoria-Deguil-Robin-BDR.xlsx');
+      .attach('files', Buffer.from('x'), 'Perf-Eval-H1-26-Adoria-Martin-Durand-BDR.xlsx');
     expect(res.status).toBe(403);
   });
 });
@@ -103,7 +103,7 @@ describe('POST /api/performance/import-general-assessment', () => {
     });
     const res = await request(app)
       .post('/api/performance/import-general-assessment')
-      .attach('files', Buffer.from('x'), 'deguil-robin.xlsx');
+      .attach('files', Buffer.from('x'), 'martin-durand.xlsx');
     expect(res.status).toBe(403);
   });
 });

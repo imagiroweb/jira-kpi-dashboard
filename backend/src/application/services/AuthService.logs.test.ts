@@ -10,7 +10,8 @@ const mockLogCreate = jest.fn();
 
 jest.mock('../../domain/user/entities/User', () => ({
   User: {
-    findOne: (...args: unknown[]) => mockUserFindOne(...args),
+    // .findOne(...).select('+password')
+    findOne: (...args: unknown[]) => ({ select: () => mockUserFindOne(...args) }),
     findById: jest.fn(),
     findByIdAndUpdate: jest.fn(),
     findOneAndUpdate: jest.fn(),
@@ -50,6 +51,14 @@ jest.mock('../../domain/team/entities/Team', () => ({
   }
 }));
 
+jest.mock('../../domain/organization/entities/Organization', () => ({
+  Organization: {
+    findById: () => ({
+      select: () => ({ lean: () => Promise.resolve({ isActive: true, allowLocalAccounts: true }) })
+    })
+  }
+}));
+
 jest.mock('../../utils/logger', () => ({
   logger: { info: jest.fn(), error: jest.fn(), warn: jest.fn() }
 }));
@@ -74,6 +83,7 @@ describe('AuthService (activity logs)', () => {
         password: hashedPassword,
         isActive: true,
         provider: 'local',
+        organizationId: new mongoose.Types.ObjectId(),
         save: jest.fn().mockResolvedValue(undefined)
       };
 
@@ -103,6 +113,7 @@ describe('AuthService (activity logs)', () => {
         password: hashedPassword,
         isActive: true,
         provider: 'local',
+        organizationId: new mongoose.Types.ObjectId(),
         save: jest.fn().mockResolvedValue(undefined)
       };
 

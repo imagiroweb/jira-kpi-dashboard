@@ -6,6 +6,8 @@ import os from 'os';
 import path from 'path';
 import multer from 'multer';
 import { logger } from '../utils/logger';
+import { ANONYMIZED_REVIEW_SUBJECT } from '../domain/performance/anonymizeReview';
+import { clientErrorDetail } from '../utils/clientError';
 import {
   buildImportPlanFromInterviewsDir,
   ImportPlanEntry
@@ -94,7 +96,7 @@ function fail(res: Response, status: number, message: string, error?: unknown) {
   return res.status(status).json({
     success: false,
     message,
-    ...(error ? { error: error instanceof Error ? error.message : 'Unknown error' } : {})
+    ...(error ? { error: clientErrorDetail(error) } : {})
   });
 }
 
@@ -104,7 +106,10 @@ function serialize(
 ) {
   return {
     id: review._id,
-    user: review.user,
+    // Fiche anonymisée : plus de compte lié (populate → null), libellé générique à l'affichage et
+    // identifiant propre à la fiche (jamais celui d'un compte).
+    user: review.user ?? { _id: `anonyme-${review._id}`, ...ANONYMIZED_REVIEW_SUBJECT },
+    anonymized: Boolean(review.anonymizedAt),
     cycle: review.cycle,
     team: teamOverride?.team ?? toIdString(review.team),
     teamNameSnapshot: teamOverride?.teamNameSnapshot ?? review.teamNameSnapshot,
@@ -260,7 +265,7 @@ router.get('/reviews/me', authenticate, async (req: Request, res: Response) => {
       team: user?.teamId ?? undefined,
       createdBy: author(req)
     });
-    logger.info(`Performance review created for ${req.user!.email} (cycle ${cycle.label})`);
+    logger.info(`Performance review created for user ${req.user!.userId} (cycle ${cycle.label})`);
 
     res.status(201).json({ success: true, review: serialize(created) });
   } catch (error) {

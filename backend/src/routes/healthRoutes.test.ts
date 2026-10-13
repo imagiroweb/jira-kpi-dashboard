@@ -14,6 +14,16 @@ jest.mock('../application/services/WorklogApplicationService', () => ({
   worklogAppService: mockWorklogAppService,
 }));
 
+let mockIsSuperAdmin = true;
+jest.mock('../middleware/authMiddleware', () => {
+  const auth = jest.requireActual<typeof import('../test/mocks/authMiddleware')>('../test/mocks/authMiddleware');
+  return {
+    authenticate: auth.mockAuthenticate(),
+    requireSuperAdmin: (req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) =>
+      mockIsSuperAdmin ? next() : res.status(403).json({ success: false }),
+  };
+});
+
 jest.mock('../websocket/socketHandler', () => ({
   getConnectedClientsCount: jest.fn(),
 }));
@@ -30,6 +40,7 @@ describe('healthRoutes (TI)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockIsSuperAdmin = true;
     mockWorklogAppService.testConnection.mockResolvedValue({ success: true });
     mockGetConnectedClientsCount.mockReturnValue(0);
   });
@@ -86,6 +97,13 @@ describe('healthRoutes (TI)', () => {
   });
 
   describe('GET /api/health/detailed', () => {
+    it('retourne 403 hors super admin (informations techniques)', async () => {
+      mockIsSuperAdmin = false;
+      const res = await request(app).get('/api/health/detailed');
+      expect(res.status).toBe(403);
+      expect(mockWorklogAppService.testConnection).not.toHaveBeenCalled();
+    });
+
     it('retourne 200 avec status ok et connectedClients mocké si Jira est connecté', async () => {
       mockWorklogAppService.testConnection.mockResolvedValue({ success: true });
       mockGetConnectedClientsCount.mockReturnValue(7);

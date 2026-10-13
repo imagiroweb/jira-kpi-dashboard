@@ -1,9 +1,11 @@
-import { LayoutDashboard, Users, Headphones, ChevronLeft, ChevronRight, ChevronDown, LogOut, User, Wifi, WifiOff, RefreshCw, Flag, Megaphone, Package, ShieldCheck, CalendarClock, Target, Users2, Euro, TrendingUp, Settings } from 'lucide-react';
+import { LayoutDashboard, Users, Headphones, ChevronLeft, ChevronRight, ChevronDown, LogOut, User, Wifi, WifiOff, RefreshCw, Flag, Megaphone, Package, ShieldCheck, CalendarClock, Target, Users2, Euro, TrendingUp, Settings, Download } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { groupOfPage, resolveNav, type NavEntry } from '../domain/sidebarNav';
 import { useStore } from '../store/useStore';
 import { useSocketOptional } from '../hooks/useSocketContext';
 import { syncApi } from '../services/api';
+import { authApi } from '../services/authApi';
+import { downloadJson, personalDataFilename } from '../utils/downloadJson';
 
 // PageType is defined in the store, we just use the same type here
 export type PageType = 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'pointHebdo' | 'gestionUtilisateurs' | 'performance' | 'performanceDashboard' | 'couts';
@@ -188,8 +190,17 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
     );
   };
 
-  const handleLogout = () => {
+  const handleExportMyData = async () => {
+    try {
+      downloadJson(await authApi.exportMyData(), personalDataFilename());
+    } catch {
+      window.alert('Export impossible pour le moment. Réessayez plus tard.');
+    }
+  };
+
+  const handleLogout = async () => {
     if (window.confirm('Êtes-vous sûr de vouloir vous déconnecter ?')) {
+      await authApi.logout();
       logout();
     }
   };
@@ -378,6 +389,18 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
             )}
           </div>
         )}
+
+        {/* Export de mes données (RGPD) */}
+        <button
+          onClick={() => void handleExportMyData()}
+          className={`w-full p-3 mb-2 rounded-xl bg-surface-800/50 border border-surface-700/50 hover:bg-surface-700/50 text-surface-400 hover:text-surface-200 transition-all duration-200 ${
+            isCollapsed ? 'flex justify-center' : 'flex items-center gap-2'
+          }`}
+          title="Exporter mes données personnelles"
+        >
+          <Download className="w-4 h-4" />
+          {!isCollapsed && <span className="text-sm">Mes données</span>}
+        </button>
 
         {/* Logout Button */}
         <button

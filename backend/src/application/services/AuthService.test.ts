@@ -69,7 +69,9 @@ describe('AuthService', () => {
       const decoded = service.verifyToken(token);
       expect(decoded).not.toBeNull();
       expect(decoded?.userId).toBe(payload.userId);
-      expect(decoded?.email).toBe(payload.email);
+      // aucune donnée personnelle dans le JWT (signé mais non chiffré)
+      expect(decoded).not.toHaveProperty('email');
+      expect(decoded?.tv).toBe(0);
       expect(decoded?.provider).toBe(payload.provider);
     });
 

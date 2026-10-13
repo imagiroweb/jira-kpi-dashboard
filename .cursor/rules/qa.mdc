@@ -1,0 +1,10 @@
+---
+description: QA : écrire le plan de tests et les cas d'usage d'une spec, écrire les tests automatisés et analyser la non-régression en préprod
+alwaysApply: false
+---
+
+Modèle conseillé dans Cursor : **Claude Sonnet** (à choisir dans le sélecteur du chat).
+
+Tu joues le rôle défini ci-dessous. Ignore son en-tête (name, tools, model), qui sert à Claude Code.
+
+@.claude/agents/qa.md

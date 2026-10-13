@@ -6,8 +6,11 @@ import { createTestApp } from '../test/createTestApp';
 import { TEST_USER_ID } from '../test/fixtures/users';
 
 const mockBuildUserWithPermissions = jest.fn();
+const mockInviteLocalUser = jest.fn();
+const mockRevokeSessions = jest.fn().mockResolvedValue(undefined);
 const mockUserFindById = jest.fn();
 const mockUserFind = jest.fn();
+const mockUserUpdateOne = jest.fn().mockResolvedValue({});
 const mockRoleFind = jest.fn();
 const mockRoleFindById = jest.fn();
 const mockRoleFindOne = jest.fn();
@@ -32,11 +35,11 @@ jest.mock('mongoose', () =>
 jest.mock('../application/services/AuthService', () => ({
   authService: {
     buildUserWithPermissions: (...args: unknown[]) => mockBuildUserWithPermissions(...args),
-    register: jest.fn(),
+    inviteLocalUser: (...args: unknown[]) => mockInviteLocalUser(...args),
+    revokeSessions: (...args: unknown[]) => mockRevokeSessions(...args),
     login: jest.fn(),
     validatePassword: jest.fn(),
     getUserById: jest.fn(),
-    setMyRole: jest.fn(),
     handleMicrosoftSSO: jest.fn(),
     requestPasswordReset: jest.fn(),
     resetPassword: jest.fn(),
@@ -54,10 +57,18 @@ jest.mock('../middleware/authMiddleware', () => {
   };
 });
 
+const mockExportPersonalData = jest.fn();
+const mockAnonymizeUser = jest.fn();
+jest.mock('../application/services/personalDataService', () => ({
+  exportPersonalData: (...a: unknown[]) => mockExportPersonalData(...a),
+  anonymizeUser: (...a: unknown[]) => mockAnonymizeUser(...a),
+}));
+
 jest.mock('../domain/user/entities/User', () => ({
   User: {
     findById: (...args: unknown[]) => mockUserFindById(...args),
     find: (...args: unknown[]) => mockUserFind(...args),
+    updateOne: (...args: unknown[]) => mockUserUpdateOne(...args),
     findOne: jest.fn(),
   },
 }));
@@ -153,6 +164,167 @@ describe('authRoutes — admin (TI)', () => {
     });
   });
 
+  describe('Droits des personnes : export et effacement (super admin)', () => {
+    const TARGET = '507f1f77bcf86cd799439088';
+
+    function mockUsers(targetOrg: string | null, target: Record<string, unknown> = {}) {
+      mockUserFindById.mockImplementation((id: string) => ({
+        select: () => ({
+          lean: () =>
+            Promise.resolve(
+              id === TARGET
+                ? targetOrg === null
+                  ? null
+                  : { organizationId: targetOrg, email: 'Marie@Adoria.com', anonymizedAt: null, ...target }
+                : { role: isSuperAdmin ? 'super_admin' : undefined, organizationId: 'org-1' }
+            ),
+        }),
+      }));
+    }
+
+    it('GET /users/:id/export télécharge les données du collaborateur', async () => {
+      mockUsers('org-1');
+      mockExportPersonalData.mockResolvedValue({ account: { email: 'marie@adoria.com' } });
+
+      const res = await request(app).get(`/api/auth/users/${TARGET}/export`);
+
+      expect(res.status).toBe(200);
+      expect(res.headers['content-disposition']).toMatch(/attachment; filename="donnees-personnelles-/);
+      expect(res.body.data).toEqual({ account: { email: 'marie@adoria.com' } });
+    });
+
+    it('GET /users/:id/export refuse un compte d’une autre organisation', async () => {
+      mockUsers('org-2');
+      expect((await request(app).get(`/api/auth/users/${TARGET}/export`)).status).toBe(403);
+      expect(mockExportPersonalData).not.toHaveBeenCalled();
+    });
+
+    it('DELETE /users/:id anonymise après confirmation par l’email', async () => {
+      mockUsers('org-1');
+      mockAnonymizeUser.mockResolvedValue({ userId: TARGET, activityLogsDeleted: 3, performanceReviewsDeleted: 1 });
+
+      const res = await request(app).delete(`/api/auth/users/${TARGET}`).send({ confirmEmail: 'marie@adoria.com' });
+
+      expect(res.status).toBe(200);
+      expect(mockAnonymizeUser).toHaveBeenCalledWith(TARGET, 'request');
+      expect(res.body.report.performanceReviewsDeleted).toBe(1);
+    });
+
+    it('DELETE /users/:id refuse un email de confirmation erroné, son propre compte, un compte déjà effacé', async () => {
+      mockUsers('org-1');
+      expect((await request(app).delete(`/api/auth/users/${TARGET}`).send({ confirmEmail: 'autre@adoria.com' })).status).toBe(400);
+      expect((await request(app).delete(`/api/auth/users/${TEST_USER_ID}`).send({ confirmEmail: 'x@y.fr' })).status).toBe(400);
+      expect((await request(app).delete(`/api/auth/users/${TARGET}`).send({})).status).toBe(400);
+      mockUsers('org-1', { anonymizedAt: new Date() });
+      expect((await request(app).delete(`/api/auth/users/${TARGET}`).send({ confirmEmail: 'marie@adoria.com' })).status).toBe(409);
+      expect(mockAnonymizeUser).not.toHaveBeenCalled();
+    });
+
+    it('réservé au super admin', async () => {
+      isSuperAdmin = false;
+      mockUsers('org-1');
+      expect((await request(app).delete(`/api/auth/users/${TARGET}`).send({ confirmEmail: 'marie@adoria.com' })).status).toBe(403);
+      expect((await request(app).get(`/api/auth/users/${TARGET}/export`)).status).toBe(403);
+    });
+  });
+
+  describe('PATCH /api/auth/users/:id/status (désactivation d’un compte)', () => {
+    const TARGET = '507f1f77bcf86cd799439099';
+    const ORG = 'org-1';
+
+    function mockUsers(adminOrg: string, targetOrg: string | null) {
+      mockUserFindById.mockImplementation((id: string) => ({
+        select: () => ({
+          lean: () =>
+            Promise.resolve(
+              id === TARGET
+                ? targetOrg === null
+                  ? null
+                  : { organizationId: targetOrg }
+                : { role: isSuperAdmin ? 'super_admin' : undefined, organizationId: adminOrg }
+            ),
+        }),
+      }));
+    }
+
+    it('désactive le compte et révoque ses sessions', async () => {
+      mockUsers(ORG, ORG);
+
+      const res = await request(app).patch(`/api/auth/users/${TARGET}/status`).send({ isActive: false });
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ success: true, isActive: false });
+      expect(mockUserUpdateOne).toHaveBeenCalledWith(
+        { _id: TARGET },
+        { $set: { isActive: false, deactivatedAt: expect.any(Date) }, $inc: { tokenVersion: 1 } }
+      );
+    });
+
+    it('refuse de désactiver son propre compte', async () => {
+      mockUsers(ORG, ORG);
+      const res = await request(app).patch(`/api/auth/users/${TEST_USER_ID}/status`).send({ isActive: false });
+      expect(res.status).toBe(400);
+      expect(mockUserUpdateOne).not.toHaveBeenCalled();
+    });
+
+    it('refuse un utilisateur d’une autre organisation', async () => {
+      mockUsers(ORG, 'org-2');
+      const res = await request(app).patch(`/api/auth/users/${TARGET}/status`).send({ isActive: false });
+      expect(res.status).toBe(403);
+      expect(mockUserUpdateOne).not.toHaveBeenCalled();
+    });
+
+    it('retourne 404 si le compte n’existe pas, 400 si isActive manque', async () => {
+      mockUsers(ORG, null);
+      expect((await request(app).patch(`/api/auth/users/${TARGET}/status`).send({ isActive: true })).status).toBe(404);
+      expect((await request(app).patch(`/api/auth/users/${TARGET}/status`).send({})).status).toBe(400);
+    });
+  });
+
+  describe('POST /api/auth/users (invitation d’un compte local)', () => {
+    it('crée le compte dans l’organisation de l’admin et renvoie 201', async () => {
+      mockInviteLocalUser.mockResolvedValue({ success: true, userId: 'u-new', emailSent: true });
+
+      const res = await request(app)
+        .post('/api/auth/users')
+        .send({ email: 'Nouveau@Adoria.com', firstName: 'Nou', lastName: 'Veau' });
+
+      expect(res.status).toBe(201);
+      expect(res.body).toEqual({ success: true, userId: 'u-new', emailSent: true });
+      expect(mockInviteLocalUser).toHaveBeenCalledWith(TEST_USER_ID, {
+        email: 'nouveau@adoria.com',
+        firstName: 'Nou',
+        lastName: 'Veau',
+        roleId: undefined,
+      });
+    });
+
+    it('propage le statut métier (409 email existant)', async () => {
+      mockInviteLocalUser.mockResolvedValue({ success: false, status: 409, error: 'Un compte existe déjà avec cet email' });
+
+      const res = await request(app).post('/api/auth/users').send({ email: 'x@adoria.com' });
+
+      expect(res.status).toBe(409);
+      expect(res.body.error).toMatch(/existe déjà/);
+    });
+
+    it('retourne 400 si l’email ou le roleId sont invalides', async () => {
+      const res = await request(app).post('/api/auth/users').send({ email: 'pas-un-email', roleId: 'x' });
+
+      expect(res.status).toBe(400);
+      expect(mockInviteLocalUser).not.toHaveBeenCalled();
+    });
+
+    it('retourne 403 si l’utilisateur n’est pas super_admin', async () => {
+      isSuperAdmin = false;
+
+      const res = await request(app).post('/api/auth/users').send({ email: 'x@adoria.com' });
+
+      expect(res.status).toBe(403);
+      expect(mockInviteLocalUser).not.toHaveBeenCalled();
+    });
+  });
+
   describe('GET /api/auth/users', () => {
     it('retourne 200 avec users et roles pour un super_admin', async () => {
       const res = await request(app).get('/api/auth/users');
@@ -236,6 +408,7 @@ describe('authRoutes — admin (TI)', () => {
         .patch(`/api/auth/users/${targetUserId}`)
         .send({ role: 'super_admin' });
 
+      expect(mockRevokeSessions).toHaveBeenCalled();
       expect(res.status).toBe(200);
       expect(res.body.success).toBe(true);
       expect(userDoc.role).toBe('super_admin');

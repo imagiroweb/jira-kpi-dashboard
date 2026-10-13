@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Users, Clock, AlertCircle, TrendingUp, FileText, ChevronDown } from 'lucide-react';
+import { authFetch } from '../services/authFetch';
 
 interface UserWorkloadData {
   accountId: string;
@@ -114,7 +115,7 @@ export function UserWorkloadChart({
     const loadReports = async () => {
       setLoadingReports(true);
       try {
-        const response = await fetch(`${API_BASE_URL}/worklog/saved-reports`);
+        const response = await authFetch(`${API_BASE_URL}/worklog/saved-reports`);
         
         // Skip on rate limiting or errors - not critical
         if (!response.ok) {
@@ -156,7 +157,7 @@ export function UserWorkloadChart({
           params.append('from', dateRange.from);
           params.append('to', dateRange.to);
           params.append('projectKeys', selectedProjects.join(','));
-          const response = await fetch(
+          const response = await authFetch(
             `${API_BASE_URL}/worklog/saved-reports/${selectedReportId}/execute?${params}`
           );
           if (response.status === 429) {

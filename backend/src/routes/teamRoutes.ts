@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { body, validationResult } from 'express-validator';
 import mongoose from 'mongoose';
 import { logger } from '../utils/logger';
+import { clientErrorDetail } from '../utils/clientError';
 import { Team, ITeam } from '../domain/team/entities/Team';
 import { canAssignUserToTeam, hasGlobalTeamManagementAccess, TeamAssignmentActor } from '../domain/team/teamAssignment';
 import { authenticate } from '../middleware/authMiddleware';
@@ -15,7 +16,7 @@ function fail(res: Response, status: number, message: string, error?: unknown) {
   return res.status(status).json({
     success: false,
     message,
-    ...(error ? { error: error instanceof Error ? error.message : 'Unknown error' } : {})
+    ...(error ? { error: clientErrorDetail(error) } : {})
   });
 }
 

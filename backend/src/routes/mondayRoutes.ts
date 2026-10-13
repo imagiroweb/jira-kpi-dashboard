@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { getMondayClient } from '../infrastructure/monday/MondayClient';
 import { logger } from '../utils/logger';
+import { clientErrorDetail } from '../utils/clientError';
 import { authenticate } from '../middleware/authMiddleware';
 
 const router = Router();
@@ -43,7 +44,7 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la récupération du compte Monday',
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: clientErrorDetail(error),
     });
   }
 });
@@ -68,7 +69,7 @@ router.get('/workspaces', authenticate, async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la récupération des workspaces Monday',
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: clientErrorDetail(error),
     });
   }
 });
@@ -96,7 +97,7 @@ router.get('/boards', authenticate, async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la récupération des boards Monday',
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: clientErrorDetail(error),
     });
   }
 });
@@ -129,7 +130,7 @@ router.get('/boards/:boardId', authenticate, async (req: Request, res: Response)
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la récupération du board Monday',
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: clientErrorDetail(error),
     });
   }
 });
@@ -155,7 +156,7 @@ router.get('/boards/:boardId/views', authenticate, async (req: Request, res: Res
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la récupération des vues/filtres Monday',
-      error: error instanceof Error ? error.message : 'Unknown error',
+      error: clientErrorDetail(error),
     });
   }
 });

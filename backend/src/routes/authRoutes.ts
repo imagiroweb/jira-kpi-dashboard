@@ -1,6 +1,5 @@
 import { Router, Request, Response } from 'express';
 import { body, validationResult } from 'express-validator';
-import rateLimit from 'express-rate-limit';
 import mongoose from 'mongoose';
 import { authService } from '../application/services/AuthService';
 import { authenticate, requireSuperAdmin } from '../middleware/authMiddleware';
@@ -12,19 +11,23 @@ import {
 import { Role, IPageVisibilities, PAGE_IDS } from '../domain/user/entities/Role';
 import { UserActivityLog } from '../domain/user/entities/UserActivityLog';
 import { parseRoadmapAdoria2026Filters } from '../domain/user/parseRoadmapAdoria2026Filters';
+import { clearSessionCookie, setSessionCookie } from '../config/sessionCookie';
+import { anonymizeUser, exportPersonalData } from '../application/services/personalDataService';
 import { sanitizeMicrosoftAccessToken } from '../utils/sanitizeMicrosoftAccessToken';
+import { microsoftIdTokenVerifier, MicrosoftTokenError } from '../infrastructure/microsoft/MicrosoftIdTokenVerifier';
 
 import { logger } from '../utils/logger';
+import {
+  forgotPasswordLimiter,
+  invitationLimiter,
+  loginPerAccountLimiter,
+  loginPerIpLimiter,
+  publicUtilityLimiter,
+  resetPasswordLimiter,
+  ssoCallbackLimiter
+} from '../middleware/rateLimits';
 import { getIntegrationSettingsView, saveIntegrationSettings } from '../domain/settings/integrationSettings';
 
-/** Max 5 demandes de reset par IP par 15 minutes */
-const forgotPasswordLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 5,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { success: false, error: 'Trop de tentatives. Veuillez réessayer dans 15 minutes.' }
-});
 
 /** Répond 503 si MongoDB n'est pas connecté (évite le timeout de 10s des opérations bufferisées) */
 const requireMongo = (_req: Request, res: Response, next: () => void) => {
@@ -37,15 +40,6 @@ const requireMongo = (_req: Request, res: Response, next: () => void) => {
   next();
 };
 
-// Microsoft Graph API profile response type
-interface MicrosoftGraphProfile {
-  id: string;
-  mail?: string;
-  userPrincipalName: string;
-  givenName?: string;
-  surname?: string;
-  displayName?: string;
-}
 
 const router = Router();
 
@@ -54,7 +48,10 @@ const router = Router();
  */
 router.get('/microsoft/config', (req: Request, res: Response) => {
   const clientId = process.env.MICROSOFT_CLIENT_ID;
-  const tenantId = process.env.MICROSOFT_TENANT_ID || 'common';
+  // Autorité utilisée par le navigateur : `organizations` (tout tenant professionnel, jamais les
+  // comptes personnels) pour le multi-entreprises, ou un tenant précis. Le backend n'accepte de
+  // toute façon que les tenants déclarés dans les organisations (liste blanche).
+  const tenantId = process.env.MICROSOFT_AUTHORITY_TENANT || process.env.MICROSOFT_TENANT_ID || 'organizations';
 
   if (!clientId) {
     return res.status(503).json({
@@ -100,101 +97,6 @@ router.use(requireMongo);
 
 /**
  * @swagger
- * /api/auth/register:
- *   post:
- *     summary: Register a new user
- *     tags: [Authentication]
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - email
- *               - password
- *             properties:
- *               email:
- *                 type: string
- *                 format: email
- *               password:
- *                 type: string
- *                 minLength: 12
- *               firstName:
- *                 type: string
- *               lastName:
- *                 type: string
- *     responses:
- *       201:
- *         description: User created successfully
- *       400:
- *         description: Validation error
- */
-router.post(
-  '/register',
-  [
-    body('email')
-      .isEmail()
-      .withMessage('Email invalide')
-      .normalizeEmail({ gmail_remove_dots: false }),
-    body('password')
-      .isLength({ min: 12 })
-      .withMessage('Le mot de passe doit contenir au moins 12 caractères'),
-    body('firstName')
-      .optional()
-      .trim()
-      .isLength({ min: 1, max: 50 })
-      .withMessage('Le prénom doit contenir entre 1 et 50 caractères'),
-    body('lastName')
-      .optional()
-      .trim()
-      .isLength({ min: 1, max: 50 })
-      .withMessage('Le nom doit contenir entre 1 et 50 caractères'),
-    body('roleId')
-      .optional()
-      .isString()
-      .withMessage('roleId invalide')
-  ],
-  async (req: Request, res: Response) => {
-    try {
-      // Check validation errors
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({
-          success: false,
-          errors: errors.array().map((e: { msg?: string }) => e.msg)
-        });
-      }
-
-      const { email, password, firstName, lastName, roleId } = req.body;
-
-      const result = await authService.register(email, password, firstName, lastName, roleId);
-
-      if (!result.success) {
-        return res.status(400).json({
-          success: false,
-          error: result.error
-        });
-      }
-
-      res.status(201).json({
-        success: true,
-        token: result.token,
-        user: result.user,
-        firstLogin: result.firstLogin
-      });
-    } catch (error) {
-      logger.error('Registration route error:', error);
-      res.status(500).json({
-        success: false,
-        error: 'Erreur serveur lors de la création du compte'
-      });
-    }
-  }
-);
-
-/**
- * @swagger
  * /api/auth/login:
  *   post:
  *     summary: Login with email and password
@@ -222,6 +124,8 @@ router.post(
  */
 router.post(
   '/login',
+  loginPerIpLimiter,
+  loginPerAccountLimiter,
   [
     body('email')
       .isEmail()
@@ -252,9 +156,10 @@ router.post(
         });
       }
 
+      // Jeton de session en cookie HttpOnly : jamais renvoyé dans le corps (inaccessible au JavaScript).
+      setSessionCookie(res, result.token!);
       res.json({
         success: true,
-        token: result.token,
         user: result.user
       });
     } catch (error) {
@@ -290,6 +195,7 @@ router.post(
  */
 router.post(
   '/validate-password',
+  publicUtilityLimiter,
   [body('password').isString().withMessage('Mot de passe requis')],
   async (req: Request, res: Response) => {
     try {
@@ -331,113 +237,72 @@ router.post(
  *           schema:
  *             type: object
  *             required:
- *               - accessToken
+ *               - idToken
+ *               - nonce
  *             properties:
- *               accessToken:
+ *               idToken:
  *                 type: string
- *                 description: Microsoft access token
+ *                 description: id_token OpenID Connect émis par Microsoft Entra ID pour cette application
+ *               nonce:
+ *                 type: string
+ *                 description: nonce envoyé à l'autorisation (anti-rejeu)
  *     responses:
  *       200:
  *         description: SSO login successful
  *       401:
- *         description: Invalid token
+ *         description: Jeton invalide (signature, audience, émetteur, nonce, expiration)
+ *       403:
+ *         description: Tenant ou domaine d'email non autorisé (aucune organisation correspondante)
  */
-router.post('/microsoft/callback', async (req: Request, res: Response) => {
-  try {
-    const accessToken = sanitizeMicrosoftAccessToken(req.body?.accessToken);
+router.post('/microsoft/callback', ssoCallbackLimiter, async (req: Request, res: Response) => {
+  const idToken = sanitizeMicrosoftAccessToken(req.body?.idToken);
+  const nonce = typeof req.body?.nonce === 'string' ? req.body.nonce : undefined;
 
-    if (!accessToken) {
-      return res.status(400).json({
-        success: false,
-        error:
-          'Token Microsoft manquant ou invalide (format incorrect : JSON, espaces ou caractères interdits dans le header Authorization)',
-      });
-    }
-
-    // Verify the token with Microsoft Graph API
-    const graphResponse = await fetch('https://graph.microsoft.com/v1.0/me', {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-    });
-
-    if (!graphResponse.ok) {
-      return res.status(401).json({
-        success: false,
-        error: 'Token Microsoft invalide',
-      });
-    }
-
-    const profile = (await graphResponse.json()) as MicrosoftGraphProfile;
-    const email = profile.mail || profile.userPrincipalName;
-    if (!email || typeof email !== 'string') {
-      return res.status(401).json({
-        success: false,
-        error: 'Profil Microsoft sans adresse e-mail exploitable',
-      });
-    }
-
-    // Handle SSO login/registration
-    const result = await authService.handleMicrosoftSSO(
-      profile.id,
-      email,
-      profile.givenName,
-      profile.surname
-    );
-
-    if (!result.success) {
-      return res.status(401).json({
-        success: false,
-        error: result.error,
-      });
-    }
-
-    res.json({
-      success: true,
-      token: result.token,
-      user: result.user,
-      firstLogin: result.firstLogin,
-    });
-  } catch (error) {
-    const err = error as { message?: string; code?: string; cause?: { message?: string } };
-    logger.error('Microsoft SSO callback error:', {
-      message: err?.message,
-      code: err?.code,
-      cause: err?.cause?.message,
-    });
-    const detail = err?.cause?.message || err?.message || '';
-    const headerIssue =
-      /invalid character in header|invalid header value|is an invalid header/i.test(detail);
-    res.status(500).json({
+  if (!idToken || !nonce) {
+    return res.status(400).json({
       success: false,
-      error: headerIssue
-        ? 'Erreur SSO : caractère invalide dans le header Authorization (token Microsoft corrompu). Réessayez la connexion.'
-        : 'Erreur lors de la connexion Microsoft',
+      error: 'Jeton Microsoft (id_token) ou nonce manquant ou invalide. Réessayez la connexion SSO.',
     });
   }
+
+  let identity;
+  try {
+    identity = await microsoftIdTokenVerifier.verify(idToken, {
+      clientId: process.env.MICROSOFT_CLIENT_ID || '',
+      nonce,
+    });
+  } catch (error) {
+    if (error instanceof MicrosoftTokenError) {
+      logger.warn(`SSO Microsoft : jeton rejeté (${error.message})`);
+      return res.status(401).json({ success: false, error: 'Jeton Microsoft invalide' });
+    }
+    logger.error('Microsoft SSO verification error:', { message: (error as Error)?.message });
+    return res.status(503).json({ success: false, error: 'Vérification Microsoft indisponible, réessayez plus tard' });
+  }
+
+  const result = await authService.handleMicrosoftSSO(identity);
+  if (!result.success) {
+    return res.status(result.status ?? 401).json({ success: false, error: result.error });
+  }
+
+  setSessionCookie(res, result.token!);
+  res.json({
+    success: true,
+    user: result.user,
+    firstLogin: result.firstLogin,
+  });
 });
 
 /**
  * @swagger
- * /api/auth/roles/for-signup:
- *   get:
- *     summary: List roles for signup / first-login role selection (no auth)
+ * /api/auth/logout:
+ *   post:
+ *     summary: Déconnexion — efface le cookie de session
  *     tags: [Authentication]
- *     responses:
- *       200:
- *         description: List of roles (id, name)
  */
-router.get('/roles/for-signup', async (_req: Request, res: Response) => {
-  try {
-    const roles = await Role.find().select('name').lean();
-    res.json({
-      success: true,
-      roles: roles.map((r: { _id: { toString: () => string }; name: string }) => ({ id: r._id.toString(), name: r.name }))
-    });
-  } catch (error) {
-    logger.error('Roles for signup error:', error);
-    res.status(500).json({ success: false, error: 'Erreur serveur' });
-  }
+router.post('/logout', (_req: Request, res: Response) => {
+  clearSessionCookie(res);
+  res.json({ success: true });
 });
 
 /**
@@ -493,51 +358,6 @@ router.get('/me', authenticate, async (req: Request, res: Response) => {
     });
   }
 });
-
-/**
- * @swagger
- * /api/auth/me/role:
- *   patch:
- *     summary: Set current user role (first-login selection)
- *     tags: [Authentication]
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required: [roleId]
- *             properties:
- *               roleId: { type: string }
- *     responses:
- *       200:
- *         description: Role updated
- *       400:
- *         description: Invalid role or not allowed
- */
-router.patch(
-  '/me/role',
-  authenticate,
-  [body('roleId').isString().notEmpty().withMessage('roleId requis')],
-  async (req: Request, res: Response) => {
-    try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        return res.status(400).json({ success: false, errors: errors.array().map((e: { msg?: string }) => e.msg) });
-      }
-      const { roleId } = req.body;
-      const result = await authService.setMyRole(req.user!.userId, roleId);
-      if (!result.success) {
-        return res.status(400).json({ success: false, error: result.error });
-      }
-      res.json({ success: true, user: result.user });
-    } catch (error) {
-      logger.error('Set my role error:', error);
-      res.status(500).json({ success: false, error: 'Erreur serveur' });
-    }
-  }
-);
 
 /**
  * @swagger
@@ -770,6 +590,7 @@ router.post(
  */
 router.post(
   '/reset-password',
+  resetPasswordLimiter,
   [
     body('token').isString().notEmpty().withMessage('Token manquant'),
     body('password')
@@ -800,7 +621,8 @@ router.post(
  */
 router.get('/users', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   try {
-    const users = await User.find().select('-password').populate('roleId', 'name').lean();
+    // Comptes anonymisés (effacés) exclus de la liste
+    const users = await User.find({ anonymizedAt: null }).select('-password').populate('roleId', 'name').lean();
     const roles = await Role.find().lean();
     const list = users.map((u: {
       _id: { toString: () => string };
@@ -835,6 +657,43 @@ router.get('/users', authenticate, requireSuperAdmin, async (req: Request, res: 
     res.status(500).json({ success: false, error: 'Erreur serveur' });
   }
 });
+
+/**
+ * @swagger
+ * /api/auth/users:
+ *   post:
+ *     summary: Créer un compte local dans l'organisation de l'administrateur et envoyer une invitation (super admin)
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     description: >
+ *       Remplace l'inscription libre. Refusé si l'organisation n'autorise pas les comptes locaux
+ *       ou si le domaine de l'email n'est pas autorisé.
+ */
+router.post(
+  '/users',
+  authenticate,
+  requireSuperAdmin,
+  invitationLimiter,
+  [
+    body('email').isEmail().withMessage('Email invalide').normalizeEmail({ gmail_remove_dots: false }),
+    body('firstName').optional().trim().isLength({ min: 1, max: 50 }).withMessage('Prénom invalide'),
+    body('lastName').optional().trim().isLength({ min: 1, max: 50 }).withMessage('Nom invalide'),
+    body('roleId').optional().isMongoId().withMessage('roleId invalide')
+  ],
+  async (req: Request, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ success: false, errors: errors.array().map((e: { msg?: string }) => e.msg) });
+    }
+    const { email, firstName, lastName, roleId } = req.body;
+    const result = await authService.inviteLocalUser(req.user!.userId, { email, firstName, lastName, roleId });
+    if (!result.success) {
+      return res.status(result.status ?? 400).json({ success: false, error: result.error });
+    }
+    res.status(201).json({ success: true, userId: result.userId, emailSent: result.emailSent });
+  }
+);
 
 /**
  * @swagger
@@ -989,6 +848,9 @@ router.patch(
         }
       }
       await user.save();
+      // Droits modifiés : les sessions ouvertes de cet utilisateur sont révoquées (reconnexion
+      // avec les nouvelles pages visibles).
+      await authService.revokeSessions(user._id);
       const withPerms = await authService.buildUserWithPermissions(user);
       res.json({
         success: true,
@@ -1009,6 +871,157 @@ router.patch(
       });
     } catch (error) {
       logger.error('Update user role error:', error);
+      res.status(500).json({ success: false, error: 'Erreur serveur' });
+    }
+  }
+);
+
+/** Un super admin n'agit que sur les comptes de sa propre organisation. */
+async function checkSameOrganization(adminId: string, targetId: string): Promise<'ok' | 'not_found' | 'other_org'> {
+  const [admin, target] = await Promise.all([
+    User.findById(adminId).select('organizationId').lean(),
+    User.findById(targetId).select('organizationId').lean()
+  ]);
+  if (!target) return 'not_found';
+  if (String(admin?.organizationId ?? '') !== String(target.organizationId ?? '')) return 'other_org';
+  return 'ok';
+}
+
+function sendOrganizationCheckError(res: Response, check: 'not_found' | 'other_org') {
+  return check === 'not_found'
+    ? res.status(404).json({ success: false, error: 'Utilisateur non trouvé' })
+    : res.status(403).json({ success: false, error: 'Utilisateur d’une autre organisation' });
+}
+
+function sendPersonalDataExport(res: Response, data: Record<string, unknown>) {
+  const date = new Date().toISOString().slice(0, 10);
+  res.setHeader('Content-Disposition', `attachment; filename="donnees-personnelles-${date}.json"`);
+  res.setHeader('Cache-Control', 'no-store');
+  res.json({ success: true, data });
+}
+
+/**
+ * @swagger
+ * /api/auth/me/export:
+ *   get:
+ *     summary: Export de mes données personnelles (RGPD, droits d'accès et de portabilité)
+ *     tags: [Authentication]
+ */
+router.get('/me/export', authenticate, async (req: Request, res: Response) => {
+  try {
+    const data = await exportPersonalData(req.user!.userId);
+    if (!data) return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
+    logger.info(`Export des données personnelles par l'utilisateur ${req.user!.userId}`);
+    sendPersonalDataExport(res, data);
+  } catch (error) {
+    logger.error('Personal data export error:', error);
+    res.status(500).json({ success: false, error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/auth/users/{id}/export:
+ *   get:
+ *     summary: Export des données personnelles d'un collaborateur (super admin, demande d'accès)
+ *     tags: [Admin]
+ */
+router.get('/users/:id/export', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
+  try {
+    const { id } = req.params;
+    if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ success: false, error: 'Identifiant invalide' });
+    const check = await checkSameOrganization(req.user!.userId, id);
+    if (check !== 'ok') return sendOrganizationCheckError(res, check);
+    const data = await exportPersonalData(id);
+    if (!data) return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
+    logger.info(`Export des données personnelles du compte ${id} par ${req.user!.userId}`);
+    sendPersonalDataExport(res, data);
+  } catch (error) {
+    logger.error('Personal data export (admin) error:', error);
+    res.status(500).json({ success: false, error: 'Erreur serveur' });
+  }
+});
+
+/**
+ * @swagger
+ * /api/auth/users/{id}:
+ *   delete:
+ *     summary: Effacement d'un compte (anonymisation irréversible, RGPD art. 17) — super admin
+ *     description: Le corps doit contenir `confirmEmail` égal à l'email du compte (garde-fou).
+ *     tags: [Admin]
+ */
+router.delete(
+  '/users/:id',
+  authenticate,
+  requireSuperAdmin,
+  [body('confirmEmail').isString().notEmpty().withMessage('confirmEmail requis')],
+  async (req: Request, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array().map((e: { msg?: string }) => e.msg) });
+      }
+      const { id } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(id)) return res.status(400).json({ success: false, error: 'Identifiant invalide' });
+      if (id === req.user!.userId) {
+        return res.status(400).json({ success: false, error: 'Vous ne pouvez pas effacer votre propre compte' });
+      }
+      const check = await checkSameOrganization(req.user!.userId, id);
+      if (check !== 'ok') return sendOrganizationCheckError(res, check);
+      const target = await User.findById(id).select('email anonymizedAt').lean();
+      if (!target) return res.status(404).json({ success: false, error: 'Utilisateur non trouvé' });
+      if (target.anonymizedAt) return res.status(409).json({ success: false, error: 'Compte déjà anonymisé' });
+      if (String(req.body.confirmEmail).trim().toLowerCase() !== target.email.toLowerCase()) {
+        return res.status(400).json({ success: false, error: 'L’email de confirmation ne correspond pas au compte' });
+      }
+      const report = await anonymizeUser(id, 'request');
+      logger.info(`Effacement du compte ${id} demandé par ${req.user!.userId}`);
+      res.json({ success: true, report });
+    } catch (error) {
+      logger.error('Delete user error:', error);
+      res.status(500).json({ success: false, error: 'Erreur serveur' });
+    }
+  }
+);
+
+/**
+ * @swagger
+ * /api/auth/users/{id}/status:
+ *   patch:
+ *     summary: Activer / désactiver un compte (super admin) — révoque immédiatement ses sessions
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ */
+router.patch(
+  '/users/:id/status',
+  authenticate,
+  requireSuperAdmin,
+  [body('isActive').isBoolean().withMessage('isActive (booléen) requis')],
+  async (req: Request, res: Response) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({ success: false, errors: errors.array().map((e: { msg?: string }) => e.msg) });
+      }
+      const { id } = req.params;
+      if (!mongoose.Types.ObjectId.isValid(id)) {
+        return res.status(400).json({ success: false, error: 'Identifiant invalide' });
+      }
+      if (id === req.user!.userId) {
+        return res.status(400).json({ success: false, error: 'Vous ne pouvez pas désactiver votre propre compte' });
+      }
+      const check = await checkSameOrganization(req.user!.userId, id);
+      if (check !== 'ok') return sendOrganizationCheckError(res, check);
+      const isActive = req.body.isActive === true || req.body.isActive === 'true';
+      await User.updateOne(
+        { _id: id },
+        { $set: { isActive, deactivatedAt: isActive ? null : new Date() }, $inc: { tokenVersion: 1 } }
+      );
+      logger.info(`Compte ${id} ${isActive ? 'réactivé' : 'désactivé'} par ${req.user!.userId}`);
+      res.json({ success: true, isActive });
+    } catch (error) {
+      logger.error('Update user status error:', error);
       res.status(500).json({ success: false, error: 'Erreur serveur' });
     }
   }

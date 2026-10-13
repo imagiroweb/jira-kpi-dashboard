@@ -32,34 +32,22 @@ import type { HourlyRate } from '../domain/hourlyRates';
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
 // Create axios instance
+// Session : cookie HttpOnly envoyé par le navigateur (withCredentials), plus de jeton en localStorage.
 const api: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
+  withCredentials: true,
   timeout: 30000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Request interceptor
-api.interceptors.request.use(
-  (config) => {
-    // Add auth token if available
-    const token = localStorage.getItem('auth_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-  },
-  (error) => Promise.reject(error)
-);
-
 // Response interceptor
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      // Handle unauthorized
-      localStorage.removeItem('auth_token');
+      // Session absente, expirée ou révoquée : retour à la connexion
       window.location.href = '/login';
     }
     return Promise.reject(error);
@@ -1031,6 +1019,35 @@ export const teamApi = {
   ): Promise<{ success: boolean; user: { id: string; canManageTeamAssignment: boolean } }> => {
     const { data } = await api.patch(`/teams/members/${userId}/delegation`, { canManageTeamAssignment });
     return data;
+  }
+};
+
+// Organisation — paramètres et durées de conservation (super admin)
+export interface RetentionSettings {
+  /** Logs d'activité supprimés au-delà de N mois (null = pas de purge). */
+  activityLogMonths: number | null;
+  /** Fiches de performance supprimées N années après la fin du cycle (null = pas de purge). */
+  performanceReviewYears: number | null;
+  /** Comptes désactivés anonymisés après N mois (null = jamais automatiquement). */
+  inactiveAccountMonths: number | null;
+}
+
+export interface OrganizationSettings {
+  name: string;
+  slug: string;
+  allowedEmailDomains: string[];
+  allowLocalAccounts: boolean;
+  retention: RetentionSettings;
+}
+
+export const organizationApi = {
+  async getMine(): Promise<OrganizationSettings> {
+    const { data } = await api.get('/organizations/me');
+    return data.organization;
+  },
+  async updateRetention(retention: Partial<RetentionSettings>): Promise<OrganizationSettings> {
+    const { data } = await api.patch('/organizations/me/retention', retention);
+    return data.organization;
   }
 };
 

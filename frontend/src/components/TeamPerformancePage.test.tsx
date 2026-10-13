@@ -166,6 +166,28 @@ describe('TeamPerformancePage', () => {
     expect(screen.getByRole('option', { name: 'Cook' })).toBeInTheDocument();
   });
 
+  it('affiche une fiche anonymisée en lecture seule, sans bouton Ouvrir', async () => {
+    seedUser({ performanceGlobalAccess: true, leadTeamIds: [] });
+    mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
+    mockTeamList.mockResolvedValue({ success: true, teams: TEAMS });
+    mockListReviews.mockResolvedValue({
+      success: true,
+      reviews: [
+        makeReview({
+          id: 'review-anon',
+          anonymized: true,
+          user: { _id: 'anonyme-review-anon', firstName: 'Collaborateur', lastName: 'anonymisé' },
+        }),
+      ],
+    });
+
+    render(<TeamPerformancePage />);
+
+    expect(await screen.findByText('Collaborateur anonymisé')).toBeInTheDocument();
+    expect(screen.getByText('Anonymisée')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Ouvrir' })).not.toBeInTheDocument();
+  });
+
   it("affiche le score d'auto-évaluation global sur 5 dans la liste de suivi", async () => {
     seedUser({ performanceGlobalAccess: true, leadTeamIds: [] });
     mockGetCycles.mockResolvedValue({ success: true, cycles: [ACTIVE_CYCLE] });
@@ -803,7 +825,7 @@ describe('TeamPerformancePage', () => {
     });
     const reviewCook = makeReview({
       id: 'review-2',
-      user: { _id: 'user-2', firstName: 'Bruno', lastName: 'Petit', email: 'bruno@test.com' },
+      user: { _id: 'user-2', firstName: 'Paul', lastName: 'Petit', email: 'bruno@test.com' },
       team: 'team-2',
       status: 'en_cours',
       objectives: [

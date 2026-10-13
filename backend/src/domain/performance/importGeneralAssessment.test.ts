@@ -37,8 +37,8 @@ function buildGeneralAssessmentWorksheet(
   return worksheet;
 }
 
-/** Les 12 lignes réelles de `evaluations-individuelles/deguil-robin.xlsx` (Bruno Deguil-Robin, CTO). */
-const BRUNO_DEGUIL_ROBIN_ROWS = [
+/** Les 12 lignes réelles de `evaluations-individuelles/martin-durand.xlsx` (Paul Martin-Durand, CTO). */
+const PAUL_MARTIN_DURAND_ROWS = [
   { axis: 'Technique', label: 'Qualité du code & revues', score: 5 },
   { axis: 'Technique', label: 'Autonomie & résolution de bugs', score: 5 },
   { axis: 'Technique', label: 'Conception & architecture', score: 5 },
@@ -53,8 +53,8 @@ const BRUNO_DEGUIL_ROBIN_ROWS = [
   { axis: 'Leadership', label: 'Vision & influence', score: 5 }
 ];
 
-/** Les 12 lignes réelles de `evaluations-individuelles/parjouet.xlsx` (Alexandre Parjouet, Dev Front). */
-const ALEXANDRE_PARJOUET_ROWS = [
+/** Les 12 lignes réelles de `evaluations-individuelles/moreau.xlsx` (Alexandre Moreau, Dev Front). */
+const ALEXANDRE_MOREAU_ROWS = [
   { axis: 'Technique', label: 'Qualité du code & revues', score: 3 },
   { axis: 'Technique', label: 'Autonomie & résolution de bugs', score: 4 },
   { axis: 'Technique', label: 'Conception & architecture', score: 3 },
@@ -70,12 +70,12 @@ const ALEXANDRE_PARJOUET_ROWS = [
 ];
 
 describe('parseGeneralAssessmentFromWorksheet', () => {
-  it("extrait les 12 sous-critères du cas réel Bruno Deguil-Robin, sans avertissement", () => {
-    const worksheet = buildGeneralAssessmentWorksheet(BRUNO_DEGUIL_ROBIN_ROWS, { name: 'Bruno Deguil-Robin' });
+  it("extrait les 12 sous-critères du cas réel Paul Martin-Durand, sans avertissement", () => {
+    const worksheet = buildGeneralAssessmentWorksheet(PAUL_MARTIN_DURAND_ROWS, { name: 'Paul Martin-Durand' });
 
     const { collaboratorName, axes, warnings } = parseGeneralAssessmentFromWorksheet(worksheet);
 
-    expect(collaboratorName).toBe('Bruno Deguil-Robin');
+    expect(collaboratorName).toBe('Paul Martin-Durand');
     expect(warnings).toEqual([]);
     expect(axes.technique).toEqual([
       { label: 'Qualité du code & revues', score: 5 },
@@ -87,12 +87,12 @@ describe('parseGeneralAssessmentFromWorksheet', () => {
     expect(axes.leadership.map((c) => c.score)).toEqual([5, 5, 5]);
   });
 
-  it('extrait les 12 sous-critères du cas réel Alexandre Parjouet, sans avertissement', () => {
-    const worksheet = buildGeneralAssessmentWorksheet(ALEXANDRE_PARJOUET_ROWS, { name: 'Alexandre Parjouet' });
+  it('extrait les 12 sous-critères du cas réel Alexandre Moreau, sans avertissement', () => {
+    const worksheet = buildGeneralAssessmentWorksheet(ALEXANDRE_MOREAU_ROWS, { name: 'Alexandre Moreau' });
 
     const { collaboratorName, axes, warnings } = parseGeneralAssessmentFromWorksheet(worksheet);
 
-    expect(collaboratorName).toBe('Alexandre Parjouet');
+    expect(collaboratorName).toBe('Alexandre Moreau');
     expect(warnings).toEqual([]);
     expect(axes.technique.map((c) => c.score)).toEqual([3, 4, 3]);
     expect(axes.impact.map((c) => c.score)).toEqual([4, 4, 3]);
@@ -101,7 +101,7 @@ describe('parseGeneralAssessmentFromWorksheet', () => {
   });
 
   it('signale une cellule B3 vide mais continue à lire les sous-critères', () => {
-    const worksheet = buildGeneralAssessmentWorksheet(BRUNO_DEGUIL_ROBIN_ROWS, { name: '' });
+    const worksheet = buildGeneralAssessmentWorksheet(PAUL_MARTIN_DURAND_ROWS, { name: '' });
 
     const { collaboratorName, axes, warnings } = parseGeneralAssessmentFromWorksheet(worksheet);
 
@@ -197,7 +197,7 @@ describe('parseGeneralAssessmentFromWorksheet', () => {
 describe('findGeneralAssessmentWorksheet', () => {
   it("trouve l'onglet propre au collaborateur quand seul l'onglet référentiel l'accompagne", () => {
     const workbook = new ExcelJS.Workbook();
-    const own = workbook.addWorksheet('Bruno Deguil-Robin');
+    const own = workbook.addWorksheet('Paul Martin-Durand');
     workbook.addWorksheet('Référentiel évaluation');
 
     expect(findGeneralAssessmentWorksheet(workbook)).toBe(own);
@@ -205,7 +205,7 @@ describe('findGeneralAssessmentWorksheet', () => {
 
   it("ignore aussi un onglet Manager s'il est présent", () => {
     const workbook = new ExcelJS.Workbook();
-    const own = workbook.addWorksheet('Alexandre Parjouet');
+    const own = workbook.addWorksheet('Alexandre Moreau');
     workbook.addWorksheet('Référentiel évaluation');
     workbook.addWorksheet('Manager');
 

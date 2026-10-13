@@ -6,24 +6,14 @@ const API_URL = '';
 
 const api = axios.create({
   baseURL: API_URL,
+  withCredentials: true,
   headers: {
     'Content-Type': 'application/json'
   }
 });
 
-// Add auth token to requests if available (sauf callback SSO Microsoft : token local
-// potentiellement corrompu ne doit pas polluer Authorization).
-api.interceptors.request.use((config) => {
-  const url = `${config.baseURL ?? ''}${config.url ?? ''}`;
-  if (url.includes('/auth/microsoft/callback')) {
-    return config;
-  }
-  const token = localStorage.getItem('auth_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
+// Session : cookie HttpOnly posé par le backend (jamais lisible en JavaScript), envoyé
+// automatiquement par le navigateur (même origine, withCredentials).
 
 export interface IntegrationSettings {
   jiraUrl: string;
@@ -113,17 +103,11 @@ export interface UserActivityLogEntry {
 
 export interface AuthResponse {
   success: boolean;
-  token?: string;
   user?: User;
-  /** True when user was just created and must choose a role (e.g. first Microsoft login) */
+  /** True when the account was just created (first Microsoft login) */
   firstLogin?: boolean;
   error?: string;
   errors?: string[];
-}
-
-export interface RoleForSignup {
-  id: string;
-  name: string;
 }
 
 export interface MicrosoftConfig {
@@ -141,44 +125,6 @@ export interface PasswordValidation {
 }
 
 export const authApi = {
-  /**
-   * List roles for signup / first-login role selection (no auth)
-   */
-  async getRolesForSignup(): Promise<RoleForSignup[]> {
-    const response = await api.get<{ success: boolean; roles: RoleForSignup[] }>('/api/auth/roles/for-signup');
-    if (!response.data.success) throw new Error((response.data as { error?: string }).error);
-    return response.data.roles;
-  },
-
-  /**
-   * Register a new user (roleId required for first-time signup)
-   */
-  async register(
-    email: string,
-    password: string,
-    firstName?: string,
-    lastName?: string,
-    roleId?: string
-  ): Promise<AuthResponse> {
-    try {
-      const response = await api.post<AuthResponse>('/api/auth/register', {
-        email,
-        password,
-        firstName,
-        lastName,
-        roleId
-      });
-      return response.data;
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { error?: string; errors?: string[] } } };
-      if (err.response?.data) {
-        const msg = err.response.data.error || err.response.data.errors?.join('. ');
-        if (msg) return { success: false, error: msg };
-      }
-      return { success: false, error: 'Erreur de connexion au serveur' };
-    }
-  },
-
   /**
    * Login with email and password
    */
@@ -231,10 +177,11 @@ export const authApi = {
   /**
    * Handle Microsoft SSO callback
    */
-  async microsoftCallback(accessToken: string): Promise<AuthResponse> {
+  async microsoftCallback(idToken: string, nonce: string): Promise<AuthResponse> {
     try {
       const response = await api.post<AuthResponse>('/api/auth/microsoft/callback', {
-        accessToken
+        idToken,
+        nonce
       });
       return response.data;
     } catch (error: unknown) {
@@ -243,6 +190,17 @@ export const authApi = {
         return { success: false, error: err.response.data.error };
       }
       return { success: false, error: 'Erreur de connexion Microsoft' };
+    }
+  },
+
+  /**
+   * Déconnexion : le backend efface le cookie de session HttpOnly.
+   */
+  async logout(): Promise<void> {
+    try {
+      await api.post('/api/auth/logout');
+    } catch {
+      // non bloquant : l'état local est réinitialisé de toute façon
     }
   },
 
@@ -277,6 +235,59 @@ export const authApi = {
     const response = await api.get<{ success: boolean; users: UserWithRoleDto[]; roles: RoleDto[] }>('/api/auth/users');
     if (!response.data.success) throw new Error((response.data as { error?: string }).error);
     return { users: response.data.users, roles: response.data.roles };
+  },
+
+  /**
+   * Crée un compte local dans l'organisation de l'admin et envoie une invitation (super_admin only).
+   * Remplace l'inscription libre.
+   */
+  async inviteLocalUser(input: {
+    email: string;
+    firstName?: string;
+    lastName?: string;
+    roleId?: string;
+  }): Promise<{ success: boolean; userId?: string; emailSent?: boolean; error?: string }> {
+    try {
+      const response = await api.post<{ success: boolean; userId: string; emailSent: boolean }>('/api/auth/users', input);
+      return response.data;
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { error?: string; errors?: string[] } } };
+      const msg = err.response?.data?.error || err.response?.data?.errors?.join('. ');
+      return { success: false, error: msg || 'Erreur de connexion au serveur' };
+    }
+  },
+
+  /**
+   * Export de mes données personnelles (RGPD, accès / portabilité).
+   */
+  async exportMyData(): Promise<Record<string, unknown>> {
+    const response = await api.get<{ success: boolean; data: Record<string, unknown> }>('/api/auth/me/export');
+    return response.data.data;
+  },
+
+  /**
+   * Export des données d'un collaborateur (super_admin only, demande d'accès).
+   */
+  async exportUserData(userId: string): Promise<Record<string, unknown>> {
+    const response = await api.get<{ success: boolean; data: Record<string, unknown> }>(`/api/auth/users/${userId}/export`);
+    return response.data.data;
+  },
+
+  /**
+   * Effacement d'un compte : anonymisation irréversible (super_admin only). `confirmEmail` doit
+   * être l'email du compte (garde-fou).
+   */
+  async deleteUser(userId: string, confirmEmail: string): Promise<void> {
+    await api.delete(`/api/auth/users/${userId}`, { data: { confirmEmail } });
+  },
+
+  /**
+   * Active / désactive un compte (super_admin only). La désactivation révoque ses sessions.
+   */
+  async setUserActive(userId: string, isActive: boolean): Promise<boolean> {
+    const response = await api.patch<{ success: boolean; isActive: boolean }>(`/api/auth/users/${userId}/status`, { isActive });
+    if (!response.data.success) throw new Error((response.data as { error?: string }).error);
+    return response.data.isActive;
   },
 
   /**
@@ -406,15 +417,6 @@ export const authApi = {
       percentages: response.data.percentages,
       daily: response.data.daily ?? []
     };
-  },
-
-  /**
-   * Set current user's role (first-login selection)
-   */
-  async updateMyRole(roleId: string): Promise<User> {
-    const response = await api.patch<{ success: boolean; user: User }>('/api/auth/me/role', { roleId });
-    if (!response.data.success) throw new Error((response.data as { error?: string }).error);
-    return response.data.user;
   },
 
   /**

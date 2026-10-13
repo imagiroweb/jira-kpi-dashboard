@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { worklogAppService } from '../application/services/WorklogApplicationService';
 import { getConnectedClientsCount } from '../websocket/socketHandler';
+import { authenticate, requireSuperAdmin } from '../middleware/authMiddleware';
 
 const router = Router();
 
@@ -23,9 +24,10 @@ router.get('/', (req: Request, res: Response) => {
 });
 
 /**
- * Detailed health check with dependencies
+ * Detailed health check with dependencies — réservé au super admin (état des intégrations,
+ * mémoire, nombre de clients connectés : informations utiles à un attaquant).
  */
-router.get('/detailed', async (req: Request, res: Response) => {
+router.get('/detailed', authenticate, requireSuperAdmin, async (req: Request, res: Response) => {
   const health = {
     status: 'ok',
     timestamp: new Date().toISOString(),

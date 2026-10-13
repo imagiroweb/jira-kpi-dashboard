@@ -226,11 +226,11 @@ describe('TeamsCyclesAdminPanel', () => {
       cycle: { id: 'cycle-1', label: 'S2-2026', status: 'active' },
       entries: [
         {
-          name: 'Bruno Deguil-Robin',
+          name: 'Paul Martin-Durand',
           team: '—',
-          relativePath: 'Perf-Eval-H1-26-Adoria-Deguil-Robin-BDR.xlsx',
+          relativePath: 'Perf-Eval-H1-26-Adoria-Martin-Durand-BDR.xlsx',
           outcome: 'ready',
-          email: 'bdeguil-robin@adoria.com',
+          email: 'pmartin-durand@adoria.com',
           warnings: [],
           errors: [],
           objectiveTitles: ['Delivery']
@@ -241,7 +241,7 @@ describe('TeamsCyclesAdminPanel', () => {
     render(<TeamsCyclesAdminPanel teams={TEAMS} cycles={CYCLES} onChanged={onChanged} />);
     await waitForRosterLoaded();
 
-    const file = new File(['x'], 'Perf-Eval-H1-26-Adoria-Deguil-Robin-BDR.xlsx', {
+    const file = new File(['x'], 'Perf-Eval-H1-26-Adoria-Martin-Durand-BDR.xlsx', {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     });
     expect(screen.getAllByText('Sélectionner des fichiers').length).toBeGreaterThan(0);
@@ -263,10 +263,10 @@ describe('TeamsCyclesAdminPanel', () => {
       cycle: { id: 'cycle-1', label: 'S2-2026', status: 'active' },
       entries: [
         {
-          name: 'Bruno Deguil-Robin',
-          fileName: 'deguil-robin.xlsx',
+          name: 'Paul Martin-Durand',
+          fileName: 'martin-durand.xlsx',
           outcome: 'ready',
-          email: 'bdeguil-robin@adoria.com',
+          email: 'pmartin-durand@adoria.com',
           warnings: [],
           errors: [],
           scoredAxisCount: 4
@@ -277,7 +277,7 @@ describe('TeamsCyclesAdminPanel', () => {
     render(<TeamsCyclesAdminPanel teams={TEAMS} cycles={CYCLES} onChanged={onChanged} />);
     await waitForRosterLoaded();
 
-    const file = new File(['x'], 'deguil-robin.xlsx', {
+    const file = new File(['x'], 'martin-durand.xlsx', {
       type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     });
     fireEvent.change(screen.getByLabelText('Grilles individuelles'), { target: { files: [file] } });

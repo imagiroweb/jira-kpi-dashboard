@@ -1,5 +1,14 @@
 # Support Board — performances (issue #37)
 
+> Page technique complémentaire. Le fonctionnement métier du Support (KPI, seuils, droits) est dans [support.md](support.md).
+
+| Rubrique | Contenu |
+|----------|---------|
+| Objectif | Garder la page Support rapide malgré le volume croissant de tickets et de worklogs. |
+| Parcours utilisateur | Inchangé : la page se charge plus vite à partir du 2e appel ; le bouton de synchronisation force le rafraîchissement. |
+| Règles métier | Caches : KPI support 30 min, ratio support / build 60 min ; cumul annuel lu en base (heures quotidiennes par projet), sprint actif toujours en direct. |
+| Limites connues | Voir la section « Limites connues » en fin de page. |
+
 ## Problème
 
 La page Support Board devient de plus en plus lente. Chaque ouverture / refresh déclenche des appels Jira / WorklogPro dont le volume croît avec le temps (backlog, historique, worklogs année en cours).
@@ -82,6 +91,17 @@ Hors phase 1 (suivis possibles) : `?refresh=1` sur `support-kpi`, lazy-load du r
 1. Borner le backlog (`searchIssuesLimited` / max tickets)
 2. Miroir Mongo des issues SB pour filtres `from`/`to` longs
 3. Redis partagé si plusieurs replicas backend
+
+## Limites connues
+
+- Caches en mémoire : perdus au redémarrage, non partagés entre instances.
+- Données support potentiellement en retard de la durée du cache (30 min, 60 min pour le ratio).
+- Cumul annuel : l'historique n'est reconstitué que si la collection est entièrement vide ; un projet partiellement couvert est considéré comme couvert, d'où un cumul possiblement sous-estimé.
+- Backlog support non borné (phase 3 non faite).
+
+## Références code
+
+- `backend/src/application/services/WorklogApplicationService.ts`, `backend/src/services/schedulerService.ts`, `backend/src/routes/worklogRoutes.ts`, `frontend/src/components/SupportDashboard.tsx`.
 
 ## Hors scope / non-régression
 

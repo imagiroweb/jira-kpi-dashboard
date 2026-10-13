@@ -1,11 +1,16 @@
 import { Router, Request, Response } from 'express';
 import { worklogAppService } from '../application/services/WorklogApplicationService';
 import { logger } from '../utils/logger';
+import { clientErrorDetail } from '../utils/clientError';
 import { DashboardSprintSnapshot } from '../domain/sprint/entities/DashboardSprintSnapshot';
-import { authenticate, optionalAuth } from '../middleware/authMiddleware';
+import { authenticate } from '../middleware/authMiddleware';
+import { requirePage } from '../middleware/requirePage';
 import { userHasCostAccess } from '../application/services/appUserDirectory';
 
 const router = Router();
+
+// Toutes les routes exigent une session (données Jira nominatives : temps passé par personne…).
+router.use(authenticate);
 
 /**
  * Get configured projects with names
@@ -35,7 +40,7 @@ router.get('/configured-projects', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch configured projects',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -64,7 +69,7 @@ router.get('/configured-boards', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch configured boards',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -73,7 +78,7 @@ router.get('/configured-boards', async (req: Request, res: Response) => {
  * Burndown fidèle du sprint actif (ou dernier clos) par board.
  * GET /api/jira/sprint-burndown?includeQa=true
  */
-router.get('/sprint-burndown', async (req: Request, res: Response) => {
+router.get('/sprint-burndown', requirePage('dashboard', 'pointHebdo'), async (req: Request, res: Response) => {
   try {
     const includeQa = req.query.includeQa === 'true';
     const boards = await worklogAppService.getSprintBurndowns({ includeQa });
@@ -83,7 +88,7 @@ router.get('/sprint-burndown', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch sprint burndowns',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -94,7 +99,7 @@ router.get('/sprint-burndown', async (req: Request, res: Response) => {
  * Query: from, to (optional) — same semantics as GET /board/:boardId/sprint-issues
  *        includeQa=true — ajoute les boards JIRA_QA_BOARD_ID (point hebdo).
  */
-router.get('/dashboard/sprint-issues-all', async (req: Request, res: Response) => {
+router.get('/dashboard/sprint-issues-all', requirePage('dashboard', 'pointHebdo'), async (req: Request, res: Response) => {
   try {
     const from = req.query.from as string | undefined;
     const to = req.query.to as string | undefined;
@@ -109,7 +114,7 @@ router.get('/dashboard/sprint-issues-all', async (req: Request, res: Response) =
     res.status(500).json({
       success: false,
       message: 'Failed to fetch sprint issues for all boards',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -120,7 +125,7 @@ router.get('/dashboard/sprint-issues-all', async (req: Request, res: Response) =
  * Query: from, to (optional) - when provided, returns all project issues updated in that date range (no sprint filter).
  * When from/to are omitted, returns issues from the board's active sprint (or last closed sprint).
  */
-router.get('/board/:boardId/sprint-issues', async (req: Request, res: Response) => {
+router.get('/board/:boardId/sprint-issues', requirePage('dashboard', 'pointHebdo'), async (req: Request, res: Response) => {
   try {
     const boardId = parseInt(req.params.boardId, 10);
     const from = req.query.from as string | undefined;
@@ -144,7 +149,7 @@ router.get('/board/:boardId/sprint-issues', async (req: Request, res: Response) 
     res.status(500).json({
       success: false,
       message: 'Failed to fetch sprint issues for board',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -154,7 +159,7 @@ router.get('/board/:boardId/sprint-issues', async (req: Request, res: Response) 
  * GET /api/jira/resolved-by-day?from=YYYY-MM-DD&to=YYYY-MM-DD&mode=tickets|points
  * or  ?activeSprint=true&mode=tickets|points  (uses sprint actif / last closed sprint dates)
  */
-router.get('/resolved-by-day', async (req: Request, res: Response) => {
+router.get('/resolved-by-day', requirePage('dashboard', 'pointHebdo'), async (req: Request, res: Response) => {
   try {
     const from = req.query.from as string | undefined;
     const to = req.query.to as string | undefined;
@@ -210,7 +215,7 @@ router.get('/resolved-by-day', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch resolved by day',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -235,7 +240,7 @@ router.get('/projects', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch projects',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -244,7 +249,7 @@ router.get('/projects', async (req: Request, res: Response) => {
  * Get Epic/Legend progress by team
  * GET /api/jira/epic-progress?boardId=123&typeFilter=epic|legend|all&statusFilter=all|done|new|indeterminate
  */
-router.get('/epic-progress', async (req: Request, res: Response) => {
+router.get('/epic-progress', requirePage('epics'), async (req: Request, res: Response) => {
   try {
     const boardId = parseInt(req.query.boardId as string, 10);
     if (Number.isNaN(boardId)) {
@@ -269,7 +274,7 @@ router.get('/epic-progress', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch epic progress',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -278,7 +283,7 @@ router.get('/epic-progress', async (req: Request, res: Response) => {
  * Search Epic/Legend by title (for autocomplete)
  * GET /api/jira/epic-search?boardId=123&query=xxx&typeFilter=epic|legend|all&statusFilter=all|done|new|indeterminate
  */
-router.get('/epic-search', async (req: Request, res: Response) => {
+router.get('/epic-search', requirePage('epics'), async (req: Request, res: Response) => {
   try {
     const boardId = parseInt(req.query.boardId as string, 10);
     if (Number.isNaN(boardId)) {
@@ -301,7 +306,7 @@ router.get('/epic-search', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to search epics',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -310,7 +315,7 @@ router.get('/epic-search', async (req: Request, res: Response) => {
  * Get Epic/Legend detail with child issues
  * GET /api/jira/epic/:epicKey/details
  */
-router.get('/epic/:epicKey/details', async (req: Request, res: Response) => {
+router.get('/epic/:epicKey/details', requirePage('epics'), async (req: Request, res: Response) => {
   try {
     const { epicKey } = req.params;
     
@@ -331,7 +336,7 @@ router.get('/epic/:epicKey/details', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch epic details',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -342,9 +347,9 @@ router.get('/epic/:epicKey/details', async (req: Request, res: Response) => {
  * admin et aux rôles ayant la page « Coûts horaires » (ex. Finance).
  * GET /api/jira/epic/:epicKey/time-by-user
  */
-router.get('/epic/:epicKey/time-by-user', optionalAuth, async (req: Request, res: Response) => {
+router.get('/epic/:epicKey/time-by-user', requirePage('epics'), async (req: Request, res: Response) => {
   try {
-    const withCosts = req.user ? await userHasCostAccess(req.user.userId) : false;
+    const withCosts = await userHasCostAccess(req.user!.userId);
     const result = await worklogAppService.getEpicTimeByUser(req.params.epicKey, { withCosts });
     res.json({ success: true, ...result });
   } catch (error) {
@@ -352,7 +357,7 @@ router.get('/epic/:epicKey/time-by-user', optionalAuth, async (req: Request, res
     res.status(500).json({
       success: false,
       message: 'Failed to fetch epic time by user',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -373,7 +378,7 @@ router.get('/time-config', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch time tracking configuration',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -382,7 +387,7 @@ router.get('/time-config', async (req: Request, res: Response) => {
  * US passées à Done et US créées sur un trimestre (ou l'année) : Claude vs non Claude (issue #39)
  * GET /api/jira/claude-us-stats?quarter=Q1|Q2|Q3|Q4|all&year=YYYY
  */
-router.get('/claude-us-stats', async (req: Request, res: Response) => {
+router.get('/claude-us-stats', requirePage('produit'), async (req: Request, res: Response) => {
   try {
     const quarterRaw = ((req.query.quarter as string) || 'all').toUpperCase();
     const quarter = quarterRaw === 'ALL' ? 'all' : quarterRaw;
@@ -401,7 +406,7 @@ router.get('/claude-us-stats', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch Claude US stats',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -410,7 +415,7 @@ router.get('/claude-us-stats', async (req: Request, res: Response) => {
  * Détail des US Claude d'une série (issue #39) : dates de création, résolution et ajout du label
  * GET /api/jira/claude-us-issues?quarter=Q3&year=2026&basis=done|created&boardId=810
  */
-router.get('/claude-us-issues', async (req: Request, res: Response) => {
+router.get('/claude-us-issues', requirePage('produit'), async (req: Request, res: Response) => {
   try {
     const quarterRaw = ((req.query.quarter as string) || 'all').toUpperCase();
     const quarter = quarterRaw === 'ALL' ? 'all' : quarterRaw;
@@ -440,28 +445,7 @@ router.get('/claude-us-issues', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Failed to fetch Claude US issues',
-      error: error instanceof Error ? error.message : 'Unknown error'
-    });
-  }
-});
-
-/**
- * Test Jira connection
- * GET /api/jira/test
- */
-router.get('/test', async (req: Request, res: Response) => {
-  try {
-    const result = await worklogAppService.testConnection();
-    res.json({
-      success: result.success,
-      message: result.success ? 'Jira connection successful' : 'Jira connection failed'
-    });
-  } catch (error) {
-    logger.error('Jira test connection error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Failed to test Jira connection',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -470,7 +454,7 @@ router.get('/test', async (req: Request, res: Response) => {
  * Save Dashboard Sprint Snapshot
  * POST /api/jira/dashboard-snapshot
  */
-router.post('/dashboard-snapshot', authenticate, async (req: Request, res: Response) => {
+router.post('/dashboard-snapshot', requirePage('dashboard'), async (req: Request, res: Response) => {
   try {
     const { sprintName, projectsStats, totals, dateRange, notes } = req.body;
     
@@ -512,7 +496,7 @@ router.post('/dashboard-snapshot', authenticate, async (req: Request, res: Respo
       notes
     });
 
-    logger.info(`Dashboard snapshot saved: ${sprintName} by ${req.user!.email}`);
+    logger.info(`Dashboard snapshot saved: ${sprintName} by user ${req.user!.userId}`);
 
     res.status(201).json({
       success: true,
@@ -543,7 +527,7 @@ router.post('/dashboard-snapshot', authenticate, async (req: Request, res: Respo
  * Get all Dashboard Sprint Snapshots
  * GET /api/jira/dashboard-snapshots
  */
-router.get('/dashboard-snapshots', async (req: Request, res: Response) => {
+router.get('/dashboard-snapshots', requirePage('dashboard'), async (req: Request, res: Response) => {
   try {
     const { limit = 50 } = req.query;
     
@@ -576,7 +560,7 @@ router.get('/dashboard-snapshots', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la récupération des snapshots',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -585,7 +569,7 @@ router.get('/dashboard-snapshots', async (req: Request, res: Response) => {
  * Get a specific Dashboard Sprint Snapshot
  * GET /api/jira/dashboard-snapshot/:id
  */
-router.get('/dashboard-snapshot/:id', async (req: Request, res: Response) => {
+router.get('/dashboard-snapshot/:id', requirePage('dashboard'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     
@@ -616,7 +600,7 @@ router.get('/dashboard-snapshot/:id', async (req: Request, res: Response) => {
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la récupération du snapshot',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });
@@ -625,7 +609,7 @@ router.get('/dashboard-snapshot/:id', async (req: Request, res: Response) => {
  * Delete a Dashboard Sprint Snapshot
  * DELETE /api/jira/dashboard-snapshot/:id
  */
-router.delete('/dashboard-snapshot/:id', authenticate, async (req: Request, res: Response) => {
+router.delete('/dashboard-snapshot/:id', requirePage('dashboard'), async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
     
@@ -638,7 +622,7 @@ router.delete('/dashboard-snapshot/:id', authenticate, async (req: Request, res:
       });
     }
 
-    logger.info(`Dashboard snapshot deleted: ${snapshot.sprintName} by ${req.user!.email}`);
+    logger.info(`Dashboard snapshot deleted: ${snapshot.sprintName} by user ${req.user!.userId}`);
 
     res.json({
       success: true,
@@ -649,7 +633,7 @@ router.delete('/dashboard-snapshot/:id', authenticate, async (req: Request, res:
     res.status(500).json({
       success: false,
       message: 'Erreur lors de la suppression du snapshot',
-      error: error instanceof Error ? error.message : 'Unknown error'
+      error: clientErrorDetail(error)
     });
   }
 });

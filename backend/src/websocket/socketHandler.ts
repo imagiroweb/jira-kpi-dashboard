@@ -1,6 +1,8 @@
 import { Server, Socket } from 'socket.io';
 import { logger } from '../utils/logger';
 import { authService } from '../application/services/AuthService';
+import { readSessionCookie } from '../config/sessionCookie';
+import { userCanSeePage } from '../middleware/requirePage';
 
 interface ConnectedClient {
   id: string;
@@ -14,13 +16,18 @@ export function setupSocketHandlers(io: Server): void {
   // Authentification obligatoire : même JWT que l'API REST (Authorization: Bearer). Un
   // client sans token valide n'établit jamais la connexion (les événements diffusés ici
   // — dont les mises à jour de points hebdo — ne doivent pas être accessibles anonymement).
-  io.use((socket, next) => {
-    const token = socket.handshake.auth?.token;
-    if (typeof token !== 'string' || !token) {
+  io.use(async (socket, next) => {
+    // Cookie de session HttpOnly (navigateur) ; `auth.token` accepté pour les clients non navigateurs.
+    const authToken = socket.handshake.auth?.token;
+    const token =
+      readSessionCookie(socket.handshake.headers?.cookie) ??
+      (typeof authToken === 'string' && authToken ? authToken : null);
+    if (!token) {
       logger.warn(`Socket connection rejected (no token): ${socket.id}`);
       return next(new Error('Authentification requise'));
     }
-    const payload = authService.verifyToken(token);
+    // Même contrôle que l'API : JWT valide, compte actif, session non révoquée.
+    const payload = await authService.validateSession(token);
     if (!payload) {
       logger.warn(`Socket connection rejected (invalid token): ${socket.id}`);
       return next(new Error('Token invalide ou expiré'));
@@ -70,9 +77,22 @@ export function setupSocketHandlers(io: Server): void {
     });
 
     // Subscribe to live updates for a specific weekly meeting (Point hebdo)
-    socket.on('subscribe:meeting', (meetingId: string) => {
+    socket.on('subscribe:meeting', async (meetingId: string) => {
       if (typeof meetingId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(meetingId)) {
         logger.warn(`Client ${socket.id} sent an invalid meetingId for subscribe:meeting`);
+        return;
+      }
+      // Même droit que l'API REST : la page « Point hebdo » doit être visible pour le rôle.
+      const userId = socket.data.user?.userId;
+      let allowed = false;
+      try {
+        allowed = typeof userId === 'string' && (await userCanSeePage(userId, 'pointHebdo'));
+      } catch (error) {
+        logger.error('subscribe:meeting access check failed:', error);
+      }
+      if (!allowed) {
+        logger.warn(`Client ${socket.id} denied subscribe:meeting (no pointHebdo access)`);
+        socket.emit('subscribed:meeting', { meetingId, success: false });
         return;
       }
       socket.join(`meeting:${meetingId}`);

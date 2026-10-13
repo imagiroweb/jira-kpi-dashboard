@@ -4,10 +4,10 @@
  * Source de vérité = les fichiers sous `Entretiens-eval-perf/` (scan récursif), pas une table
  * nominative. Convention de nommage constatée :
  *   `Perf-Eval-<période>-Adoria-<nom>-BDR.xlsx` (ou `.ods`)
- * où `<nom>` est en général le nom de famille (éventuellement composé : Wan-Meenen, Deguil-Robin).
+ * où `<nom>` est en général le nom de famille (éventuellement composé : Wan-Meenen, Martin-Durand).
  *
  * Lien avec Entra : l'email Adoria est `1re lettre du prénom` + `nom de famille` + `@adoria.com`
- * (ex. Bruno Deguil-Robin → `bdeguil-robin@adoria.com`). Le jeton du fichier (`Deguil-Robin`)
+ * (ex. Paul Martin-Durand → `pmartin-durand@adoria.com`). Le jeton du fichier (`Martin-Durand`)
  * est cherché dans la partie locale de cet email.
  *
  * `IMPORT_FILE_NAME_OVERRIDES` n'existe que pour les exceptions (homonymes, fichier hors
@@ -46,7 +46,7 @@ export function emailLocalPart(email: string): string {
   return normalizeName((email.split('@')[0] ?? '').replace(/\s+/g, ''));
 }
 
-/** Variantes du nom pour l'email Entra : tirets conservés ou retirés (`deguil-robin` / `deguilrobin`). */
+/** Variantes du nom pour l'email Entra : tirets conservés ou retirés (`martin-durand` / `martindurand`). */
 export function lastNameEmailKeys(lastNameToken: string): string[] {
   const withHyphen = normalizeName(lastNameToken.replace(/\s+/g, '-'));
   const compact = normalizeHyphenatedName(lastNameToken).replace(/ /g, '');
@@ -54,8 +54,8 @@ export function lastNameEmailKeys(lastNameToken: string): string[] {
 }
 
 /**
- * Email Entra : `bdeguil-robin@adoria.com` = 1re lettre du prénom + nom.
- * Le jeton fichier `Deguil-Robin` doit être le suffixe de la partie locale, précédé d'une lettre.
+ * Email Entra : `pmartin-durand@adoria.com` = 1re lettre du prénom + nom.
+ * Le jeton fichier `Martin-Durand` doit être le suffixe de la partie locale, précédé d'une lettre.
  */
 export function emailLocalMatchesLastName(email: string, lastNameToken: string): boolean {
   const local = emailLocalPart(email);
@@ -69,7 +69,7 @@ export function expectedAdoriaLocalParts(firstName: string, lastName: string): s
 }
 
 /**
- * Extrait le jeton de nom entre `Adoria-` et `-BDR` (`Parjouet`, `Wan-Meenen`, `Deguil-Robin`).
+ * Extrait le jeton de nom entre `Adoria-` et `-BDR` (`Parjouet`, `Wan-Meenen`, `Martin-Durand`).
  * `null` si le fichier ne suit pas la convention — à traiter via override ou à renommer.
  */
 export function parseInterviewFileName(fileName: string): string | null {
@@ -112,7 +112,7 @@ export function matchRosterByLastNameInEmail(
 
 /**
  * Rattache le jeton du fichier au roster :
- * 1. email Entra (`b` + `deguil-robin` → `bdeguil-robin@adoria.com`) ;
+ * 1. email Entra (`p` + `martin-durand` → `pmartin-durand@adoria.com`) ;
  * 2. nom de famille unique / prénom+nom / suffixe, si l'email ne suffit pas.
  * `null` si 0 ou plusieurs candidats — le dry-run le signale.
  */

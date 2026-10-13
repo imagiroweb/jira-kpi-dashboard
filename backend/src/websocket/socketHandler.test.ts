@@ -9,7 +9,12 @@ jest.mock('../utils/logger', () => ({
 
 const mockVerifyToken = jest.fn();
 jest.mock('../application/services/AuthService', () => ({
-  authService: { verifyToken: (...args: unknown[]) => mockVerifyToken(...args) }
+  authService: { validateSession: (...args: unknown[]) => mockVerifyToken(...args) }
+}));
+
+const mockUserCanSeePage = jest.fn();
+jest.mock('../middleware/requirePage', () => ({
+  userCanSeePage: (...args: unknown[]) => mockUserCanSeePage(...args)
 }));
 
 import type { Server, Socket } from 'socket.io';
@@ -88,7 +93,7 @@ function getAuthMiddleware(io: IoMock) {
   return io.use.mock.calls[0][0] as (
     socket: SocketMock,
     next: (err?: Error) => void
-  ) => void;
+  ) => void | Promise<void>;
 }
 
 describe('socketHandler', () => {
@@ -105,43 +110,59 @@ describe('socketHandler', () => {
   });
 
   describe('authentification (io.use)', () => {
-    it('rejette une connexion sans token', () => {
+    it('rejette une connexion sans token', async () => {
       const io = makeIoMock();
       setupSocketHandlers(asServer(io));
       const middleware = getAuthMiddleware(io);
       const socket = makeSocketMock('sock-no-token');
       const next = jest.fn();
 
-      middleware(socket, next);
+      await middleware(socket, next);
 
       expect(next).toHaveBeenCalledWith(expect.any(Error));
       expect(mockVerifyToken).not.toHaveBeenCalled();
     });
 
-    it('rejette une connexion avec un token invalide', () => {
-      mockVerifyToken.mockReturnValue(null);
+    it('rejette un token invalide, un compte désactivé ou une session révoquée', async () => {
+      mockVerifyToken.mockResolvedValue(null);
       const io = makeIoMock();
       setupSocketHandlers(asServer(io));
       const middleware = getAuthMiddleware(io);
       const socket = makeSocketMock('sock-bad-token', { token: 'garbage' });
       const next = jest.fn();
 
-      middleware(socket, next);
+      await middleware(socket, next);
 
       expect(mockVerifyToken).toHaveBeenCalledWith('garbage');
       expect(next).toHaveBeenCalledWith(expect.any(Error));
     });
 
-    it('accepte une connexion avec un token valide et attache l\'utilisateur au socket', () => {
+    it('accepte le cookie de session HttpOnly envoyé au handshake', async () => {
       const user = { userId: 'u1', email: 'alice@test.com' };
-      mockVerifyToken.mockReturnValue(user);
+      mockVerifyToken.mockResolvedValue(user);
+      const io = makeIoMock();
+      setupSocketHandlers(asServer(io));
+      const middleware = getAuthMiddleware(io);
+      const socket = makeSocketMock('sock-cookie');
+      (socket.handshake as { headers?: Record<string, string> }).headers = { cookie: 'x=1; session=cookie-jwt' };
+      const next = jest.fn();
+
+      await middleware(socket, next);
+
+      expect(mockVerifyToken).toHaveBeenCalledWith('cookie-jwt');
+      expect(next).toHaveBeenCalledWith();
+    });
+
+    it('accepte une connexion avec un token valide et attache l\'utilisateur au socket', async () => {
+      const user = { userId: 'u1', email: 'alice@test.com' };
+      mockVerifyToken.mockResolvedValue(user);
       const io = makeIoMock();
       setupSocketHandlers(asServer(io));
       const middleware = getAuthMiddleware(io);
       const socket = makeSocketMock('sock-ok', { token: 'valid-jwt' });
       const next = jest.fn();
 
-      middleware(socket, next);
+      await middleware(socket, next);
 
       expect(next).toHaveBeenCalledWith();
       expect(socket.data.user).toEqual(user);
@@ -173,16 +194,24 @@ describe('socketHandler', () => {
     expect(getConnectedClients().find((c) => c.id === 'sock-1')).toBeUndefined();
   });
 
-  it('gère subscribe/unsubscribe:meeting et rejette un meetingId invalide', () => {
+  function connectMeetingSocket(user?: { userId: string }) {
     const io = makeIoMock();
     setupSocketHandlers(asServer(io));
     const connectionCb = io.on.mock.calls.find((c) => c[0] === 'connection')?.[1] as
       | ((socket: Socket) => void)
       | undefined;
     const socket = makeSocketMock('sock-meeting');
+    if (user) socket.data.user = user;
     connectionCb?.(socket as unknown as Socket);
+    return socket;
+  }
 
-    socket._handlers['subscribe:meeting']('507f1f77bcf86cd799439055');
+  it('gère subscribe/unsubscribe:meeting et rejette un meetingId invalide', async () => {
+    mockUserCanSeePage.mockResolvedValue(true);
+    const socket = connectMeetingSocket({ userId: 'u1' });
+
+    await socket._handlers['subscribe:meeting']('507f1f77bcf86cd799439055');
+    expect(mockUserCanSeePage).toHaveBeenCalledWith('u1', 'pointHebdo');
     expect(socket.join).toHaveBeenCalledWith('meeting:507f1f77bcf86cd799439055');
     expect(socket.emit).toHaveBeenCalledWith('subscribed:meeting', {
       meetingId: '507f1f77bcf86cd799439055',
@@ -193,8 +222,31 @@ describe('socketHandler', () => {
     expect(socket.leave).toHaveBeenCalledWith('meeting:507f1f77bcf86cd799439055');
 
     socket.join.mockClear();
-    socket._handlers['subscribe:meeting']('not valid; drop table');
+    await socket._handlers['subscribe:meeting']('not valid; drop table');
     expect(socket.join).not.toHaveBeenCalled();
+  });
+
+  it('refuse subscribe:meeting sans la page pointHebdo', async () => {
+    mockUserCanSeePage.mockResolvedValue(false);
+    const socket = connectMeetingSocket({ userId: 'u2' });
+
+    await socket._handlers['subscribe:meeting']('507f1f77bcf86cd799439055');
+
+    expect(socket.join).not.toHaveBeenCalled();
+    expect(socket.emit).toHaveBeenCalledWith('subscribed:meeting', {
+      meetingId: '507f1f77bcf86cd799439055',
+      success: false
+    });
+  });
+
+  it('refuse subscribe:meeting si la vérification des droits échoue', async () => {
+    mockUserCanSeePage.mockRejectedValue(new Error('Mongo down'));
+    const socket = connectMeetingSocket({ userId: 'u3' });
+
+    await socket._handlers['subscribe:meeting']('507f1f77bcf86cd799439055');
+
+    expect(socket.join).not.toHaveBeenCalled();
+    expect(mockLogger.error).toHaveBeenCalled();
   });
 
   it('émet les événements helpers vers les bons canaux', () => {

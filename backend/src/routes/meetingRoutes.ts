@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { Server } from 'socket.io';
 import { logger } from '../utils/logger';
+import { clientErrorDetail } from '../utils/clientError';
 import { WeeklySprintMeeting, IWeeklySprintMeeting } from '../domain/meeting/entities/WeeklySprintMeeting';
 import {
   applyMeetingPatch,
@@ -11,10 +12,14 @@ import {
   stampMeetingPatchAuthors,
   WeeklyMeetingDraft
 } from '../domain/meeting/weeklySprintMeeting';
-import { authenticate } from '../middleware/authMiddleware';
+import { authenticate, requireSuperAdmin } from '../middleware/authMiddleware';
+import { requirePage } from '../middleware/requirePage';
 import { emitMeetingUpdate } from '../websocket/socketHandler';
 
 const router = Router();
+
+// Toutes les routes exigent la page « Point hebdo » dans le rôle, pas seulement une connexion.
+router.use(authenticate, requirePage('pointHebdo'));
 
 const DEFAULT_LIST_LIMIT = 30;
 const MAX_LIST_LIMIT = 100;
@@ -102,7 +107,7 @@ function fail(res: Response, status: number, message: string, error?: unknown) {
   return res.status(status).json({
     success: false,
     message,
-    ...(error ? { error: error instanceof Error ? error.message : 'Unknown error' } : {})
+    ...(error ? { error: clientErrorDetail(error) } : {})
   });
 }
 
@@ -110,7 +115,7 @@ function fail(res: Response, status: number, message: string, error?: unknown) {
  * Liste des points hebdo (du plus récent au plus ancien)
  * GET /api/meetings
  */
-router.get('/', authenticate, async (req: Request, res: Response) => {
+router.get('/', async (req: Request, res: Response) => {
   try {
     const requested = Number(req.query.limit ?? DEFAULT_LIST_LIMIT);
     const limit = Number.isFinite(requested)
@@ -136,7 +141,7 @@ router.get('/', authenticate, async (req: Request, res: Response) => {
  * Dernier point hebdo, créé à la volée s'il n'en existe aucun
  * GET /api/meetings/latest
  */
-router.get('/latest', authenticate, async (req: Request, res: Response) => {
+router.get('/latest', async (req: Request, res: Response) => {
   try {
     const meeting = await WeeklySprintMeeting.findOne().sort({ 'sprint.date': -1, createdAt: -1 });
 
@@ -148,7 +153,7 @@ router.get('/latest', authenticate, async (req: Request, res: Response) => {
       ...buildDefaultMeeting(today()),
       createdBy: author(req)
     });
-    logger.info(`Weekly meeting created (first one) by ${req.user!.email}`);
+    logger.info(`Weekly meeting created (first one) by user ${req.user!.userId}`);
     res.status(201).json({ success: true, meeting: serialize(created) });
   } catch (error) {
     logger.error('Error fetching latest weekly meeting:', error);
@@ -160,7 +165,7 @@ router.get('/latest', authenticate, async (req: Request, res: Response) => {
  * Détail d'un point hebdo
  * GET /api/meetings/:id
  */
-router.get('/:id', authenticate, async (req: Request, res: Response) => {
+router.get('/:id', async (req: Request, res: Response) => {
   try {
     const meeting = await WeeklySprintMeeting.findById(req.params.id);
     if (!meeting) {
@@ -177,7 +182,7 @@ router.get('/:id', authenticate, async (req: Request, res: Response) => {
  * Créer un point hebdo vierge
  * POST /api/meetings
  */
-router.post('/', authenticate, async (req: Request, res: Response) => {
+router.post('/', async (req: Request, res: Response) => {
   try {
     const date = typeof req.body?.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(req.body.date)
       ? req.body.date
@@ -188,7 +193,7 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
       createdBy: author(req)
     });
 
-    logger.info(`Weekly meeting created by ${req.user!.email}`);
+    logger.info(`Weekly meeting created by user ${req.user!.userId}`);
     res.status(201).json({ success: true, meeting: serialize(meeting) });
   } catch (error) {
     logger.error('Error creating weekly meeting:', error);
@@ -200,7 +205,7 @@ router.post('/', authenticate, async (req: Request, res: Response) => {
  * Démarrer le point suivant à partir d'un point existant
  * POST /api/meetings/:id/next
  */
-router.post('/:id/next', authenticate, async (req: Request, res: Response) => {
+router.post('/:id/next', async (req: Request, res: Response) => {
   try {
     const previous = await WeeklySprintMeeting.findById(req.params.id);
     if (!previous) {
@@ -216,7 +221,7 @@ router.post('/:id/next', authenticate, async (req: Request, res: Response) => {
       createdBy: author(req)
     });
 
-    logger.info(`Weekly meeting rolled over by ${req.user!.email}`);
+    logger.info(`Weekly meeting rolled over by user ${req.user!.userId}`);
     res.status(201).json({ success: true, meeting: serialize(meeting) });
   } catch (error) {
     logger.error('Error rolling over weekly meeting:', error);
@@ -229,7 +234,7 @@ router.post('/:id/next', authenticate, async (req: Request, res: Response) => {
  * Les listes sont fusionnées par id (upsert/remove) avec un verrou optimiste __v.
  * PATCH /api/meetings/:id
  */
-router.patch('/:id', authenticate, async (req: Request, res: Response) => {
+router.patch('/:id', async (req: Request, res: Response) => {
   try {
     const patch = parseWeeklyMeetingPatch(req.body);
     if (!patch) {
@@ -290,16 +295,16 @@ router.patch('/:id', authenticate, async (req: Request, res: Response) => {
 });
 
 /**
- * Supprimer un point hebdo
+ * Supprimer un point hebdo (super admin uniquement : l'interface ne propose pas la suppression)
  * DELETE /api/meetings/:id
  */
-router.delete('/:id', authenticate, async (req: Request, res: Response) => {
+router.delete('/:id', requireSuperAdmin, async (req: Request, res: Response) => {
   try {
     const meeting = await WeeklySprintMeeting.findByIdAndDelete(req.params.id);
     if (!meeting) {
       return fail(res, 404, 'Point hebdo non trouvé');
     }
-    logger.info(`Weekly meeting deleted by ${req.user!.email}`);
+    logger.info(`Weekly meeting deleted by user ${req.user!.userId}`);
     res.json({ success: true, message: 'Point hebdo supprimé avec succès' });
   } catch (error) {
     logger.error('Error deleting weekly meeting:', error);

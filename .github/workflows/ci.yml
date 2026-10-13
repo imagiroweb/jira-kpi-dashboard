@@ -27,6 +27,7 @@ jobs:
           cache-dependency-path: |
             backend/yarn.lock
             frontend/yarn.lock
+            e2e/yarn.lock
 
       # --- Backend ---
       - name: Backend – install
@@ -61,6 +62,15 @@ jobs:
       - name: Frontend – build
         working-directory: ./frontend
         run: yarn build
+
+      # --- E2E (vérification de compilation ; l'exécution se fait contre la préprod) ---
+      - name: E2E – install
+        working-directory: ./e2e
+        run: yarn install --frozen-lockfile
+
+      - name: E2E – typecheck
+        working-directory: ./e2e
+        run: yarn typecheck
 
   docker-build:
     name: Docker build (validation)

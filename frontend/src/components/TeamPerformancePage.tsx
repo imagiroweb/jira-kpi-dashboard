@@ -920,7 +920,9 @@ export function TeamPerformancePage() {
                         <ObjectiveStatusBadges objectives={review.objectives} />
                       </td>
                       <td className="p-3 text-right">
-                        {!isOwnPerformanceRow(reviewUserId(review)) && (
+                        {review.anonymized ? (
+                          <span className="text-xs text-surface-500">Anonymisée</span>
+                        ) : !isOwnPerformanceRow(reviewUserId(review)) && (
                           <button
                             type="button"
                             className="btn-ghost text-xs px-3 py-1.5"

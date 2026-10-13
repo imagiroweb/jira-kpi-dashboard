@@ -65,7 +65,6 @@ import App from './App';
 const mockVerifyToken = vi.mocked(authApi.verifyToken);
 const mockGetCurrentUser = vi.mocked(authApi.getCurrentUser);
 const mockGetMicrosoftConfig = vi.mocked(authApi.getMicrosoftConfig);
-const mockGetRolesForSignup = vi.mocked(authApi.getRolesForSignup);
 const mockRecordPageView = vi.mocked(authApi.recordPageView);
 
 function stubWindowLocation(pathname: string, search = '') {
@@ -89,7 +88,6 @@ describe('App', () => {
       tenantId: '',
       redirectUri: '',
     });
-    mockGetRolesForSignup.mockResolvedValue([]);
     mockVerifyToken.mockResolvedValue(true);
     mockGetCurrentUser.mockResolvedValue(TEST_USER);
   });
@@ -151,7 +149,7 @@ describe('App', () => {
   });
 
   it('déconnecte l’utilisateur si verifyToken échoue', async () => {
-    seedAuthenticatedUser(undefined, 'expired-token');
+    seedAuthenticatedUser();
     mockVerifyToken.mockResolvedValue(false);
 
     render(<App />);
@@ -161,21 +159,6 @@ describe('App', () => {
     });
 
     expect(useStore.getState().isAuthenticated).toBe(false);
-    expect(useStore.getState().token).toBeNull();
-  });
-
-  it('affiche RoleSelectionScreen quand pendingRoleSelection est actif', async () => {
-    seedAuthenticatedUser();
-    useStore.getState().setPendingRoleSelection(true);
-    mockGetRolesForSignup.mockResolvedValue([{ id: 'role-1', name: 'Développeur' }]);
-
-    render(<App />);
-
-    await waitFor(() => {
-      expect(screen.getByText('Première connexion')).toBeInTheDocument();
-    });
-
-    expect(screen.queryByTestId('sidebar')).not.toBeInTheDocument();
   });
 
   it('affiche l’application authentifiée après vérification réussie', async () => {

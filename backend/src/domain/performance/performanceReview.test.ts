@@ -57,7 +57,7 @@ function makeObjective(overrides: Partial<IObjective> = {}): IObjective {
   };
 }
 
-const author: IReviewAuthor = { id: 'u1', name: 'Maxime Andres', role: 'collaborateur' };
+const author: IReviewAuthor = { id: 'u1', name: 'Maxime Laurent', role: 'collaborateur' };
 
 describe('sumWeights / weightsAreBalanced', () => {
   it('somme les poids', () => {
@@ -200,7 +200,7 @@ describe('computeGeneralAssessmentAxisScore', () => {
     expect(computeGeneralAssessmentAxisScore(subCriteria)).toBe(5);
   });
 
-  it('moyenne des sous-critères quand ils diffèrent (cas réel Alexandre Parjouet, axe Impact : 4/4/3)', () => {
+  it('moyenne des sous-critères quand ils diffèrent (cas réel Alexandre Moreau, axe Impact : 4/4/3)', () => {
     const subCriteria = [
       { label: 'Livraison (delivery)', score: 4 },
       { label: 'Contribution aux OKR', score: 4 },
@@ -219,7 +219,7 @@ describe('computeGeneralAssessmentGlobalScore', () => {
     expect(computeGeneralAssessmentGlobalScore(emptyAxes())).toBe(0);
   });
 
-  it('reprend le cas réel Excel (Bruno Deguil-Robin) : axes 5/4.667/5/5 => moyenne ~4.917', () => {
+  it('reprend le cas réel Excel (Paul Martin-Durand) : axes 5/4.667/5/5 => moyenne ~4.917', () => {
     const axes: IGeneralAssessmentAxes = {
       technique: [
         { label: 'Qualité du code & revues', score: 5 },

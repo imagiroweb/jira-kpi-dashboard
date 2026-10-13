@@ -33,16 +33,20 @@ jest.mock('../application/services/appUserDirectory', () => ({
   userHasCostAccess: (...args: unknown[]) => mockUserHasCostAccess(...args),
 }));
 
-// optionalAuth : un utilisateur n'est attaché que si un token est envoyé.
+// Contrôle par page testé à part (middleware/requirePage.test.ts) : ici, laisse passer
+// sauf si mockPageAccess = 'deny'.
+let mockPageAccess = 'allow' as 'allow' | 'deny';
+jest.mock('../middleware/requirePage', () => ({
+  requirePage: () => (_req: unknown, res: { status: (c: number) => { json: (b: unknown) => void } }, next: () => void) =>
+    mockPageAccess === 'deny' ? res.status(403).json({ success: false, error: 'Accès non autorisé pour votre rôle' }) : next(),
+}));
+
+let mockAuthMode = 'pass' as 'pass' | 'deny';
 jest.mock('../middleware/authMiddleware', () => {
-  const actual = jest.requireActual('../middleware/authMiddleware');
-  const { TEST_USER } = jest.requireActual('../test/fixtures/users');
+  const auth = jest.requireActual<typeof import('../test/mocks/authMiddleware')>('../test/mocks/authMiddleware');
   return {
-    ...actual,
-    optionalAuth: (req: { headers: Record<string, string>; user?: unknown }, _res: unknown, next: () => void) => {
-      if (req.headers.authorization) req.user = TEST_USER;
-      next();
-    },
+    authenticate: (req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) =>
+      mockAuthMode === 'deny' ? auth.mockAuthDenied(req, res, next) : auth.mockAuthenticate()(req, res, next),
   };
 });
 
@@ -53,6 +57,8 @@ describe('jiraRoutes — core (TI)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockAuthMode = 'pass';
+    mockPageAccess = 'allow';
 
     mockWorklogAppService.getConfiguredProjects.mockResolvedValue(['PROJ', 'ABC', 'UNKNOWN']);
     mockWorklogAppService.getProjects.mockResolvedValue(TEST_JIRA_PROJECTS);
@@ -441,15 +447,22 @@ describe('jiraRoutes — core (TI)', () => {
   describe('GET /api/jira/epic/:epicKey/time-by-user', () => {
     const RESULT = { epicKey: 'PROJ-100', issueCount: 3, totalSeconds: 7200, people: [], byRole: [] };
 
-    it('ne demande pas les coûts sans utilisateur authentifié', async () => {
-      mockWorklogAppService.getEpicTimeByUser.mockResolvedValue(RESULT);
+    it('retourne 401 sans utilisateur authentifié (temps passé par personne)', async () => {
+      mockAuthMode = 'deny';
 
       const res = await request(app).get('/api/jira/epic/PROJ-100/time-by-user');
 
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(mockUserHasCostAccess).not.toHaveBeenCalled();
-      expect(mockWorklogAppService.getEpicTimeByUser).toHaveBeenCalledWith('PROJ-100', { withCosts: false });
+      expect(res.status).toBe(401);
+      expect(mockWorklogAppService.getEpicTimeByUser).not.toHaveBeenCalled();
+    });
+
+    it('retourne 403 si le rôle n’a pas la page Suivi épics', async () => {
+      mockPageAccess = 'deny';
+
+      const res = await request(app).get('/api/jira/epic/PROJ-100/time-by-user');
+
+      expect(res.status).toBe(403);
+      expect(mockWorklogAppService.getEpicTimeByUser).not.toHaveBeenCalled();
     });
 
     it("demande les coûts si l'utilisateur y a accès (super admin / rôle finance)", async () => {
@@ -605,34 +618,30 @@ describe('jiraRoutes — core (TI)', () => {
     });
   });
 
-  describe('GET /api/jira/test', () => {
-    it('retourne 200 si la connexion Jira réussit', async () => {
-      const res = await request(app).get('/api/jira/test');
+  describe('Authentification obligatoire (toutes les routes)', () => {
+    it.each([
+      '/api/jira/configured-projects',
+      '/api/jira/configured-boards',
+      '/api/jira/projects',
+      '/api/jira/time-config',
+      '/api/jira/dashboard/sprint-issues-all',
+      '/api/jira/resolved-by-day',
+      '/api/jira/sprint-burndown',
+      '/api/jira/epic-progress?boardId=1',
+      '/api/jira/claude-us-stats',
+      '/api/jira/dashboard-snapshots',
+    ])('GET %s → 401 sans session', async (url) => {
+      mockAuthMode = 'deny';
 
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(res.body.message).toBe('Jira connection successful');
-      expect(mockWorklogAppService.testConnection).toHaveBeenCalled();
+      const res = await request(app).get(url);
+
+      expect(res.status).toBe(401);
     });
 
-    it('retourne 200 avec success false si la connexion échoue', async () => {
-      mockWorklogAppService.testConnection.mockResolvedValue({ success: false });
-
+    it('la route de diagnostic /test a été supprimée', async () => {
       const res = await request(app).get('/api/jira/test');
 
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(false);
-      expect(res.body.message).toBe('Jira connection failed');
-    });
-
-    it('retourne 500 si testConnection lève une erreur', async () => {
-      mockWorklogAppService.testConnection.mockRejectedValue(new Error('network'));
-
-      const res = await request(app).get('/api/jira/test');
-
-      expect(res.status).toBe(500);
-      expect(res.body.success).toBe(false);
-      expect(res.body.error).toBe('network');
+      expect(res.status).toBe(404);
     });
   });
 });

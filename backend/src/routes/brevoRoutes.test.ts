@@ -6,13 +6,25 @@ import { getBrevoClient } from '../infrastructure/brevo/BrevoClient';
 import { createTestApp } from '../test/createTestApp';
 import { createBrevoClientMock } from '../test/mocks/externalClients';
 
+let mockAuthMode = 'pass' as 'pass' | 'deny';
 jest.mock('../middleware/authMiddleware', () => {
   const auth = jest.requireActual<typeof import('../test/mocks/authMiddleware')>('../test/mocks/authMiddleware');
   return {
-    authenticate: auth.bypassAuth,
+    authenticate: (req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) =>
+      mockAuthMode === 'deny' ? auth.mockAuthDenied(req, res, next) : auth.mockAuthenticate()(req, res, next),
     requireSuperAdmin: auth.mockRequireSuperAdmin,
   };
 });
+
+let mockPageAccess = 'allow' as 'allow' | 'deny';
+const mockRequirePageArgs: string[][] = [];
+jest.mock('../middleware/requirePage', () => ({
+  requirePage: (...pages: string[]) => {
+    mockRequirePageArgs.push(pages);
+    return (_req: unknown, res: { status: (c: number) => { json: (b: unknown) => void } }, next: () => void) =>
+      mockPageAccess === 'deny' ? res.status(403).json({ success: false }) : next();
+  },
+}));
 
 jest.mock('../utils/logger', () =>
   jest.requireActual('../test/mocks/logger').loggerMockFactory()
@@ -32,6 +44,8 @@ describe('brevoRoutes (TI)', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    mockAuthMode = 'pass';
+    mockPageAccess = 'allow';
     client = createBrevoClientMock();
     mockGetBrevoClient.mockReturnValue(client as never);
     client.isConfigured.mockReturnValue(true);
@@ -286,6 +300,29 @@ describe('brevoRoutes (TI)', () => {
       const res = await request(app).get('/api/brevo/stats');
       expect(res.status).toBe(500);
       expect(res.body.message).toMatch(/statistiques Brevo/);
+    });
+  });
+
+  describe('contrôle d’accès (données de contacts clients)', () => {
+    it('exige la page Marketing sur tout le routeur', () => {
+      expect(mockRequirePageArgs).toContainEqual(['marketing']);
+    });
+
+    it.each(['/api/brevo/status', '/api/brevo/transactional/events', '/api/brevo/campaigns/1/recipients?type=clickers'])(
+      'GET %s → 401 sans session',
+      async (url) => {
+        mockAuthMode = 'deny';
+        expect((await request(app).get(url)).status).toBe(401);
+      }
+    );
+
+    it('GET /campaigns/:id/recipients → 403 sans la page Marketing', async () => {
+      mockPageAccess = 'deny';
+
+      const res = await request(app).get('/api/brevo/campaigns/1/recipients?type=clickers');
+
+      expect(res.status).toBe(403);
+      expect(client.getCampaignRecipientEmails).not.toHaveBeenCalled();
     });
   });
 });

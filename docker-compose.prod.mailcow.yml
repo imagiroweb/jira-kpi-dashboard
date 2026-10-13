@@ -4,7 +4,10 @@
 # Le nom du réseau Docker dépend du nom de projet Compose (souvent le nom du dossier) : à vérifier
 # impérativement avec la commande ci-dessous, pas en devinant.
 #
-# Usage (fichier en DERNIER) :
+# Déploiement automatique (cd.yml, prod et préprod) : ce fichier est ajouté dès que
+# MAILCOW_DOCKER_NETWORK est défini dans le .env du dossier de déploiement.
+#
+# Usage manuel (fichier en DERNIER) :
 #   cd /opt/jira-kpi-dashboard
 #   docker compose -f docker-compose.prod.yml -f docker-compose.prod.ghcr.yml \
 #     -f docker-compose.prod.scaleway.yml -f docker-compose.prod.mailcow.yml up -d

@@ -20,10 +20,10 @@ describe('collectGeneralAssessmentFiles', () => {
   it('scanne les .xlsx/.ods à plat, ignore les fichiers temporaires (~$...) et les agrégateurs connus', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'general-assessments-'));
     try {
-      fs.writeFileSync(path.join(tmpDir, 'deguil-robin.xlsx'), '');
-      fs.writeFileSync(path.join(tmpDir, 'parjouet.xlsx'), '');
-      fs.writeFileSync(path.join(tmpDir, '~$parjouet.xlsx'), '');
-      fs.writeFileSync(path.join(tmpDir, 'wan-meenen.ods'), '');
+      fs.writeFileSync(path.join(tmpDir, 'martin-durand.xlsx'), '');
+      fs.writeFileSync(path.join(tmpDir, 'moreau.xlsx'), '');
+      fs.writeFileSync(path.join(tmpDir, '~$moreau.xlsx'), '');
+      fs.writeFileSync(path.join(tmpDir, 'van-hoven.ods'), '');
       fs.writeFileSync(path.join(tmpDir, 'dashboard-all.xlsx'), '');
       fs.writeFileSync(path.join(tmpDir, 'grille-evaluations.xlsx'), '');
       fs.writeFileSync(path.join(tmpDir, '.DS_Store'), '');
@@ -32,7 +32,7 @@ describe('collectGeneralAssessmentFiles', () => {
       const files = collectGeneralAssessmentFiles(tmpDir);
 
       expect(files).toEqual(
-        ['deguil-robin.xlsx', 'parjouet.xlsx', 'wan-meenen.ods'].sort((a, b) => a.localeCompare(b, 'fr'))
+        ['martin-durand.xlsx', 'moreau.xlsx', 'van-hoven.ods'].sort((a, b) => a.localeCompare(b, 'fr'))
       );
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -43,11 +43,11 @@ describe('collectGeneralAssessmentFiles', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'general-assessments-case-'));
     try {
       fs.writeFileSync(path.join(tmpDir, 'Dashboard-All.xlsx'), '');
-      fs.writeFileSync(path.join(tmpDir, 'megret.xlsx'), '');
+      fs.writeFileSync(path.join(tmpDir, 'faure.xlsx'), '');
 
       const files = collectGeneralAssessmentFiles(tmpDir);
 
-      expect(files).toEqual(['megret.xlsx']);
+      expect(files).toEqual(['faure.xlsx']);
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }

@@ -110,4 +110,42 @@ describe('NodemailerEmailService', () => {
     expect(mockLogger.error).toHaveBeenCalled();
     expect(mockLogger.warn).toHaveBeenCalled();
   });
+
+  describe('sendAccountInvitationEmail', () => {
+    it('envoie l’invitation avec le lien et échappe le prénom (HTML)', async () => {
+      process.env.SMTP_HOST = 'smtp.local';
+      process.env.SMTP_USER = 'smtp-user';
+      process.env.SMTP_PASS = 'smtp-pass';
+      process.env.EMAIL_FROM = 'noreply@test.com';
+      mockSendMail.mockResolvedValue({});
+      const { NodemailerEmailService } = await import('./NodemailerEmailService');
+      const service = new NodemailerEmailService();
+
+      const ok = await service.sendAccountInvitationEmail(
+        { email: 'marie@test.com', firstName: '<b>Marie</b>' },
+        'https://app.test/reset-password?token=abc',
+        72
+      );
+
+      expect(ok).toBe(true);
+      const mail = mockSendMail.mock.calls[0][0];
+      expect(mail.to).toBe('marie@test.com');
+      expect(mail.subject).toMatch(/Activez votre compte/);
+      expect(mail.html).toContain('https://app.test/reset-password?token=abc');
+      expect(mail.html).toContain('&lt;b&gt;Marie&lt;/b&gt;');
+      expect(mail.html).not.toContain('<b>Marie</b>');
+      expect(mail.text).toContain('72 heures');
+    });
+
+    it('retourne false en production sans SMTP', async () => {
+      delete process.env.SMTP_HOST;
+      delete process.env.SMTP_USER;
+      delete process.env.SMTP_PASS;
+      process.env.NODE_ENV = 'production';
+      const { NodemailerEmailService } = await import('./NodemailerEmailService');
+      const service = new NodemailerEmailService();
+
+      expect(await service.sendAccountInvitationEmail({ email: 'a@b.fr' }, 'https://x', 72)).toBe(false);
+    });
+  });
 });
