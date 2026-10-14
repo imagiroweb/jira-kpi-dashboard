@@ -199,6 +199,12 @@ volumes:
 
 Dans Azure Entra : **App registration** → **Authentication** → **Add a platform** → **Single-page application** → Redirect URI = `https://jira-kpi.imagiro.fr/auth/microsoft/callback`. Permissions API : `openid`, `profile`, `email`, `User.Read`.
 
+Toujours dans **Authentication**, section **Implicit grant and hybrid flows** : cocher **ID tokens**. Le frontend demande un `id_token` (`response_type=id_token`, vérifié par le backend) ; sans cette case, Microsoft renvoie sur le callback sans jeton et la page affiche « Jeton d'identité manquant ». La case **Access tokens** n'est plus nécessaire.
+
+Le tenant Azure des utilisateurs doit aussi être déclaré dans l'organisation (SSO Microsoft, `tenantId`) : sinon la connexion est refusée avec « Votre organisation n'est pas autorisée ».
+
+Si, après un déploiement, la page de callback affiche encore « Token d'accès manquant », le navigateur exécute l'ancienne version du frontend (index.html en cache) : recharger sans cache (Ctrl+Maj+R). Depuis la correction du `nginx.conf`, `index.html` est servi en `Cache-Control: no-cache`.
+
 5. Si les images GHCR sont **privées** : dans Portainer, **Registries** → ajouter un registry **Custom** :
    - **Name** : `ghcr.io`
    - **URL** : `ghcr.io`
