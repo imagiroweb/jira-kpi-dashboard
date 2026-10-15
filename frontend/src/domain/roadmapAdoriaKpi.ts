@@ -533,10 +533,18 @@ export interface RoadmapMissingIndicatorDef {
    * est listée (les lignes « NON » ne sont ni comptées ni décomptées).
    */
   gate?: { columnTitles: string[]; values: string[] };
+  /**
+   * Préfixe de nom d'élément Monday (casse et espaces en tête ignorés) : seules les
+   * lignes dont le nom commence par ce préfixe entrent dans le périmètre du contrôle.
+   */
+  namePrefix?: string;
 }
 
 /** Valeurs de colonne « … requis ? » qui rendent le contrôle applicable. */
 export const ROADMAP_REQUIS_GATE_VALUES = ['oui', 'à définir'];
+
+/** Préfixe des éléments facturables, repris des vues Monday « Sans devis » et « Sans validation client ». */
+export const ROADMAP_FAC_NAME_PREFIX = 'FAC';
 
 /**
  * Les 13 contrôles « Sans … » du board Roadmap Adoria 2026, dans l'ordre d'affichage.
@@ -585,6 +593,7 @@ export const ROADMAP_MISSING_INDICATORS: RoadmapMissingIndicatorDef[] = [
     columnTitles: ['Devis'],
     rule: 'blank',
     hint: 'Aucun fichier joint.',
+    namePrefix: ROADMAP_FAC_NAME_PREFIX,
   },
   {
     id: 'validationClient',
@@ -592,6 +601,7 @@ export const ROADMAP_MISSING_INDICATORS: RoadmapMissingIndicatorDef[] = [
     columnTitles: ['Validation client'],
     rule: 'checkbox',
     hint: 'Case non cochée.',
+    namePrefix: ROADMAP_FAC_NAME_PREFIX,
   },
   {
     id: 'clientsPilotes',
@@ -621,6 +631,7 @@ export const ROADMAP_MISSING_INDICATORS: RoadmapMissingIndicatorDef[] = [
     columnTitles: ['Validation clients'],
     rule: 'checkbox',
     hint: 'Case non cochée.',
+    namePrefix: ROADMAP_FAC_NAME_PREFIX,
   },
   {
     id: 'validationMarketing',
@@ -750,12 +761,18 @@ export function isRoadmapIndicatorRowApplicable(
   return gateValues.some((v) => normalizeRoadmapColumnTitle(v) === value);
 }
 
+/** Nom d'élément commençant par le préfixe (casse et espaces en tête ignorés) ; vrai si aucun préfixe. */
+export function isRoadmapItemNameWithPrefix(name: string | null | undefined, prefix: string | undefined): boolean {
+  if (!prefix) return true;
+  return (name ?? '').trimStart().toLowerCase().startsWith(prefix.toLowerCase());
+}
+
 export interface RoadmapMissingIndicator {
   def: RoadmapMissingIndicatorDef;
   column: MondayColumn | null;
   gateColumn: MondayColumn | null;
   hasColumn: boolean;
-  /** Lignes entrant dans le périmètre du contrôle (après colonne « … requis ? »). */
+  /** Lignes entrant dans le périmètre du contrôle (après colonne « … requis ? » et préfixe de nom). */
   applicableCount: number;
   missingCount: number;
   /** Lignes manquantes, triées par nom — utilisées par la modale de détail. */
@@ -775,7 +792,11 @@ export function computeRoadmapMissingIndicators(
   return defs.map((def) => {
     const { column, gateColumn } = resolved.get(def.id) ?? { column: null, gateColumn: null };
     const applicable = column
-      ? items.filter((item) => isRoadmapIndicatorRowApplicable(item, gateColumn, def.gate?.values))
+      ? items.filter(
+          (item) =>
+            isRoadmapItemNameWithPrefix(item.name, def.namePrefix) &&
+            isRoadmapIndicatorRowApplicable(item, gateColumn, def.gate?.values)
+        )
       : [];
     const missingItems = applicable
       .filter((item) => isRoadmapIndicatorValueMissing(item, column, def.rule))

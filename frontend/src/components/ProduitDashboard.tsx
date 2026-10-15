@@ -304,13 +304,15 @@ function RoadmapMissingIndicatorTile({
   const noScope = hasColumn && applicableCount === 0;
   const tone =
     ROADMAP_TILE_TONES[!hasColumn || noScope ? 'muted' : missingCount > 0 ? 'warn' : 'ok'];
+  // Préfixe de nom (ex. « FAC ») rappelé dans chaque état pour expliciter le périmètre compté.
+  const scope = def.namePrefix ? ` ${def.namePrefix}` : '';
   const hint = !hasColumn
     ? 'Colonne absente.'
     : noScope
-      ? 'Aucune ligne concernée.'
+      ? `Aucune ligne${scope} concernée.`
       : missingCount === 0
-        ? 'Toutes les lignes renseignées.'
-        : `${def.hint} Sur ${applicableCount} ligne(s).`;
+        ? `Toutes les lignes${scope} renseignées.`
+        : `${def.hint} Sur ${applicableCount} ligne(s)${scope}.`;
   return (
     <button
       type="button"
@@ -2473,6 +2475,9 @@ export function ProduitDashboard() {
                   {roadmapIndicatorInModal.def.gate.values.join(' ou ')} sont comptées.
                 </>
               )}
+              {roadmapIndicatorInModal?.def.namePrefix && (
+                <> Seules les lignes dont le nom commence par « {roadmapIndicatorInModal.def.namePrefix} » sont comptées.</>
+              )}
             </p>
             <div className="p-4 overflow-auto flex-1 min-h-0">
               {roadmapIndicatorInModal && !roadmapIndicatorInModal.hasColumn && (
@@ -2484,8 +2489,9 @@ export function ProduitDashboard() {
                 roadmapIndicatorInModal.hasColumn &&
                 roadmapIndicatorInModal.missingCount === 0 && (
                   <p className="text-sm text-surface-500">
-                    Toutes les lignes filtrées sont renseignées ({roadmapIndicatorInModal.applicableCount} ligne(s)
-                    concernée(s)).
+                    Toutes les lignes filtrées
+                    {roadmapIndicatorInModal.def.namePrefix ? ` ${roadmapIndicatorInModal.def.namePrefix}` : ''} sont
+                    renseignées ({roadmapIndicatorInModal.applicableCount} ligne(s) concernée(s)).
                   </p>
                 )}
               {roadmapIndicatorModal === 'raf' && roadmapItemsRafDetail.length === 0 && (
