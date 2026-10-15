@@ -61,3 +61,47 @@ export const TEST_MONDAY_ITEMS: MondayItem[] = [
     ],
   },
 ];
+
+/** Board avec les colonnes des encarts FAC (« Sans devis », « Sans validation client(s) »). */
+export const TEST_MONDAY_FAC_COLUMNS: MondayColumn[] = [
+  ...TEST_MONDAY_COLUMNS,
+  { id: 'joursDevis', title: 'Jours devis', type: 'numbers' },
+  { id: 'devis', title: 'Devis', type: 'file' },
+  { id: 'valClients', title: 'Validation clients', type: 'checkbox' },
+];
+
+const facItem = (
+  id: string,
+  name: string,
+  { trimestre = 'Q4', statut = 'En cours', team = 'Team Cook', devis = '', valClient = false, valClients = false } = {}
+): MondayItem => ({
+  id,
+  name,
+  column_values: [
+    { id: 'trimestre', text: trimestre, type: 'status' },
+    { id: 'st', text: statut, type: 'status' },
+    { id: 'team', text: team, type: 'status' },
+    { id: 'sol', text: '', type: 'link' },
+    { id: 'devis', text: devis, type: 'file' },
+    { id: 'valClient', text: valClient ? 'v' : '', value: `{"checked":${valClient}}`, type: 'checkbox' },
+    { id: 'valClients', text: valClients ? 'v' : '', value: `{"checked":${valClients}}`, type: 'checkbox' },
+  ],
+});
+
+/**
+ * Éléments FAC / non FAC. En Q4 : « Sans devis » = 4 (FAC-123, fac-45, FAC Relance, FAC),
+ * « Sans Validation client devis » = 3 (FAC-123, fac-45, FAC), « Sans validation client finale » = 3
+ * (FAC-123, FAC Relance, FAC). Toutes les lignes ont une solution doc vide (10 en tout, 9 en Q4).
+ */
+export const TEST_MONDAY_FAC_ITEMS: MondayItem[] = [
+  facItem('fac-1', 'FAC-123 Export'),
+  facItem('fac-2', 'Refonte menu'),
+  facItem('fac-3', 'fac-45 Import', { statut: 'Done', team: 'Softcam', valClients: true }),
+  facItem('fac-4', '  FAC Relance', { team: 'Softcam', valClient: true }),
+  facItem('fac-5', 'Sujet FAC'),
+  facItem('fac-6', 'FACTURATION mensuelle', { trimestre: 'Q3' }),
+  facItem('fac-7', 'FAC-900 Complet', { statut: 'Done', devis: 'devis.pdf', valClient: true, valClients: true }),
+  facItem('fac-8', 'FA'),
+  facItem('fac-9', 'FAC'),
+  facItem('fac-10', ''),
+];

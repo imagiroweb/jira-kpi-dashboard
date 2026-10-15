@@ -81,6 +81,9 @@ JIRA_BOARD_ID=1
 
 # MongoDB
 MONGO_PASSWORD=your-secure-password
+# Utilisateur applicatif du backend (obligatoire, voir docs/DEPLOIEMENT.md §6) ; mot de passe : openssl rand -hex 32
+MONGO_APP_USER=jira_kpi_app
+MONGO_APP_PASSWORD=resultat-de-openssl-rand-hex-32
 
 # AI (choisir un)
 ANTHROPIC_API_KEY=sk-ant-...

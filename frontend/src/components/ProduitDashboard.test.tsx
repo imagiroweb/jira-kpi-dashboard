@@ -1,8 +1,11 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderWithProviders } from '@/test/render';
+import type { MondayItem } from '@/services/api';
 import {
   TEST_MONDAY_COLUMNS,
+  TEST_MONDAY_FAC_COLUMNS,
+  TEST_MONDAY_FAC_ITEMS,
   TEST_MONDAY_ITEMS,
   TEST_MONDAY_USER,
 } from '@/test/fixtures/monday';
@@ -483,6 +486,91 @@ describe('ProduitDashboard', () => {
     // Seules INT135 et item-4 ont Trimestre = Q3. La date Q3 et le CHR Q3 de item-5 sont ignorés.
     await waitFor(() => {
       expect(screen.getByTitle('Sans solution doc — voir le détail des lignes')).toHaveTextContent('2');
+    });
+  });
+
+  describe('encarts devis / validation client (préfixe FAC)', () => {
+    const DEVIS = 'Sans devis';
+    const VAL_CLIENT = 'Sans Validation client devis';
+    const VAL_CLIENTS = 'Sans validation client finale';
+    const SOL = 'Sans solution doc';
+
+    const mockRoadmapBoard = (items: MondayItem[]) => {
+      mockGetBoard.mockImplementation(async (boardId: string) => {
+        if (boardId === SUIVI_BOARD_ID) {
+          return {
+            success: true,
+            columns: SUIVI_COLUMNS,
+            items: SUIVI_ITEMS,
+            board: { id: boardId, name: 'Suivi clients', state: 'active', boardKind: 'public', itemCount: 2 },
+          };
+        }
+        return {
+          success: true,
+          columns: TEST_MONDAY_FAC_COLUMNS,
+          items,
+          board: { id: boardId, name: 'Board', state: 'active', boardKind: 'public', itemCount: items.length },
+        };
+      });
+    };
+
+    const tile = (label: string) => screen.getByTitle(`${label} — voir le détail des lignes`);
+    /** Compteur seul de la tuile (évite de matcher un chiffre du texte d'aide). */
+    const counter = (label: string) => tile(label).querySelector('span')?.textContent;
+
+    const expectCounters = async (expected: Record<string, string>) => {
+      await waitFor(() => {
+        for (const [label, value] of Object.entries(expected)) expect(counter(label), label).toBe(value);
+      });
+    };
+
+    /** Ouvre la modale de l'encart, vérifie lignes = compteur et le rappel FAC, puis la referme. */
+    const expectModalRows = async (label: string, names: string[]) => {
+      fireEvent.click(tile(label));
+      const heading = await screen.findByRole('heading', { name: `${label} — détail des lignes` });
+      const modal = modalRootFromHeading(heading);
+      expect(within(modal).getByText(/nom commence par « FAC »/)).toBeInTheDocument();
+      const rows = within(modal).getAllByRole('row').slice(1);
+      const listed = rows.map((r) => r.querySelector('td')?.textContent?.trim() ?? '');
+      expect([...listed].sort()).toEqual([...names].sort());
+      expect(String(rows.length)).toBe(counter(label));
+      fireEvent.click(within(modal).getByRole('button', { name: '' }));
+      await waitFor(() => expect(screen.queryByRole('heading', { name: `${label} — détail des lignes` })).toBeNull());
+    };
+
+    it('ne comptent que les éléments FAC, avec les filtres trimestre et team', async () => {
+      mockRoadmapBoard(TEST_MONDAY_FAC_ITEMS);
+      renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
+      await screen.findByTitle(`${DEVIS} — voir le détail des lignes`);
+
+      // Sans filtre : FACTURATION mensuelle (Q3) s'ajoute aux 4 / 3 / 3 éléments FAC de Q4.
+      await expectCounters({ [DEVIS]: '5', [VAL_CLIENT]: '4', [VAL_CLIENTS]: '4', [SOL]: '10' });
+      expect(tile(DEVIS)).toHaveTextContent(/Sur 6 ligne\(s\) FAC/);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Q4' }));
+      // Les autres encarts comptent toujours les éléments non FAC.
+      await expectCounters({ [DEVIS]: '4', [VAL_CLIENT]: '3', [VAL_CLIENTS]: '3', [SOL]: '9' });
+
+      await expectModalRows(DEVIS, ['FAC', 'FAC Relance', 'FAC-123 Export', 'fac-45 Import']);
+      await expectModalRows(VAL_CLIENT, ['FAC', 'FAC-123 Export', 'fac-45 Import']);
+      await expectModalRows(VAL_CLIENTS, ['FAC', 'FAC Relance', 'FAC-123 Export']);
+
+      // Q4 + team Softcam : seuls fac-45 Import et FAC Relance restent.
+      fireEvent.click(screen.getByRole('checkbox', { name: /Softcam/ }));
+      await expectCounters({ [DEVIS]: '2', [VAL_CLIENT]: '1', [VAL_CLIENTS]: '1' });
+      await expectModalRows(VAL_CLIENT, ['fac-45 Import']);
+    });
+
+    it.each([
+      ['aucun élément FAC', [TEST_MONDAY_FAC_ITEMS[1]], 'Aucune ligne FAC concernée.'],
+      ['éléments FAC tous renseignés', [TEST_MONDAY_FAC_ITEMS[1], TEST_MONDAY_FAC_ITEMS[6]], 'Toutes les lignes FAC renseignées.'],
+    ])('rappelle FAC dans le texte d’aide quand il y a %s', async (_cas, items, hint) => {
+      mockRoadmapBoard(items);
+      renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
+      await screen.findByTitle(`${DEVIS} — voir le détail des lignes`);
+
+      await expectCounters({ [DEVIS]: '0', [VAL_CLIENT]: '0', [VAL_CLIENTS]: '0', [SOL]: String(items.length) });
+      for (const label of [DEVIS, VAL_CLIENT, VAL_CLIENTS]) expect(tile(label), label).toHaveTextContent(hint);
     });
   });
 
