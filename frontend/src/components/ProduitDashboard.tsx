@@ -2489,8 +2489,9 @@ export function ProduitDashboard() {
                 roadmapIndicatorInModal.hasColumn &&
                 roadmapIndicatorInModal.missingCount === 0 && (
                   <p className="text-sm text-surface-500">
-                    Toutes les lignes filtrées sont renseignées ({roadmapIndicatorInModal.applicableCount} ligne(s)
-                    concernée(s)).
+                    Toutes les lignes filtrées
+                    {roadmapIndicatorInModal.def.namePrefix ? ` ${roadmapIndicatorInModal.def.namePrefix}` : ''} sont
+                    renseignées ({roadmapIndicatorInModal.applicableCount} ligne(s) concernée(s)).
                   </p>
                 )}
               {roadmapIndicatorModal === 'raf' && roadmapItemsRafDetail.length === 0 && (

@@ -651,6 +651,7 @@ describe('roadmapAdoriaKpi', () => {
         ['fAC Import', true],
         ['  FAC Relance', true],
         ['\tFAC Relance', true],
+        ['\u00a0FAC Relance', true],
         ['FAC', true],
         ['FACTURATION mensuelle', true],
         ['FAC123', true],
