@@ -3,6 +3,7 @@ import type { MondayColumn, MondayItem } from '../services/api';
 import {
   EMPTY_ROADMAP_KPIS,
   ROADMAP_ADORIA_KNOWN_TEAMS,
+  ROADMAP_FAC_NAME_PREFIX,
   ROADMAP_MISSING_INDICATORS,
   buildRoadmapTeamFilterOptions,
   calendarDaysInclusiveFromTodayToQuarterEnd,
@@ -20,6 +21,7 @@ import {
   getRoadmapDateColumnRaw,
   getRoadmapItemTeamLabel,
   isRoadmapCheckboxUnchecked,
+  isRoadmapItemNameWithPrefix,
   isRoadmapNumericKpiValueMissing,
   isRoadmapSolutionDocValueMissing,
   isRoadmapStatusDone,
@@ -592,7 +594,8 @@ describe('roadmapAdoriaKpi', () => {
         },
         {
           id: '2',
-          name: 'Rien renseigné',
+          // Préfixe FAC : requis par « Sans devis » et « Sans Validation client devis ».
+          name: 'FAC Rien renseigné',
           column_values: [
             { id: 'cp', text: '', type: 'people' },
             { id: 'sol', text: '', type: 'link' },
@@ -612,6 +615,119 @@ describe('roadmapAdoriaKpi', () => {
         expect(ind.missingCount, id).toBe(1);
         expect(ind.missingItems.map((i) => i.id), id).toEqual(['2']);
       }
+    });
+
+    describe('préfixe de nom « FAC » (devis et validations client)', () => {
+      const FAC_IDS = ['devis', 'validationClient', 'validationClients'];
+
+      /** Ligne sans devis, cases « Validation client(s) » décochées, et vide sur les autres contrôles. */
+      const bareItem = (id: string, name: string | undefined, overrides: NonNullable<MondayItem['column_values']> = []): MondayItem => {
+        const byColumn = new Map(
+          [
+            { id: 'cp', text: '', type: 'people' },
+            { id: 'sol', text: '', type: 'link' },
+            { id: 'devis', text: '', type: 'file' },
+            { id: 'valClient', text: '', value: '{"checked":false}', type: 'checkbox' },
+            { id: 'valClients', text: '', value: '{"checked":false}', type: 'checkbox' },
+            { id: 'epic', text: '', type: 'link' },
+            ...overrides,
+          ].map((cv) => [cv.id, cv])
+        );
+        return { id, name: name as string, column_values: [...byColumn.values()] };
+      };
+
+      it('ne porte le préfixe FAC que sur les trois encarts devis / validation client', () => {
+        const withPrefix = ROADMAP_MISSING_INDICATORS.filter((d) => d.namePrefix).map((d) => d.id);
+        expect(withPrefix.sort()).toEqual([...FAC_IDS].sort());
+        for (const d of ROADMAP_MISSING_INDICATORS.filter((d) => d.namePrefix)) {
+          expect(d.namePrefix).toBe(ROADMAP_FAC_NAME_PREFIX);
+        }
+      });
+
+      it.each([
+        ['FAC-123 Export', true],
+        ['fac-45 Import', true],
+        ['Fac Import', true],
+        ['fAC Import', true],
+        ['  FAC Relance', true],
+        ['\tFAC Relance', true],
+        ['FAC', true],
+        ['FACTURATION mensuelle', true],
+        ['FAC123', true],
+        ['Sujet FAC', false],
+        ['Le FAC-12', false],
+        ['[FAC] Export', false],
+        ['FA', false],
+        ['F', false],
+        ['FAÇ', false],
+        ['FAK Import', false],
+        ['', false],
+        ['   ', false],
+      ])('isRoadmapItemNameWithPrefix(%j, FAC) = %s', (name, expected) => {
+        expect(isRoadmapItemNameWithPrefix(name, ROADMAP_FAC_NAME_PREFIX)).toBe(expected);
+      });
+
+      it('accepte un nom absent sans exception, et tout nom sans préfixe défini', () => {
+        expect(isRoadmapItemNameWithPrefix(undefined, 'FAC')).toBe(false);
+        expect(isRoadmapItemNameWithPrefix(null, 'FAC')).toBe(false);
+        expect(isRoadmapItemNameWithPrefix('Refonte menu', undefined)).toBe(true);
+      });
+
+      it('ne compte que les éléments FAC dans les trois encarts', () => {
+        const items = [
+          bareItem('1', 'FAC-123 Export'),
+          bareItem('2', 'Refonte menu'),
+          bareItem('3', 'Sujet FAC'),
+          bareItem('4', undefined),
+        ];
+        const indicators = computeRoadmapMissingIndicators(items, boardColumns);
+        for (const id of FAC_IDS) {
+          const ind = byId(indicators, id);
+          expect(ind.missingCount, id).toBe(1);
+          expect(ind.applicableCount, id).toBe(1);
+          expect(ind.missingItems.map((i) => i.name), id).toEqual(['FAC-123 Export']);
+        }
+      });
+
+      it('chaque encart garde sa propre colonne testée', () => {
+        const checked = '{"checked":true}';
+        const items = [
+          bareItem('1', 'FAC sans devis', [
+            { id: 'valClient', text: 'v', value: checked, type: 'checkbox' },
+            { id: 'valClients', text: 'v', value: checked, type: 'checkbox' },
+          ]),
+          bareItem('2', 'FAC cases décochées', [{ id: 'devis', text: 'https://devis.pdf', type: 'file' }]),
+          bareItem('3', 'FAC-900 Complet', [
+            { id: 'devis', text: 'https://devis.pdf', type: 'file' },
+            { id: 'valClient', text: 'v', value: checked, type: 'checkbox' },
+            { id: 'valClients', text: 'v', value: checked, type: 'checkbox' },
+          ]),
+        ];
+        const indicators = computeRoadmapMissingIndicators(items, boardColumns);
+        expect(byId(indicators, 'devis').missingItems.map((i) => i.id)).toEqual(['1']);
+        expect(byId(indicators, 'validationClient').missingItems.map((i) => i.id)).toEqual(['2']);
+        expect(byId(indicators, 'validationClients').missingItems.map((i) => i.id)).toEqual(['2']);
+        for (const id of FAC_IDS) expect(byId(indicators, id).applicableCount, id).toBe(3);
+      });
+
+      it('ne change pas les autres encarts : les éléments non FAC y restent comptés', () => {
+        const others = ROADMAP_MISSING_INDICATORS.map((d) => d.id).filter((id) => !FAC_IDS.includes(id));
+        const fac = computeRoadmapMissingIndicators([bareItem('1', 'FAC Sujet')], boardColumns);
+        const nonFac = computeRoadmapMissingIndicators([bareItem('1', 'Sujet')], boardColumns);
+        for (const id of others) {
+          expect(byId(nonFac, id).missingCount, id).toBe(byId(fac, id).missingCount);
+          expect(byId(nonFac, id).applicableCount, id).toBe(byId(fac, id).applicableCount);
+        }
+        expect(byId(nonFac, 'solutionDoc').missingCount).toBe(1);
+        expect(byId(nonFac, 'cp').missingCount).toBe(1);
+        for (const id of FAC_IDS) expect(byId(nonFac, id).applicableCount, id).toBe(0);
+      });
+
+      it('trie les éléments FAC manquants par nom', () => {
+        const items = [bareItem('1', 'FAC-Z'), bareItem('2', 'fac-A'), bareItem('3', 'Autre'), bareItem('4', 'FAC-M')];
+        const devis = byId(computeRoadmapMissingIndicators(items, boardColumns), 'devis');
+        expect(devis.missingItems.map((i) => i.name)).toEqual(['fac-A', 'FAC-M', 'FAC-Z']);
+      });
     });
 
     it('ignore les lignes dont la colonne « … requis ? » vaut NON', () => {

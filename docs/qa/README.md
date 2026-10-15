@@ -18,7 +18,7 @@ Workflow `.github/workflows/e2e-preprod.yml`, cible `https://jira-kpi-preprod.im
 
 | Plan | Spec | Mise à jour |
 |---|---|---|
-| _(aucun pour l'instant)_ | | |
+| [`plans/produit-roadmap-filtre-fac.md`](plans/produit-roadmap-filtre-fac.md) | [#66](https://github.com/imagiroweb/jira-kpi-dashboard/issues/66) | 2026-10-15 |
 
 ## Tests E2E
 

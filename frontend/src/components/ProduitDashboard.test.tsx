@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { renderWithProviders } from '@/test/render';
 import {
   TEST_MONDAY_COLUMNS,
+  TEST_MONDAY_FAC_COLUMNS,
+  TEST_MONDAY_FAC_ITEMS,
   TEST_MONDAY_ITEMS,
   TEST_MONDAY_USER,
 } from '@/test/fixtures/monday';
@@ -484,6 +486,61 @@ describe('ProduitDashboard', () => {
     await waitFor(() => {
       expect(screen.getByTitle('Sans solution doc — voir le détail des lignes')).toHaveTextContent('2');
     });
+  });
+
+  it('encarts devis / validation client : ne comptent que les éléments dont le nom commence par FAC', async () => {
+    mockGetBoard.mockImplementation(async (boardId: string) => {
+      if (boardId === SUIVI_BOARD_ID) {
+        return {
+          success: true,
+          columns: SUIVI_COLUMNS,
+          items: SUIVI_ITEMS,
+          board: { id: boardId, name: 'Suivi clients', state: 'active', boardKind: 'public', itemCount: 2 },
+        };
+      }
+      return {
+        success: true,
+        columns: TEST_MONDAY_FAC_COLUMNS,
+        items: TEST_MONDAY_FAC_ITEMS,
+        board: { id: boardId, name: 'Board', state: 'active', boardKind: 'public', itemCount: 10 },
+      };
+    });
+
+    renderWithProviders(<ProduitDashboard />, { user: TEST_USER });
+
+    const devisTitle = 'Sans devis — voir le détail des lignes';
+    const valClientTitle = 'Sans Validation client devis — voir le détail des lignes';
+    const valClientsTitle = 'Sans validation client finale — voir le détail des lignes';
+    const solTitle = 'Sans solution doc — voir le détail des lignes';
+
+    // Sans filtre : FACTURATION mensuelle (Q3) s'ajoute aux 4 / 3 / 3 éléments FAC de Q4.
+    const devisTile = await screen.findByTitle(devisTitle);
+    expect(devisTile).toHaveTextContent('5');
+    expect(devisTile).toHaveTextContent(/Sur 6 ligne\(s\) FAC/);
+    expect(screen.getByTitle(valClientTitle)).toHaveTextContent('4');
+    expect(screen.getByTitle(valClientsTitle)).toHaveTextContent('4');
+    // Les autres encarts comptent toujours les éléments non FAC.
+    expect(screen.getByTitle(solTitle)).toHaveTextContent('10');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Q4' }));
+
+    await waitFor(() => {
+      expect(screen.getByTitle(devisTitle)).toHaveTextContent('4');
+    });
+    expect(screen.getByTitle(valClientTitle)).toHaveTextContent('3');
+    expect(screen.getByTitle(valClientsTitle)).toHaveTextContent('3');
+    expect(screen.getByTitle(solTitle)).toHaveTextContent('9');
+
+    fireEvent.click(screen.getByTitle(devisTitle));
+    const heading = await screen.findByRole('heading', { name: 'Sans devis — détail des lignes' });
+    const modal = modalRootFromHeading(heading);
+    expect(within(modal).getByText(/nom commence par « FAC »/)).toBeInTheDocument();
+    for (const name of ['FAC-123 Export', 'fac-45 Import', 'FAC Relance', 'FAC']) {
+      expect(within(modal).getByText(name)).toBeInTheDocument();
+    }
+    for (const name of ['Refonte menu', 'Sujet FAC', 'FA', 'FACTURATION mensuelle', 'FAC-900 Complet']) {
+      expect(within(modal).queryByText(name)).not.toBeInTheDocument();
+    }
   });
 
   it('ouvre le détail d’un encart « Sans … » et respecte la colonne « … requis ? »', async () => {

@@ -33,7 +33,7 @@ Les routes `/api/monday/...` (statut, profil, espaces de travail, boards, vues) 
 
 ## Limites connues
 
-- Les compteurs des encarts peuvent différer de ceux des vues Monday (restrictions de vue non reprises).
+- Les compteurs des encarts peuvent différer de ceux des vues Monday (restrictions de vue non reprises, hormis le préfixe `FAC` des encarts devis et validation client).
 - Dépendance aux titres de colonnes Monday : renommer une colonne désactive l'encart ou le filtre correspondant.
 - Les routes Monday ne sont pas protégées par la page `produit`.
 - Filtre trimestre : uniquement la colonne « Trimestre » ; une ligne sans valeur Q1 à Q4 est exclue quand un trimestre est choisi.
@@ -52,7 +52,7 @@ Les routes `/api/monday/...` (statut, profil, espaces de travail, boards, vues) 
 - **Indicateurs (encart ratio CP)** : RAF trimestre si le filtre trimestre correspond au trimestre courant et année courante ; projets non terminés avec date de fin dans ce trimestre.
 - **Encarts « Sans … » (13 contrôles)** : un encart compact par contrôle qualité, sur le **même périmètre filtré** que les graphiques Roadmap (trimestre / statut / team), plus éventuellement l’encart **RAF**. Un **clic** ouvre une **modale** listant les lignes concernées (nom, valeur de colonne, statut si disponible). Définitions dans `ROADMAP_MISSING_INDICATORS` (`roadmapAdoriaKpi.ts`), rendu par le composant local `RoadmapMissingIndicatorTile`.
 
-| Encart | Colonne Monday testée | Règle « manquant » | Colonne « … requis ? » |
+| Encart | Colonne Monday testée | Règle « manquant » | Restriction de périmètre (« … requis ? » ou nom) |
 |--------|----------------------|--------------------|------------------------|
 | Sans CP référent | `CP référent` | vide, « - » ou « sans nom » | — |
 | Sans solution doc | `Solution doc` | vide ou « - » | — |
@@ -60,15 +60,16 @@ Les routes `/api/monday/...` (statut, profil, espaces de travail, boards, vues) 
 | Sans maquettes | `Lien vers la maquette` | vide ou « - » | `Maquettes requis ?` = OUI / À définir |
 | Sans macro chiffrage | `Macro chiffrage` | vide, « - », non numérique ou ≤ 0 | — |
 | Sans estimation | `Estimation` | vide, « - », non numérique ou ≤ 0 | — |
-| Sans devis | `Devis` (fichier) | aucun fichier | — |
-| Sans validation client | `Validation client` | case non cochée | — |
-| Sans validation clients | `Validation clients` | case non cochée | — |
+| Sans devis | `Devis` (fichier) | aucun fichier | nom commençant par `FAC` |
+| Sans Validation client devis | `Validation client` | case non cochée | nom commençant par `FAC` |
+| Sans validation client finale | `Validation clients` | case non cochée | nom commençant par `FAC` |
 | Sans validation opérationnelle | `Validation opérationnelle` | case non cochée | — |
 | Sans validation marketing | `Validation marketing` | case non cochée | `Marketing requis ?` = OUI / À définir |
 | Sans clients pilotes | `Clients pilotes` | aucune valeur | — |
 | Sans Epic | `Lien Epic` | vide ou « - » | — |
 
-- **Source de la liste** : les vues enregistrées « Sans … » du board Monday `5191064770`. Les encarts reprennent la **colonne testée** et la **colonne « … requis ? »** de chaque vue, mais **pas** ses restrictions propres (groupe `Q3 2026`, exclusions `Status` To do / Stuck, exclusions `Team`, `Source` = Dev request, préfixe de nom `FAC`) : le périmètre est celui des **filtres de la page**. Les compteurs peuvent donc différer de ceux affichés dans Monday.
+- **Source de la liste** : les vues enregistrées « Sans … » du board Monday `5191064770`. Les encarts reprennent la **colonne testée** et la **colonne « … requis ? »** de chaque vue, mais **pas** ses autres restrictions propres (groupe `Q3 2026`, exclusions `Status` To do / Stuck, exclusions `Team`, `Source` = Dev request) : le périmètre est celui des **filtres de la page**.
+- **Préfixe `FAC`** : « Sans devis », « Sans Validation client devis » et « Sans validation client finale » ne comptent que les éléments dont le **nom** commence par `FAC` (casse et espaces en tête ignorés, aucun séparateur exigé : « FACTURATION … » est retenu, « Sujet FAC » non), comme les vues Monday correspondantes. La règle s’ajoute aux filtres de la page ; le « Sur N ligne(s) FAC » de l’encart et la modale de détail ne portent que sur ces éléments. Les 10 autres encarts ne sont pas concernés. Les compteurs peuvent donc différer de ceux affichés dans Monday.
 - **Détection des colonnes** : égalité de titre **exacte** d’abord (insensible à la casse / aux accents), puis inclusion, chaque colonne n’étant attribuée qu’à un seul encart. C’est ce qui évite les confusions `Wireframe` / `Wireframe requis ?`, `Devis` / `Jours devis` et `Validation client` / `Validation clients`.
 - **Colonne absente du board** : l’encart s’affiche en gris avec « — » et un compteur à 0 (`hasColumn: false`).
 - **Règle « macro / estimation manquant »** : identique dans les encarts et le diagramme « macro vs estimation » (vide, « - », non numérique ou **≤ 0** ; le diagramme n’affiche pas les paires entièrement nulles). Colonnes également détectées par mots-clés en secours (`ROADMAP_MACRO_CHIFFRAGE_KEYS` / `ROADMAP_ESTIMATION_KEYS`).
@@ -82,7 +83,7 @@ Les routes `/api/monday/...` (statut, profil, espaces de travail, boards, vues) 
 - **Status filter** : multi-select checkboxes; empty selection means no status filter.
 - **Team filter** : multi-select checkboxes (known Monday labels ∪ board values); empty selection means no team filter.
 - **Charts** : CP referent, **PM** (empty → « Non attribués »), status — responsive grid.
-- **13 “missing” tiles** (same filtered scope as roadmap charts): CP referent, solution doc, wireframe, mockups, macro estimate, estimation, quote, client / clients / ops / marketing validations, pilot clients, Epic link — plus the optional **RAF** quarter tile. Column titles and “required?” gates come from the Monday saved views « Sans … »; the views’ own restrictions (group, status/team exclusions, source, name prefix) are **not** replicated, the page filters define the scope. **Click** opens a **modal** with the matching rows (name, column value, status when available).
+- **13 “missing” tiles** (same filtered scope as roadmap charts): CP referent, solution doc, wireframe, mockups, macro estimate, estimation, quote, client / clients / ops / marketing validations, pilot clients, Epic link — plus the optional **RAF** quarter tile. Column titles and “required?” gates come from the Monday saved views « Sans … »; the views’ own restrictions (group, status/team exclusions, source) are **not** replicated, the page filters define the scope. Exception: the quote and client validation tiles (« Sans devis », « Sans Validation client devis », « Sans validation client finale ») only count items whose **name** starts with `FAC` (case-insensitive, leading spaces ignored), like their Monday views. **Click** opens a **modal** with the matching rows (name, column value, status when available).
 - **Macro / estimation “missing” rule** : columns are resolved by **title** keywords (`ROADMAP_MACRO_CHIFFRAGE_KEYS`, `ROADMAP_ESTIMATION_KEYS`). A row is missing if the cell is empty, « - », non-numeric, or **≤ 0** — consistent with the macro vs estimation chart (pairs with both values at zero are skipped there).
 
 ## Module testable (`frontend/src/domain/roadmapAdoriaKpi.ts`)
