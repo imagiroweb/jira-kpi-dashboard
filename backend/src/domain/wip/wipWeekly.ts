@@ -105,7 +105,25 @@ export function parseStatusList(raw: string | string[] | undefined | null, fallb
   return out.length > 0 ? Array.from(new Set(out)) : fallback;
 }
 
-const normalize = (s: string) => s.trim().toLowerCase();
+/**
+ * Forme comparable d'un nom de statut : sans casse, accents, espaces ni ponctuation. Les workflows
+ * Jira décorent souvent leurs statuts (« --In Progress-- », « GO-PROD ») : ils doivent correspondre
+ * aux noms saisis dans les réglages (« In Progress », « Go Prod »).
+ */
+export const normalizeStatusName = (s: string) =>
+  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+const normalize = normalizeStatusName;
+
+/**
+ * Noms Jira réels correspondant aux statuts saisis (voir `normalizeStatusName`), pour la JQL qui
+ * exige les noms exacts. Les statuts saisis sont toujours gardés, même absents de la liste Jira.
+ */
+export function resolveStatusNames(configured: string[], jiraStatusNames: string[]): string[] {
+  const wanted = new Set(configured.map(normalize));
+  const matches = jiraStatusNames.filter((n) => wanted.has(normalize(n)));
+  return Array.from(new Set([...configured, ...matches]));
+}
 
 /** Valeur du champ équipe Jira : texte, objet `{ name }` / `{ value }`, ou tableau (première valeur). */
 export function readTeamField(raw: unknown): string | null {

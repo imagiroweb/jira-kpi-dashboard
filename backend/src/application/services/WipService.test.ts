@@ -130,6 +130,29 @@ describe('WipService', () => {
     expect(res.weeks).toHaveLength(1);
   });
 
+  it('cherche aussi les statuts décorés du workflow (« --In Progress-- », « --Go Prod-- »)', async () => {
+    mockGet.mockImplementation((path: string) =>
+      Promise.resolve(
+        path === '/rest/api/3/issuetype'
+          ? [{ name: 'US' }]
+          : [
+              { name: 'In Progress', statusCategory: { key: 'indeterminate' } },
+              { name: '--In Progress--', statusCategory: { key: 'indeterminate' } },
+              { name: '--Go Prod--', statusCategory: { key: 'indeterminate' } },
+            ]
+      )
+    );
+    mockSearchAll.mockResolvedValue([issue('1', 'AD-1', { name: 'US' })]);
+    mockGetChangelogs.mockResolvedValue(new Map([['1', [history('2026-09-08T10:00:00+02:00', '--In Progress--')]]]));
+
+    const res = await service.getWeekly('2026-09-07', '2026-09-13', NOW);
+
+    const jql = mockSearchAll.mock.calls[0][0];
+    expect(jql).toContain('status was in ("In Progress", "--In Progress--")');
+    expect(jql).toContain('status not in ("Go Prod", "--Go Prod--")');
+    expect(res.weeks.map((w) => w.total.wip)).toEqual([1]);
+  });
+
   it('ignore les types suivis absents de Jira', async () => {
     mockGet.mockImplementation((path: string) =>
       Promise.resolve(path === '/rest/api/3/issuetype' ? [{ name: 'US' }, { name: 'Bug dev' }] : [])
@@ -139,8 +162,8 @@ describe('WipService', () => {
     expect(mockSearchAll.mock.calls[0][0]).toContain('issuetype in ("US", "Bug dev")');
   });
 
-  it('statuts inconnus de Jira détectés sans tenir compte de la casse ; Jira muet → aucune vérification', async () => {
-    expect(await service.findUnknownStatuses(['in progress', 'Go-Prod'])).toEqual(['Go-Prod']);
+  it('statuts inconnus de Jira détectés (casse et ponctuation ignorées) ; Jira muet → aucune vérification', async () => {
+    expect(await service.findUnknownStatuses(['in progress', 'Go-Prod', 'Livré'])).toEqual(['Livré']);
     globalCache.clear();
     mockGet.mockRejectedValue(new Error('down'));
     expect(await service.findUnknownStatuses(['Go-Prod'])).toEqual([]);

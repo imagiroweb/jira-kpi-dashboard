@@ -13,8 +13,10 @@ import {
   measurePoint,
   mondayOf,
   NO_TEAM,
+  normalizeStatusName,
   parseStatusList,
   readTeamField,
+  resolveStatusNames,
   sortTeams,
   zonedIsoDate,
   zonedMidnight,
@@ -44,6 +46,27 @@ describe('parseStatusList', () => {
     expect(parseStatusList(['  Dev ', ''], ['X'])).toEqual(['Dev']);
     expect(parseStatusList('', ['X'])).toEqual(['X']);
     expect(parseStatusList(undefined, ['X'])).toEqual(['X']);
+  });
+});
+
+describe('statuts décorés des workflows Jira', () => {
+  it('normalizeStatusName ignore casse, accents, espaces et ponctuation', () => {
+    expect(normalizeStatusName('--In Progress--')).toBe(normalizeStatusName('In Progress'));
+    expect(normalizeStatusName('GO-PROD')).toBe(normalizeStatusName('Go Prod'));
+    expect(normalizeStatusName('Livré')).toBe('livre');
+    expect(normalizeStatusName('Dev In Progress')).not.toBe(normalizeStatusName('In Progress'));
+  });
+
+  it('resolveStatusNames ajoute les noms Jira équivalents et garde les noms saisis', () => {
+    const jira = ['In Progress', '--In Progress--', 'Dev In Progress', '--Go Prod--', 'GO PROD'];
+    expect(resolveStatusNames(['In Progress'], jira)).toEqual(['In Progress', '--In Progress--']);
+    expect(resolveStatusNames(['Go Prod'], jira)).toEqual(['Go Prod', '--Go Prod--', 'GO PROD']);
+    expect(resolveStatusNames(['Inconnu'], jira)).toEqual(['Inconnu']);
+  });
+
+  it('un ticket passé par « --In Progress-- » compte dans le WIP réglé sur « In Progress »', () => {
+    const res = weekly(issue('AD-1', [['2026-09-08T10:00:00+02:00', '--In Progress--']]), '2026-09-07', '2026-09-13');
+    expect(res.wip).toEqual([1]);
   });
 });
 

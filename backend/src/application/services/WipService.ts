@@ -10,7 +10,9 @@ import {
   listWeeks,
   measurePoint,
   mondayOf,
+  normalizeStatusName,
   parseStatusList,
+  resolveStatusNames,
   zonedIsoDate,
   readTeamField,
   type WipWeek,
@@ -122,9 +124,14 @@ export class WipService {
     const teamField = (process.env.JIRA_TEAM_FIELD || 'customfield_10001').trim();
     const projectKeys = this.getProjectKeys();
     const boards = await this.getTeamBoards(boardIds);
-    const issueTypes = await this.keepExistingIssueTypes(
-      parseStatusList(process.env.JIRA_WIP_ISSUE_TYPES, DEFAULT_WIP_ISSUE_TYPES)
-    );
+    const [issueTypes, jiraStatuses] = await Promise.all([
+      this.keepExistingIssueTypes(parseStatusList(process.env.JIRA_WIP_ISSUE_TYPES, DEFAULT_WIP_ISSUE_TYPES)),
+      this.getJiraStatuses(),
+    ]);
+    // « In Progress » saisi doit aussi viser « --In Progress-- » des workflows décorés (cf. normalizeStatusName).
+    const jiraStatusNames = jiraStatuses.map((s) => s.name);
+    const startStatuses = resolveStatusNames(settings.startStatuses, jiraStatusNames);
+    const endStatuses = resolveStatusNames(settings.endStatuses, jiraStatusNames);
     const weeks = listWeeks(from, to);
     // Les terminés de la 1re semaine partent du vendredi précédent ; marge d'un jour de chaque côté
     // car les dates JQL sont lues dans le fuseau du compte Jira.
@@ -133,8 +140,8 @@ export class WipService {
         scopeJql,
         projectKeys,
         issueTypes,
-        startStatuses: settings.startStatuses,
-        endStatuses: settings.endStatuses,
+        startStatuses,
+        endStatuses,
         from: shiftDate(weeks[0]?.weekStart ?? from, -4),
         toExclusive: shiftDate(weeks[weeks.length - 1]?.weekEnd ?? to, 2),
       });
@@ -157,7 +164,7 @@ export class WipService {
       return { issues: Array.from(byId.values()), boardsById };
     };
 
-    const [{ issues, boardsById }, jiraStatuses] = await Promise.all([searchIssues(), this.getJiraStatuses()]);
+    const { issues, boardsById } = await searchIssues();
     // Statuts de catégorie « terminé » : ils sortent un ticket du WIP sans le compter terminé.
     const closedStatuses = jiraStatuses.filter((s) => s.category === 'done').map((s) => s.name);
     const tracked = issues.filter((i) =>
@@ -165,7 +172,7 @@ export class WipService {
     );
     const changelogs = tracked.length > 0 ? await jiraClient.getFieldChangelogs(tracked.map((i) => String(i.id)), 'status') : new Map();
 
-    const config = { startStatuses: settings.startStatuses, endStatuses: settings.endStatuses, closedStatuses };
+    const config = { startStatuses, endStatuses, closedStatuses };
     const tickets = tracked.map((i) =>
       computeWipTicket(
         {
@@ -192,14 +199,14 @@ export class WipService {
   }
 
   /**
-   * Statuts saisis absents de Jira (comparaison insensible à la casse). Liste vide si Jira ne répond
+   * Statuts saisis absents de Jira (comparaison souple, cf. normalizeStatusName). Liste vide si Jira ne répond
    * pas : la vérification est alors sautée plutôt que de bloquer l'enregistrement.
    */
   async findUnknownStatuses(names: string[]): Promise<string[]> {
     const known = await this.getJiraStatuses();
     if (known.length === 0) return [];
-    const lower = new Set(known.map((s) => s.name.toLowerCase()));
-    return names.filter((n) => !lower.has(n.trim().toLowerCase()));
+    const normalized = new Set(known.map((s) => normalizeStatusName(s.name)));
+    return names.filter((n) => !normalized.has(normalizeStatusName(n)));
   }
 
   /** Statuts Jira (nom et catégorie), mis en cache ; liste vide si Jira ne répond pas. */
