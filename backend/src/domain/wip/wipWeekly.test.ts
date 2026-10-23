@@ -283,6 +283,18 @@ describe('périmètre et équipes', () => {
     expect(weeks.map((w) => w.byTeam['Team B'].wip)).toEqual([1, 1]);
   });
 
+  it('CT-77 : équipes = boards ; un ticket sur deux boards compte pour chacun, une fois au total', () => {
+    const t = computeWipTicket(
+      { ...issue('KPI-12', [['2026-09-08T10:00:00+02:00', 'In Progress']], { team: 'Team A' }), teams: ['Supply', ' Brigade ', 'Supply'] },
+      CONFIG
+    );
+    expect(t.teams).toEqual(['Supply', 'Brigade']);
+    const { weeks, teams } = aggregateWipByWeek([t], '2026-09-07', '2026-09-13', NOW, undefined, ['Calson', 'Supply']);
+    expect(teams).toEqual(['Brigade', 'Calson', 'Supply']);
+    expect(weeks[0].total).toEqual({ wip: 1, done: 0 });
+    expect(weeks[0].byTeam).toEqual({ Brigade: { wip: 1, done: 0 }, Calson: { wip: 0, done: 0 }, Supply: { wip: 1, done: 0 } });
+  });
+
   it('CT-25 : lecture du champ équipe (texte, objet, tableau)', () => {
     expect(readTeamField({ name: ' Team A ' })).toBe('Team A');
     expect(readTeamField({ value: 'Team B' })).toBe('Team B');

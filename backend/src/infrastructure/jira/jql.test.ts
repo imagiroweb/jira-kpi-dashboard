@@ -133,4 +133,17 @@ describe('buildWipJql (suivi WIP, issue #79)', () => {
     const jql = buildWipJql({ projectKeys: [], startStatuses: ['Dev'], endStatuses: ['Go Prod'], from: '2026-01-01', toExclusive: '2026-02-01' });
     expect(jql.startsWith('issuetype not in subTaskIssueTypes()')).toBe(true);
   });
+
+  it('avec le filtre d\'un board : remplace la restriction projet', () => {
+    const jql = buildWipJql({
+      scopeJql: '(project = AD AND team = Supply)',
+      projectKeys: ['AD'],
+      startStatuses: ['In Progress'],
+      endStatuses: ['Go Prod'],
+      from: '2026-01-01',
+      toExclusive: '2026-02-01',
+    });
+    expect(jql.startsWith('(project = AD AND team = Supply) AND issuetype not in subTaskIssueTypes()')).toBe(true);
+    expect(jql).not.toContain('project in');
+  });
 });

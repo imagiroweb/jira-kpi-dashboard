@@ -5,6 +5,10 @@ const mockSearchAll = jest.fn();
 const mockGetChangelogs = jest.fn();
 const mockGet = jest.fn();
 let mockProjectKeys = ['AD', 'SB'];
+let mockBoardIds: number[] = [];
+const mockGetBoard = jest.fn();
+const mockGetBoardConfiguration = jest.fn();
+const mockGetFilterJql = jest.fn();
 
 jest.mock('../../infrastructure/Container', () => ({
   container: () => ({
@@ -12,8 +16,14 @@ jest.mock('../../infrastructure/Container', () => ({
       searchAllIssuesByJql: mockSearchAll,
       getFieldChangelogs: mockGetChangelogs,
       get: mockGet,
+      getBoard: mockGetBoard,
+      getBoardConfiguration: mockGetBoardConfiguration,
+      getFilterJql: mockGetFilterJql,
       get configuredProjectKeys() {
         return mockProjectKeys;
+      },
+      get configuredBoardIds() {
+        return mockBoardIds;
       },
     },
   }),
@@ -49,7 +59,9 @@ describe('WipService', () => {
     jest.clearAllMocks();
     globalCache.clear();
     mockProjectKeys = ['AD', 'SB'];
+    mockBoardIds = [];
     delete process.env.JIRA_WIP_PROJECT_KEYS;
+    delete process.env.JIRA_WIP_BOARD_IDS;
     delete process.env.JIRA_SUPPORT_PROJECT_KEY;
     mockFindOne.mockReturnValue({ lean: () => Promise.resolve(null) });
     mockGet.mockImplementation((path: string) =>
@@ -165,5 +177,82 @@ describe('WipService', () => {
     );
     await service.getWeekly('2026-09-07', '2026-09-13', NOW);
     expect(mockSearchAll).toHaveBeenCalledTimes(2);
+  });
+
+  describe('CT-78 : une équipe = un board configuré', () => {
+    const BOARDS: Record<number, { name: string; filter: string | null }> = {
+      10: { name: 'Supply', filter: '200' },
+      11: { name: 'Brigade', filter: '201' },
+      12: { name: 'Calson', filter: '202' },
+      13: { name: 'Sans filtre', filter: null },
+    };
+    const FILTERS: Record<string, string> = {
+      '200': 'project = AD AND team = Supply ORDER BY Rank ASC',
+      '201': 'project = AD AND team = Brigade',
+      '202': 'project = AD AND team = Calson',
+    };
+
+    beforeEach(() => {
+      mockBoardIds = [10, 11, 12, 13];
+      mockGetBoard.mockImplementation((id: number) => Promise.resolve({ id, name: BOARDS[id].name }));
+      mockGetBoardConfiguration.mockImplementation((id: number) =>
+        Promise.resolve(BOARDS[id].filter ? { filter: { id: BOARDS[id].filter } } : {})
+      );
+      mockGetFilterJql.mockImplementation((id: string) => Promise.resolve(FILTERS[id]));
+    });
+
+    it('lit chaque board avec son filtre ; un ticket sur deux boards compte pour les deux, une fois au total', async () => {
+      mockSearchAll.mockImplementation((jql: string) =>
+        Promise.resolve(
+          jql.includes('team = Supply')
+            ? [issue('1', 'AD-1', { name: 'US' }), issue('2', 'AD-2', { name: 'Bug' })]
+            : jql.includes('team = Brigade')
+              ? [issue('2', 'AD-2', { name: 'Bug' })]
+              : []
+        )
+      );
+      mockGetChangelogs.mockResolvedValue(
+        new Map([
+          ['1', [history('2026-09-08T10:00:00+02:00', 'In Progress')]],
+          ['2', [history('2026-09-08T10:00:00+02:00', 'In Progress')]],
+        ])
+      );
+
+      const res = await service.getWeekly('2026-09-07', '2026-09-13', NOW);
+
+      const jqls = mockSearchAll.mock.calls.map((c) => c[0] as string);
+      expect(jqls).toHaveLength(3);
+      expect(jqls[0].startsWith('(project = AD AND team = Supply) AND ')).toBe(true);
+      expect(jqls[0]).not.toContain('ORDER BY');
+      expect(jqls.every((j) => !j.includes('project in'))).toBe(true);
+      expect(mockGetChangelogs).toHaveBeenCalledWith(['1', '2'], 'status');
+      expect(res.boards).toEqual(['Supply', 'Brigade', 'Calson']);
+      expect(res.projectKeys).toEqual([]);
+      // Calson n'a aucun ticket mais reste proposée ; le champ équipe Jira est ignoré.
+      expect(res.teams).toEqual(['Brigade', 'Calson', 'Supply']);
+      expect(res.weeks[0].total).toEqual({ wip: 2, done: 0 });
+      expect(res.weeks[0].byTeam).toEqual({
+        Brigade: { wip: 1, done: 0 },
+        Calson: { wip: 0, done: 0 },
+        Supply: { wip: 2, done: 0 },
+      });
+    });
+
+    it('JIRA_WIP_BOARD_IDS prioritaire sur les boards du dashboard', async () => {
+      process.env.JIRA_WIP_BOARD_IDS = '12, x';
+      mockSearchAll.mockResolvedValue([]);
+      const res = await service.getWeekly('2026-09-07', '2026-09-13', NOW);
+      expect(mockGetBoard).toHaveBeenCalledTimes(1);
+      expect(res.boards).toEqual(['Calson']);
+    });
+
+    it('aucun board exploitable : repli sur les projets et le champ équipe', async () => {
+      mockBoardIds = [13];
+      mockSearchAll.mockResolvedValue([]);
+      const res = await service.getWeekly('2026-09-07', '2026-09-13', NOW);
+      expect(mockSearchAll.mock.calls[0][0]).toContain('project in ("AD")');
+      expect(res.boards).toEqual([]);
+      expect(res.projectKeys).toEqual(['AD']);
+    });
   });
 });

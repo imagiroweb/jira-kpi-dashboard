@@ -43,6 +43,8 @@ export interface WipWeeklyData {
   weeks: WipWeek[];
   teams: string[];
   projectKeys: string[];
+  /** Boards qui délimitent les équipes ; vide : équipes lues dans le champ équipe Jira. */
+  boards?: string[];
   ticketCount: number;
   settings: WipSettings;
 }
@@ -169,6 +171,8 @@ export function formatWeekRange(weekStart: string, weekEnd: string): string {
  */
 export function buildWipRows(data: WipWeeklyData, selected: string[], now: Date = new Date()): { rows: WipRow[]; teams: string[]; threshold: WipThreshold } {
   const teams = effectiveTeams(data.teams, selected);
+  // Toutes les équipes : total du serveur, où un ticket présent sur plusieurs boards ne compte qu'une fois.
+  const allTeams = teams.length === data.teams.length;
   const threshold = combinedThreshold(data.settings, teams);
   const byStart = new Map(data.weeks.map((w) => [w.weekStart, w]));
   const currentMonday = mondayOf(localIsoDate(now));
@@ -185,6 +189,10 @@ export function buildWipRows(data: WipWeeklyData, selected: string[], now: Date 
         perTeam[team] = c.wip;
         wip += c.wip;
         done += c.done;
+      }
+      if (allTeams && week) {
+        wip = week.total.wip;
+        done = week.total.done;
       }
       const gap = threshold.value === null ? null : wip - threshold.value;
       return {

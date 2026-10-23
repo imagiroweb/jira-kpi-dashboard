@@ -26,6 +26,13 @@ describe('buildWipRows', () => {
     expect(rows[0]).toMatchObject({ wip: 12, done: 3 });
   });
 
+  it('CT-79 : toutes les équipes → total du serveur (ticket sur deux boards compté une fois)', () => {
+    const weeks = WIP_DATA.weeks.map((w, i) => (i === 0 ? { ...w, total: { wip: 10, done: 3 } } : w));
+    const { rows } = buildWipRows({ ...WIP_DATA, weeks }, [], NOW);
+    expect(rows[0]).toMatchObject({ wip: 10, done: 3 });
+    expect(buildWipRows({ ...WIP_DATA, weeks }, ['Team A', 'Team B'], NOW).rows[0]).toMatchObject({ wip: 9 });
+  });
+
   it('CT-28 : deux équipes → somme et une série par équipe, la troisième absente', () => {
     const { rows, teams } = buildWipRows(WIP_DATA, ['Team A', 'Team B'], NOW);
     expect(teams).toEqual(['Team A', 'Team B']);

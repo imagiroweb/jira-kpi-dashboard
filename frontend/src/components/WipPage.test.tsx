@@ -46,6 +46,13 @@ describe('WipPage', () => {
     expect(screen.getByText('Seuil partiel : 21')).toBeInTheDocument();
   });
 
+  it('CT-78 : affiche les boards qui délimitent les équipes, sinon les projets', async () => {
+    mockGetWeekly.mockResolvedValue({ success: true, data: { ...WIP_DATA, boards: ['Supply', 'Brigade'], projectKeys: [] }, canEdit: false });
+    renderWithProviders(<WipPage />, { user: TEST_USER });
+    expect(await screen.findByText(/boards Supply, Brigade/)).toBeInTheDocument();
+    expect(screen.queryByText(/projets/)).not.toBeInTheDocument();
+  });
+
   it('CT-67 : période trop longue → message, aucune requête', async () => {
     renderWithProviders(<WipPage />, { user: TEST_USER });
     await waitFor(() => expect(mockGetWeekly).toHaveBeenCalledTimes(1));

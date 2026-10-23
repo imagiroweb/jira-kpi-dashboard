@@ -330,7 +330,8 @@ export function WipPage() {
           <section className="card-glass p-6" aria-label="Graphique WIP par semaine">
             <h2 className="mb-1 text-lg font-semibold text-surface-100">WIP et terminés par semaine</h2>
             <p className="mb-4 text-xs text-surface-400">
-              {data.ticketCount} tickets analysés · projets {data.projectKeys.join(', ') || '—'} · mesure le vendredi à 14:00 (heure de Paris), semaine en cours : maintenant
+              {data.ticketCount} tickets analysés ·{' '}
+              {data.boards && data.boards.length > 0 ? `boards ${data.boards.join(', ')}` : `projets ${data.projectKeys.join(', ') || '—'}`} · mesure le vendredi à 14:00 (heure de Paris), semaine en cours : maintenant
             </p>
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">

@@ -1,6 +1,6 @@
 import { container } from '../../infrastructure/Container';
 import { globalCache } from '../../infrastructure/cache';
-import { buildWipJql } from '../../infrastructure/jira/jql';
+import { buildWipJql, stripOrderBy } from '../../infrastructure/jira/jql';
 import {
   aggregateWipByWeek,
   DEFAULT_WIP_ISSUE_TYPES,
@@ -25,6 +25,8 @@ export interface WipWeeklyResult {
   weeks: WipWeek[];
   teams: string[];
   projectKeys: string[];
+  /** Boards dont le filtre délimite chaque équipe ; vide : repli sur les projets et le champ équipe. */
+  boards: string[];
   /** Nombre de tickets analysés (passés par le WIP ou candidats). */
   ticketCount: number;
   settings: WipSettingsValue;
@@ -76,37 +78,86 @@ export class WipService {
     return container().jiraClient.configuredProjectKeys.filter((k) => k && k.toUpperCase() !== support);
   }
 
+  /** Boards suivis : JIRA_WIP_BOARD_IDS, sinon les boards configurés du dashboard (hors boards QA). */
+  getBoardIds(): number[] {
+    const explicit = (process.env.JIRA_WIP_BOARD_IDS || '')
+      .split(',')
+      .map((id) => parseInt(id.trim(), 10))
+      .filter((id) => Number.isInteger(id) && id > 0);
+    return explicit.length > 0 ? explicit : container().jiraClient.configuredBoardIds;
+  }
+
+  /**
+   * Nom et filtre de chaque board suivi : une équipe = un board, son périmètre = le filtre du board.
+   * Les boards sans filtre lisible sont ignorés.
+   */
+  private async getTeamBoards(boardIds: number[]): Promise<Array<{ id: number; name: string; scopeJql: string }>> {
+    const jiraClient = container().jiraClient;
+    const boards = await Promise.all(
+      boardIds.map(async (id) => {
+        const [board, config] = await Promise.all([jiraClient.getBoard(id), jiraClient.getBoardConfiguration(id)]);
+        const filterJql = config?.filter?.id ? await jiraClient.getFilterJql(config.filter.id) : null;
+        const base = filterJql ? stripOrderBy(filterJql).base : '';
+        if (!base) {
+          logger.warn(`WIP : board ${id} sans filtre exploitable, ignoré`);
+          return null;
+        }
+        return { id, name: board?.name?.trim() || `Board ${id}`, scopeJql: `(${base})` };
+      })
+    );
+    return boards.filter((b): b is NonNullable<typeof b> => b !== null);
+  }
+
   async getWeekly(from: string, to: string, now: Date = new Date()): Promise<WipWeeklyResult> {
     const settings = await this.getSettings();
     const statusKey = [settings.startStatuses.join('|'), settings.endStatuses.join('|')].join('>');
+    const boardIds = this.getBoardIds();
     // La semaine en cours est mesurée « maintenant » jusqu'au vendredi 14:00 : la clé change à ce moment.
     const measured = measurePoint(mondayOf(zonedIsoDate(now.getTime()))) <= now.getTime() ? 'mesuree' : 'en-cours';
-    const cacheKey = `${CACHE_PREFIX}${from}:${to}:${statusKey}:${measured}`;
+    const cacheKey = `${CACHE_PREFIX}${from}:${to}:${statusKey}:${boardIds.join(',')}:${measured}`;
     const cached = globalCache.get<Omit<WipWeeklyResult, 'settings'>>(cacheKey);
     if (cached) return { ...cached, settings };
 
     const jiraClient = container().jiraClient;
     const teamField = (process.env.JIRA_TEAM_FIELD || 'customfield_10001').trim();
     const projectKeys = this.getProjectKeys();
+    const boards = await this.getTeamBoards(boardIds);
     const issueTypes = await this.keepExistingIssueTypes(
       parseStatusList(process.env.JIRA_WIP_ISSUE_TYPES, DEFAULT_WIP_ISSUE_TYPES)
     );
     const weeks = listWeeks(from, to);
     // Les terminés de la 1re semaine partent du vendredi précédent ; marge d'un jour de chaque côté
     // car les dates JQL sont lues dans le fuseau du compte Jira.
-    const jql = buildWipJql({
-      projectKeys,
-      issueTypes,
-      startStatuses: settings.startStatuses,
-      endStatuses: settings.endStatuses,
-      from: shiftDate(weeks[0]?.weekStart ?? from, -4),
-      toExclusive: shiftDate(weeks[weeks.length - 1]?.weekEnd ?? to, 2),
-    });
+    const jqlFor = (scopeJql: string | null) =>
+      buildWipJql({
+        scopeJql,
+        projectKeys,
+        issueTypes,
+        startStatuses: settings.startStatuses,
+        endStatuses: settings.endStatuses,
+        from: shiftDate(weeks[0]?.weekStart ?? from, -4),
+        toExclusive: shiftDate(weeks[weeks.length - 1]?.weekEnd ?? to, 2),
+      });
+    const fields = `key,issuetype,status,created,${teamField}`;
 
-    const [issues, jiraStatuses] = await Promise.all([
-      jiraClient.searchAllIssuesByJql(jql, `key,issuetype,status,created,${teamField}`),
-      this.getJiraStatuses(),
-    ]);
+    // Une requête par board ; un ticket présent sur plusieurs boards est lu une fois et compte pour chacun.
+    // Sans board exploitable : périmètre projet, équipe lue dans le champ équipe Jira.
+    const searchIssues = async () => {
+      if (boards.length === 0) return { issues: await jiraClient.searchAllIssuesByJql(jqlFor(null), fields), boardsById: new Map<string, string[]>() };
+      const perBoard = await Promise.all(boards.map(async (b) => ({ b, issues: await jiraClient.searchAllIssuesByJql(jqlFor(b.scopeJql), fields) })));
+      const byId = new Map<string, (typeof perBoard)[number]['issues'][number]>();
+      const boardsById = new Map<string, string[]>();
+      for (const { b, issues: list } of perBoard) {
+        for (const i of list) {
+          const id = String(i.id);
+          byId.set(id, i);
+          boardsById.set(id, [...(boardsById.get(id) ?? []), b.name]);
+        }
+      }
+      return { issues: Array.from(byId.values()), boardsById };
+    };
+
+    const [{ issues, boardsById }, jiraStatuses] = await Promise.all([searchIssues(), this.getJiraStatuses()]);
     // Statuts de catégorie « terminé » : ils sortent un ticket du WIP sans le compter terminé.
     const closedStatuses = jiraStatuses.filter((s) => s.category === 'done').map((s) => s.name);
     const tracked = issues.filter((i) =>
@@ -120,6 +171,7 @@ export class WipService {
         {
           key: i.key,
           team: readTeamField(i.fields[teamField]),
+          teams: boardsById.get(String(i.id)),
           created: (i.fields.created as string) ?? null,
           currentStatus: (i.fields.status as { name?: string } | undefined)?.name ?? null,
           transitions: extractStatusTransitions(changelogs.get(String(i.id)) ?? []),
@@ -127,10 +179,14 @@ export class WipService {
         config
       )
     );
-    const { weeks: byWeek, teams } = aggregateWipByWeek(tickets, from, to, now);
+    const boardNames = boards.map((b) => b.name);
+    const { weeks: byWeek, teams } = aggregateWipByWeek(tickets, from, to, now, undefined, boardNames);
 
-    const result = { from, to, weeks: byWeek, teams, projectKeys, ticketCount: tracked.length };
-    logger.info(`getWipWeekly: ${tracked.length} tickets, ${byWeek.length} semaines, projets [${projectKeys.join(', ')}]`);
+    const result = { from, to, weeks: byWeek, teams, projectKeys: boards.length > 0 ? [] : projectKeys, boards: boardNames, ticketCount: tracked.length };
+    logger.info(
+      `getWipWeekly: ${tracked.length} tickets, ${byWeek.length} semaines, ` +
+        (boards.length > 0 ? `boards [${boardNames.join(', ')}]` : `projets [${projectKeys.join(', ')}]`)
+    );
     globalCache.set(cacheKey, result, cacheTtlMinutes());
     return { ...result, settings };
   }

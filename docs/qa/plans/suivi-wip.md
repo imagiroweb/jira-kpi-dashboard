@@ -122,6 +122,9 @@ Module cible : `frontend/src/domain/wipChart.ts` (nom à fixer par le dev), alim
 |---|---|---|---|---|---|---|
 | CT-61 | CU-01, CU-02 (CA A1, A2, décision BDR 5) | Unitaire | Défauts des rôles semés (`backend/src/domain/user/entities/Role.ts` et semis de `index.ts`) ; rôles personnalisés existants **sans** champ `wip` : « Tech Lead », « LEAD QA », « Leadership », « Coach » | Démarrage (semis + activation unique) puis lecture de `wip` | Dev = vrai, PO = vrai ; Utilisateur, Product, Marketing = faux ; super admin = vrai ; utilisateur sans rôle = faux ; « Tech Lead », « LEAD QA » = vrai (nom contenant le mot « lead » ou « leads », casse ignorée) ; « Leadership » et « Coach » = faux | P1 |
 | CT-76 | CU-01 (décision BDR 5) | Unitaire | Rôle personnalisé « Tech Lead » avec `wip: false` déjà enregistré (case décochée par un super admin) ; rôle « Lead Front » sans champ | Démarrage deux fois de suite | « Tech Lead » reste à faux (l'activation ne joue que si le champ est absent) ; « Lead Front » passe à vrai au 1er démarrage et le reste ; un 2e démarrage ne change rien (idempotent) | P1 |
+| CT-77 | CU-06 (retour BDR du 23/10) | Unitaire | Ticket rattaché aux boards Supply et Brigade ; board Calson configuré sans ticket | Agrégation | Compté dans Supply et dans Brigade, une seule fois au total ; Calson présente à 0 | P1 |
+| CT-78 | CU-06 (retour BDR du 23/10) | Service + composant | Boards configurés Supply, Brigade, Calson (avec filtre) et un board sans filtre | Calcul de la semaine | Une requête par board avec son filtre (ORDER BY retiré, pas de restriction projet) ; board sans filtre ignoré ; `JIRA_WIP_BOARD_IDS` prioritaire ; aucun board exploitable → repli projets + champ équipe ; sous-titre « boards Supply, Brigade » | P1 |
+| CT-79 | CU-06 (retour BDR du 23/10) | Unitaire front | Vue « Toutes » avec un ticket sur deux boards | Construction des lignes | WIP et terminés = total serveur (pas la somme des équipes) ; une sélection garde la somme | P2 |
 | CT-62 | CU-03 (CA A3) | Unitaire | Défaut d'un nouveau rôle | Créer un rôle sans préciser les pages | `wip` = vrai (règle « tout à vrai sauf gestionUtilisateurs, performanceDashboard, couts ») | P1 |
 | CT-63 | CU-03 (CA A3) | Route | Jeton super admin | Création / modification de rôle avec une liste de pages qui omet `wip` ; puis avec `wip` | Sans `wip` : refusée (« la liste des pages doit être complète ») ; avec : acceptée. Test de route existant des rôles à étendre | P2 |
 | CT-64 | CU-03 (CA A3) | Composant | Écran de gestion des rôles (`UserManagementPage`) | Ouvrir création / modification d'un rôle | Une case libellée « Suivi WIP » est présente et cochable | P2 |
@@ -161,6 +164,7 @@ Décision de niveau : toute la logique de comptage (statuts, retours, annulation
 | E2 Aucune sélection → vue globale | CT-27, CT-66 |
 | E3 Deux équipes → somme + une courbe par équipe | CT-28, CT-29 |
 | E4 Équipe actuelle | CT-24 |
+| Équipes = boards existants (retour BDR du 23/10) | CT-77, CT-78, CT-79 |
 | P1 12 dernières semaines par défaut | CT-30, CT-66 |
 | P2 Semaines touchées, bornes comprises | CT-31, CT-32, CT-52 |
 | P3 Plus de 52 semaines → message | CT-33, CT-53, CT-67 |

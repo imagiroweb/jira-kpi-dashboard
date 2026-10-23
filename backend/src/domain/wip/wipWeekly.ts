@@ -57,6 +57,8 @@ export interface WipStatusConfig {
 export interface WipIssueInput {
   key: string;
   team: string | null;
+  /** Boards (équipes) du ticket ; prioritaire sur `team` s'il est renseigné. */
+  teams?: string[];
   /** Date de création ISO (repli si le ticket a été créé directement dans un statut de départ). */
   created?: string | null;
   currentStatus?: string | null;
@@ -65,7 +67,8 @@ export interface WipIssueInput {
 
 export interface WipTicket {
   key: string;
-  team: string;
+  /** Équipes du ticket : un ticket présent sur plusieurs boards compte une fois par board. */
+  teams: string[];
   /** Périodes passées dans le WIP, en ms ; `end` null : toujours en cours. */
   periods: Array<{ start: number; end: number | null }>;
   /** Dernier passage dans un statut d'arrivée (ms), ou null. */
@@ -184,7 +187,9 @@ export function computeWipTicket(issue: WipIssueInput, config: WipStatusConfig):
   }
   if (openSince !== null) periods.push({ start: openSince, end: null });
 
-  return { key: issue.key, team: issue.team?.trim() || NO_TEAM, periods, doneAt };
+  const boards = Array.from(new Set((issue.teams ?? []).map((t) => t.trim()).filter(Boolean)));
+  const teams = boards.length > 0 ? boards : [issue.team?.trim() || NO_TEAM];
+  return { key: issue.key, teams, periods, doneAt };
 }
 
 /** Décalage (ms) du fuseau par rapport à UTC à l'instant donné. */
@@ -262,10 +267,12 @@ export function aggregateWipByWeek(
   from: string,
   to: string,
   now: Date = new Date(),
-  timeZone: string = WIP_TIME_ZONE
+  timeZone: string = WIP_TIME_ZONE,
+  knownTeams: string[] = []
 ): { weeks: WipWeek[]; teams: string[] } {
   const nowMs = now.getTime();
-  const teams = sortTeams(tickets.map((t) => t.team));
+  // Les boards configurés apparaissent même sans ticket sur la période.
+  const teams = sortTeams([...knownTeams, ...tickets.flatMap((t) => t.teams)]);
 
   const weeks = listWeeks(from, to)
     .filter((w) => zonedMidnight(w.weekStart, timeZone) <= nowMs)
@@ -276,14 +283,14 @@ export function aggregateWipByWeek(
       const byTeam: Record<string, WipCounts> = {};
       for (const team of teams) byTeam[team] = { wip: 0, done: 0 };
 
+      // Le total compte chaque ticket une fois, même s'il est sur plusieurs boards.
       for (const t of tickets) {
-        const counts = byTeam[t.team];
         if (t.periods.some((p) => p.start <= snapshot && (p.end === null || p.end > snapshot))) {
-          counts.wip += 1;
+          t.teams.forEach((team) => (byTeam[team].wip += 1));
           total.wip += 1;
         }
         if (t.doneAt !== null && t.doneAt > previous && t.doneAt <= snapshot) {
-          counts.done += 1;
+          t.teams.forEach((team) => (byTeam[team].done += 1));
           total.done += 1;
         }
       }

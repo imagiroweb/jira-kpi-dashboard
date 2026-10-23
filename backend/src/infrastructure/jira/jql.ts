@@ -104,7 +104,9 @@ export function buildClaudeUsJql(opts: ClaudeUsJqlOptions): { allJql: string; cl
 }
 
 export interface WipJqlOptions {
-  /** Clés projet du périmètre (vide = pas de restriction projet). */
+  /** Périmètre (ex. filtre d'un board, ORDER BY retiré) ; prioritaire sur projectKeys. */
+  scopeJql?: string | null;
+  /** Clés projet du périmètre, si scopeJql est absent (vide = pas de restriction projet). */
   projectKeys: string[];
   /** Types de tickets suivis (vide = tous). */
   issueTypes?: string[];
@@ -124,7 +126,8 @@ export function buildWipJql(opts: WipJqlOptions): string {
   const list = (statuses: string[]) => statuses.map(quoteJql).join(', ');
   const starts = list(opts.startStatuses);
   const conditions: string[] = [];
-  if (opts.projectKeys.length > 0) conditions.push(`project in (${opts.projectKeys.map(quoteJql).join(', ')})`);
+  if (opts.scopeJql) conditions.push(opts.scopeJql);
+  else if (opts.projectKeys.length > 0) conditions.push(`project in (${opts.projectKeys.map(quoteJql).join(', ')})`);
   if (opts.issueTypes && opts.issueTypes.length > 0) conditions.push(`issuetype in (${list(opts.issueTypes)})`);
   conditions.push('issuetype not in subTaskIssueTypes()');
   // WAS IN tient compte du statut initial (ticket créé directement dans un statut de départ).
