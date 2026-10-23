@@ -19,6 +19,7 @@ Workflow `.github/workflows/e2e-preprod.yml`, cible `https://jira-kpi-preprod.im
 | Plan | Spec | Mise à jour |
 |---|---|---|
 | [`plans/produit-roadmap-filtre-fac.md`](plans/produit-roadmap-filtre-fac.md) | [#66](https://github.com/imagiroweb/jira-kpi-dashboard/issues/66) | 2026-10-15 |
+| [`plans/suivi-wip.md`](plans/suivi-wip.md) | [#79](https://github.com/imagiroweb/jira-kpi-dashboard/issues/79) | 2026-10-23 |
 
 ## Tests E2E
 
@@ -26,3 +27,4 @@ Workflow `.github/workflows/e2e-preprod.yml`, cible `https://jira-kpi-preprod.im
 |---|---|---|
 | `e2e/tests/smoke.spec.ts` | API santé, affichage de l'écran de connexion | oui |
 | `e2e/tests/auth.spec.ts` | Connexion avec le compte de test, refus d'un mauvais mot de passe | connexion |
+| `e2e/tests/wip.spec.ts` | Ouverture de la page « Suivi WIP » depuis le menu (ignoré si le compte de test n'a pas la page) | oui |

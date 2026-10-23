@@ -408,6 +408,7 @@ export class JiraClient {
   /**
    * Historique d'un champ pour plusieurs tickets en un appel (POST /rest/api/3/changelog/bulkfetch,
    * 1000 tickets max par requête, pagination par nextPageToken). Clé du résultat : id du ticket.
+   * Cet endpoint renvoie `created` en millisecondes epoch (nombre) : on le ramène en ISO comme ailleurs.
    */
   async getFieldChangelogs(issueIds: string[], fieldId: string): Promise<Map<string, JiraChangeHistory[]>> {
     const out = new Map<string, JiraChangeHistory[]>();
@@ -423,7 +424,11 @@ export class JiraClient {
         });
         for (const log of response.data.issueChangeLogs ?? []) {
           const id = String(log.issueId);
-          out.set(id, [...(out.get(id) ?? []), ...(log.changeHistories ?? [])]);
+          const histories = (log.changeHistories ?? []).map((h) => ({
+            ...h,
+            created: typeof h.created === 'number' ? new Date(h.created).toISOString() : h.created
+          }));
+          out.set(id, [...(out.get(id) ?? []), ...histories]);
         }
         nextPageToken = response.data.nextPageToken?.trim() || undefined;
         if (!nextPageToken) break;
@@ -637,11 +642,18 @@ export interface JiraSearchResponse {
 /** Entrée d'historique Jira (changelog) : date + champs modifiés. */
 export interface JiraChangeHistory {
   created: string;
-  items: Array<{ field?: string; fieldId?: string; fromString?: string | null; toString?: string | null }>;
+  items: Array<{
+    field?: string;
+    fieldId?: string;
+    from?: string | null;
+    to?: string | null;
+    fromString?: string | null;
+    toString?: string | null;
+  }>;
 }
 
 interface JiraBulkChangelogResponse {
-  issueChangeLogs?: Array<{ issueId: string; changeHistories?: JiraChangeHistory[] }>;
+  issueChangeLogs?: Array<{ issueId: string; changeHistories?: Array<Omit<JiraChangeHistory, 'created'> & { created: string | number }> }>;
   nextPageToken?: string;
 }
 

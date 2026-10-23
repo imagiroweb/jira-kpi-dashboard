@@ -11,7 +11,8 @@ export const PAGE_IDS = [
   'gestionUtilisateurs',
   'performance',
   'performanceDashboard',
-  'couts'
+  'couts',
+  'wip'
 ] as const;
 
 export type PageId = (typeof PAGE_IDS)[number];
@@ -31,6 +32,8 @@ export interface IPageVisibilities {
   performanceDashboard: boolean;
   /** Page « Coûts horaires » : saisie des coûts horaires, et affichage des coûts dans le Suivi épic (ex. Finance). */
   couts: boolean;
+  /** Page « Suivi WIP » : WIP hebdomadaire et seuils par équipe (issue #79). */
+  wip: boolean;
 }
 
 export interface IRole extends Document {
@@ -58,7 +61,8 @@ const defaultPageVisibilities: IPageVisibilities = {
   gestionUtilisateurs: false,
   performance: true,
   performanceDashboard: false,
-  couts: false
+  couts: false,
+  wip: true
 };
 
 const PageVisibilitiesSchema = new Schema<IPageVisibilities>(
@@ -73,7 +77,8 @@ const PageVisibilitiesSchema = new Schema<IPageVisibilities>(
     gestionUtilisateurs: { type: Boolean, default: false },
     performance: { type: Boolean, default: true },
     performanceDashboard: { type: Boolean, default: false },
-    couts: { type: Boolean, default: false }
+    couts: { type: Boolean, default: false },
+    wip: { type: Boolean, default: true }
   },
   { _id: false }
 );

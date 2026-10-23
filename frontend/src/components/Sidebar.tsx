@@ -1,4 +1,4 @@
-import { LayoutDashboard, Users, Headphones, ChevronLeft, ChevronRight, ChevronDown, LogOut, User, Wifi, WifiOff, RefreshCw, Flag, Megaphone, Package, ShieldCheck, CalendarClock, Target, Users2, Euro, TrendingUp, Settings, Download } from 'lucide-react';
+import { LayoutDashboard, Users, Headphones, ChevronLeft, ChevronRight, ChevronDown, LogOut, User, Wifi, WifiOff, RefreshCw, Flag, Megaphone, Package, ShieldCheck, CalendarClock, Target, Users2, Euro, TrendingUp, Gauge, Settings, Download } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { groupOfPage, resolveNav, type NavEntry } from '../domain/sidebarNav';
 import { useStore } from '../store/useStore';
@@ -8,7 +8,7 @@ import { authApi } from '../services/authApi';
 import { downloadJson, personalDataFilename } from '../utils/downloadJson';
 
 // PageType is defined in the store, we just use the same type here
-export type PageType = 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'pointHebdo' | 'gestionUtilisateurs' | 'performance' | 'performanceDashboard' | 'couts';
+export type PageType = 'dashboard' | 'users' | 'support' | 'epics' | 'marketing' | 'produit' | 'pointHebdo' | 'gestionUtilisateurs' | 'performance' | 'performanceDashboard' | 'couts' | 'wip';
 
 interface SidebarProps {
   currentPage: PageType;
@@ -66,6 +66,12 @@ const pageItems: NavItem[] = [
     description: 'Réunion sprint Dev & QA'
   },
   {
+    id: 'wip',
+    label: 'Suivi WIP',
+    icon: <Gauge className="w-5 h-5" />,
+    description: 'Travail en cours par semaine'
+  },
+  {
     id: 'gestionUtilisateurs',
     label: 'Gestion des utilisateurs',
     icon: <ShieldCheck className="w-5 h-5" />,
@@ -121,6 +127,7 @@ const NAV: NavEntry<PageType>[] = [
   { kind: 'page', id: 'marketing' },
   { kind: 'page', id: 'produit' },
   { kind: 'page', id: 'pointHebdo' },
+  { kind: 'page', id: 'wip' },
   { kind: 'group', id: 'suiviPerformance', pages: ['performance', 'performanceDashboard'] },
   { kind: 'group', id: 'parametres', pages: ['gestionUtilisateurs', 'couts'] }
 ];
@@ -134,7 +141,7 @@ export function Sidebar({ currentPage, onNavigate }: SidebarProps) {
 
   const visiblePages = user?.visiblePages;
   const canSee = (pageId: PageType) => {
-    if (!visiblePages) return pageId !== 'gestionUtilisateurs' && pageId !== 'performanceDashboard' && pageId !== 'couts';
+    if (!visiblePages) return pageId !== 'gestionUtilisateurs' && pageId !== 'performanceDashboard' && pageId !== 'couts' && pageId !== 'wip';
     return visiblePages[pageId] === true;
   };
   const nav = resolveNav(NAV, canSee);

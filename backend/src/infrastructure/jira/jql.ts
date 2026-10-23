@@ -102,3 +102,64 @@ export function buildClaudeUsJql(opts: ClaudeUsJqlOptions): { allJql: string; cl
   const claudeCondition = filterId ? `filter = ${quoteJql(filterId)}` : `labels = ${quoteJql(opts.label)}`;
   return { allJql, claudeJql: `${allJql} AND ${claudeCondition}` };
 }
+
+export interface WipJqlOptions {
+  /** Périmètre (ex. filtre d'un board, ORDER BY retiré) ; prioritaire sur projectKeys. */
+  scopeJql?: string | null;
+  /** Clés projet du périmètre, si scopeJql est absent (vide = pas de restriction projet). */
+  projectKeys: string[];
+  /** Types de tickets suivis (vide = tous). */
+  issueTypes?: string[];
+  startStatuses: string[];
+  endStatuses: string[];
+  /** Période [from, toExclusive), YYYY-MM-DD. */
+  from: string;
+  toExclusive: string;
+}
+
+/**
+ * JQL des tickets qui ont pu être dans le WIP sur la période (spec issue #79) : passés par un statut
+ * de départ avant la fin de période (statut initial compris), et soit encore en cours, soit
+ * modifiés en statut depuis le début de période. Sous-tâches exclues.
+ */
+const TEAM_ID_IN_JQL = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
+/**
+ * Ids Team cités dans une JQL de board (`Team in (uuid)` ou `"Team[Team]" = uuid`).
+ * Un filtre qui ne porte que le nom (`team = Supply`) n'en renvoie aucun.
+ */
+export function extractTeamIdsFromJql(jql: string): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  const clause = /(?:"Team(?:\[Team\])?"|\bTeam)\s*(?:=|in)\s*(\((?:[^()]|"[^"]*")*\)|"(?:[^"]*)"|[0-9a-f-]{36})/gi;
+  let match: RegExpExecArray | null;
+  while ((match = clause.exec(jql)) !== null) {
+    const blob = match[1];
+    TEAM_ID_IN_JQL.lastIndex = 0;
+    let id: RegExpExecArray | null;
+    while ((id = TEAM_ID_IN_JQL.exec(blob)) !== null) {
+      const key = id[0].toLowerCase();
+      if (!seen.has(key)) {
+        seen.add(key);
+        ids.push(key);
+      }
+    }
+  }
+  return ids;
+}
+
+export function buildWipJql(opts: WipJqlOptions): string {
+  const list = (statuses: string[]) => statuses.map(quoteJql).join(', ');
+  const starts = list(opts.startStatuses);
+  const conditions: string[] = [];
+  if (opts.scopeJql) conditions.push(opts.scopeJql);
+  else if (opts.projectKeys.length > 0) conditions.push(`project in (${opts.projectKeys.map(quoteJql).join(', ')})`);
+  if (opts.issueTypes && opts.issueTypes.length > 0) conditions.push(`issuetype in (${list(opts.issueTypes)})`);
+  conditions.push('issuetype not in subTaskIssueTypes()');
+  // WAS IN tient compte du statut initial (ticket créé directement dans un statut de départ).
+  conditions.push(`status was in (${starts}) before "${opts.toExclusive.replace(/-/g, '/')}"`);
+  conditions.push(
+    `((statusCategory != Done AND status not in (${list(opts.endStatuses)})) OR status changed after "${opts.from.replace(/-/g, '/')}")`
+  );
+  return conditions.join(' AND ');
+}

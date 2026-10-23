@@ -4,7 +4,7 @@ Index des pages. Chaque page suit le plan : Objectif, Parcours utilisateur, Règ
 
 | Page | Description | Dernière mise à jour |
 |---|---|---|
-| [utilisateurs-roles-authentification.md](utilisateurs-roles-authentification.md) | Connexion locale et Microsoft, mot de passe, rôles et pages visibles, administration, logs d'activité, RGPD. | 2026-10-10 |
+| [utilisateurs-roles-authentification.md](utilisateurs-roles-authentification.md) | Connexion locale et Microsoft, mot de passe, rôles et pages visibles, administration, logs d'activité, RGPD. | 2026-10-23 |
 | [sprints-velocite.md](sprints-velocite.md) | Tableau de bord de sprint, classement des tickets, burndown, résolus par jour, vélocité. | 2026-10-10 |
 | [worklogs-temps.md](worklogs-temps.md) | Temps passé par utilisateur, projet et jour (page Détail Utilisateurs). | 2026-10-10 |
 | [SUIVI_EPICS.md](SUIVI_EPICS.md) | Progression des épics et légendes, story points par statut, temps et coût par personne. | 2026-10-10 |
@@ -13,6 +13,7 @@ Index des pages. Chaque page suit le plan : Objectif, Parcours utilisateur, Règ
 | [produit-roadmap-adoria.md](produit-roadmap-adoria.md) | Roadmap Adoria 2026 (Monday), encarts « Sans … » et indicateur US Claude. | 2026-10-10 |
 | [point-hebdo-sprint.md](point-hebdo-sprint.md) | Document collaboratif du point hebdomadaire Dev et QA. | 2026-10-10 |
 | [performance.md](performance.md) | Cycles, objectifs et KR, évaluations, grille générale, actions, imports OKR. | 2026-10-10 |
+| [wip.md](wip.md) | Suivi WIP hebdomadaire par équipe Jira, tickets terminés et seuils devs × max par dev (issue #79). | 2026-10-23 |
 | [equipes.md](equipes.md) | Équipes, leads, rattachement des collaborateurs et délégation. | 2026-10-10 |
 | [couts-horaires.md](couts-horaires.md) | Taux horaires datés et calcul du coût du temps passé. | 2026-10-10 |
 | [marketing-brevo.md](marketing-brevo.md) | Statistiques de campagnes, contacts et emails transactionnels Brevo. | 2026-10-10 |

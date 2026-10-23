@@ -1,4 +1,4 @@
-import { stripOrderBy, buildBoardBacklogJql, buildProjectBacklogJql, quarterDateRange, buildClaudeUsJql, combineBoardFiltersJql } from './jql';
+import { stripOrderBy, buildBoardBacklogJql, buildProjectBacklogJql, quarterDateRange, buildClaudeUsJql, combineBoardFiltersJql, buildWipJql, extractTeamIdsFromJql } from './jql';
 
 describe('jql utils', () => {
   it('stripOrderBy sépare la clause ORDER BY', () => {
@@ -108,5 +108,54 @@ describe('combineBoardFiltersJql', () => {
     });
     expect(allJql.startsWith('((team = Choco) OR (team = Cook)) AND issuetype in ("US")')).toBe(true);
     expect(allJql).not.toContain('project in');
+  });
+});
+
+describe('buildWipJql (suivi WIP, issue #79)', () => {
+  it('cible les tickets passés par un statut de départ, encore en cours ou modifiés sur la période', () => {
+    expect(
+      buildWipJql({
+        projectKeys: ['AD', 'REL'],
+        issueTypes: ['US', 'Bug dev'],
+        startStatuses: ['In Progress'],
+        endStatuses: ['Go Prod', 'Livré'],
+        from: '2026-09-06',
+        toExclusive: '2026-10-27',
+      })
+    ).toBe(
+      'project in ("AD", "REL") AND issuetype in ("US", "Bug dev") AND issuetype not in subTaskIssueTypes()' +
+        ' AND status was in ("In Progress") before "2026/10/27"' +
+        ' AND ((statusCategory != Done AND status not in ("Go Prod", "Livré")) OR status changed after "2026/09/06")'
+    );
+  });
+
+  it('sans projet configuré : pas de restriction projet', () => {
+    const jql = buildWipJql({ projectKeys: [], startStatuses: ['Dev'], endStatuses: ['Go Prod'], from: '2026-01-01', toExclusive: '2026-02-01' });
+    expect(jql.startsWith('issuetype not in subTaskIssueTypes()')).toBe(true);
+  });
+
+  it('extrait les ids Team du filtre, pas un nom d\'équipe', () => {
+    expect(
+      extractTeamIdsFromJql(
+        'project in (ADORIA26, "support board") AND Team in (972ac800-927e-42c6-a6c9-4d691ce8c87e, 83219e84-63fa-4122-b927-fde8e28adf97)'
+      )
+    ).toEqual(['972ac800-927e-42c6-a6c9-4d691ce8c87e', '83219e84-63fa-4122-b927-fde8e28adf97']);
+    expect(extractTeamIdsFromJql('"Team[Team]" = 931e2ea1-6791-4262-ad27-a5a46b22d1fe')).toEqual([
+      '931e2ea1-6791-4262-ad27-a5a46b22d1fe',
+    ]);
+    expect(extractTeamIdsFromJql('project = AD AND team = Supply ORDER BY Rank ASC')).toEqual([]);
+  });
+
+  it('avec le filtre d\'un board : remplace la restriction projet', () => {
+    const jql = buildWipJql({
+      scopeJql: '(project = AD AND team = Supply)',
+      projectKeys: ['AD'],
+      startStatuses: ['In Progress'],
+      endStatuses: ['Go Prod'],
+      from: '2026-01-01',
+      toExclusive: '2026-02-01',
+    });
+    expect(jql.startsWith('(project = AD AND team = Supply) AND issuetype not in subTaskIssueTypes()')).toBe(true);
+    expect(jql).not.toContain('project in');
   });
 });
