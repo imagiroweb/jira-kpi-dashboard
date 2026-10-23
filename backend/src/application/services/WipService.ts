@@ -8,7 +8,10 @@ import {
   extractStatusTransitions,
   isWipEligibleIssueType,
   listWeeks,
+  measurePoint,
+  mondayOf,
   parseStatusList,
+  zonedIsoDate,
   readTeamField,
   type WipWeek,
 } from '../../domain/wip/wipWeekly';
@@ -28,6 +31,7 @@ export interface WipWeeklyResult {
 }
 
 const CACHE_PREFIX = 'wip-weekly:';
+const JIRA_STATUSES_CACHE_KEY = 'wip-jira-statuses';
 
 function cacheTtlMinutes(): number {
   const n = parseInt(process.env.WIP_WEEKLY_CACHE_TTL_MINUTES || '', 10);
@@ -75,14 +79,18 @@ export class WipService {
   async getWeekly(from: string, to: string, now: Date = new Date()): Promise<WipWeeklyResult> {
     const settings = await this.getSettings();
     const statusKey = [settings.startStatuses.join('|'), settings.endStatuses.join('|')].join('>');
-    const cacheKey = `${CACHE_PREFIX}${from}:${to}:${statusKey}`;
+    // La semaine en cours est mesurée « maintenant » jusqu'au vendredi 14:00 : la clé change à ce moment.
+    const measured = measurePoint(mondayOf(zonedIsoDate(now.getTime()))) <= now.getTime() ? 'mesuree' : 'en-cours';
+    const cacheKey = `${CACHE_PREFIX}${from}:${to}:${statusKey}:${measured}`;
     const cached = globalCache.get<Omit<WipWeeklyResult, 'settings'>>(cacheKey);
     if (cached) return { ...cached, settings };
 
     const jiraClient = container().jiraClient;
     const teamField = (process.env.JIRA_TEAM_FIELD || 'customfield_10001').trim();
     const projectKeys = this.getProjectKeys();
-    const issueTypes = parseStatusList(process.env.JIRA_WIP_ISSUE_TYPES, DEFAULT_WIP_ISSUE_TYPES);
+    const issueTypes = await this.keepExistingIssueTypes(
+      parseStatusList(process.env.JIRA_WIP_ISSUE_TYPES, DEFAULT_WIP_ISSUE_TYPES)
+    );
     const weeks = listWeeks(from, to);
     // Les terminés de la 1re semaine partent du vendredi précédent ; marge d'un jour de chaque côté
     // car les dates JQL sont lues dans le fuseau du compte Jira.
@@ -95,10 +103,12 @@ export class WipService {
       toExclusive: shiftDate(weeks[weeks.length - 1]?.weekEnd ?? to, 2),
     });
 
-    const [issues, closedStatuses] = await Promise.all([
+    const [issues, jiraStatuses] = await Promise.all([
       jiraClient.searchAllIssuesByJql(jql, `key,issuetype,status,created,${teamField}`),
-      this.getDoneCategoryStatuses(),
+      this.getJiraStatuses(),
     ]);
+    // Statuts de catégorie « terminé » : ils sortent un ticket du WIP sans le compter terminé.
+    const closedStatuses = jiraStatuses.filter((s) => s.category === 'done').map((s) => s.name);
     const tracked = issues.filter((i) =>
       isWipEligibleIssueType(i.fields.issuetype as { name?: string; subtask?: boolean } | undefined, issueTypes)
     );
@@ -126,18 +136,50 @@ export class WipService {
   }
 
   /**
-   * Noms des statuts de catégorie Jira « terminé » : sortie du WIP sans être comptés terminés.
-   * Liste vide si Jira ne répond pas (le calcul reste possible avec les seuls statuts d'arrivée).
+   * Statuts saisis absents de Jira (comparaison insensible à la casse). Liste vide si Jira ne répond
+   * pas : la vérification est alors sautée plutôt que de bloquer l'enregistrement.
    */
-  private async getDoneCategoryStatuses(): Promise<string[]> {
+  async findUnknownStatuses(names: string[]): Promise<string[]> {
+    const known = await this.getJiraStatuses();
+    if (known.length === 0) return [];
+    const lower = new Set(known.map((s) => s.name.toLowerCase()));
+    return names.filter((n) => !lower.has(n.trim().toLowerCase()));
+  }
+
+  /** Statuts Jira (nom et catégorie), mis en cache ; liste vide si Jira ne répond pas. */
+  private async getJiraStatuses(): Promise<Array<{ name: string; category: string | null }>> {
+    const cached = globalCache.get<Array<{ name: string; category: string | null }>>(JIRA_STATUSES_CACHE_KEY);
+    if (cached) return cached;
     try {
       const statuses = await container().jiraClient.get<Array<{ name?: string; statusCategory?: { key?: string } }>>(
         '/rest/api/3/status'
       );
-      return (statuses ?? []).filter((s) => s.statusCategory?.key === 'done' && s.name).map((s) => s.name as string);
+      const out = (statuses ?? [])
+        .filter((s) => s.name)
+        .map((s) => ({ name: s.name as string, category: s.statusCategory?.key ?? null }));
+      globalCache.set(JIRA_STATUSES_CACHE_KEY, out, 60);
+      return out;
     } catch (err) {
-      logger.warn(`getWipWeekly: liste des statuts Jira indisponible: ${err}`);
+      logger.warn(`WIP : liste des statuts Jira indisponible: ${err}`);
       return [];
+    }
+  }
+
+  /**
+   * Types suivis réellement présents dans Jira : un type absent ferait échouer toute la requête JQL.
+   * Si Jira ne répond pas, la liste configurée est gardée telle quelle.
+   */
+  private async keepExistingIssueTypes(types: string[]): Promise<string[]> {
+    try {
+      const all = await container().jiraClient.get<Array<{ name?: string }>>('/rest/api/3/issuetype');
+      const known = new Set((all ?? []).map((t) => (t.name ?? '').toLowerCase()));
+      const kept = types.filter((t) => known.has(t.toLowerCase()));
+      const missing = types.filter((t) => !known.has(t.toLowerCase()));
+      if (missing.length > 0) logger.warn(`WIP : types absents de Jira ignorés : ${missing.join(', ')}`);
+      return kept.length > 0 ? kept : types;
+    } catch (err) {
+      logger.warn(`WIP : liste des types Jira indisponible: ${err}`);
+      return types;
     }
   }
 }

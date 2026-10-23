@@ -386,7 +386,7 @@ describe('AuthService.getVisiblePages — moindre privilège', () => {
 
     expect(pages.dashboard).toBe(true);
     expect(pages.performance).toBe(true);
-    for (const page of ['users', 'support', 'epics', 'marketing', 'produit', 'pointHebdo', 'gestionUtilisateurs', 'couts'] as const) {
+    for (const page of ['users', 'support', 'epics', 'marketing', 'produit', 'pointHebdo', 'gestionUtilisateurs', 'couts', 'wip'] as const) {
       expect(pages[page]).toBe(false);
     }
   });

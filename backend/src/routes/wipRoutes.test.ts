@@ -37,11 +37,13 @@ jest.mock('../domain/user/entities/User', () => ({
 const mockGetWeekly = jest.fn();
 const mockGetSettings = jest.fn();
 const mockSaveSettings = jest.fn();
+const mockFindUnknownStatuses = jest.fn();
 jest.mock('../application/services/WipService', () => ({
   wipService: {
     getWeekly: (...args: unknown[]) => mockGetWeekly(...args),
     getSettings: (...args: unknown[]) => mockGetSettings(...args),
     saveSettings: (...args: unknown[]) => mockSaveSettings(...args),
+    findUnknownStatuses: (...args: unknown[]) => mockFindUnknownStatuses(...args),
   },
 }));
 
@@ -60,6 +62,7 @@ describe('wipRoutes (TI)', () => {
     mockAuthMode = 'pass';
     mockRole = 'super_admin';
     mockGetSettings.mockResolvedValue(SETTINGS);
+    mockFindUnknownStatuses.mockResolvedValue([]);
   });
 
   it('protège la lecture par la page `wip`', () => {
@@ -172,6 +175,15 @@ describe('wipRoutes (TI)', () => {
         'B : le maximum de tickets par dev doit être un entier entre 1 et 20',
         'C : le nombre de devs doit être un entier entre 0 et 50',
       ]);
+      expect(mockSaveSettings).not.toHaveBeenCalled();
+    });
+
+    it('400 si un statut n\'existe pas dans Jira, rien enregistré', async () => {
+      mockFindUnknownStatuses.mockResolvedValue(['Go-Prod']);
+      const res = await request(app).put('/api/wip/settings').send({ ...SETTINGS, endStatuses: ['Go-Prod'] });
+      expect(res.status).toBe(400);
+      expect(res.body.errors).toEqual(['Statut inconnu dans Jira : Go-Prod']);
+      expect(mockFindUnknownStatuses).toHaveBeenCalledWith(['In Progress', 'Go-Prod']);
       expect(mockSaveSettings).not.toHaveBeenCalled();
     });
 

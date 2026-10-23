@@ -87,6 +87,17 @@ describe('validateWipSettings', () => {
   });
 });
 
+describe('bornes des équipes', () => {
+  it('refuse plus de 200 équipes et les noms de plus de 100 caractères', () => {
+    const many = Array.from({ length: 201 }, (_, i) => ({ team: `T${i}`, devCount: 1 }));
+    expect(validateWipSettings({ ...base, teams: many })).toEqual({ ok: false, errors: ['200 équipes au maximum'] });
+    expect(validateWipSettings({ ...base, teams: [{ team: 'x'.repeat(101), devCount: 1 }] })).toEqual({
+      ok: false,
+      errors: ['Équipe n°1 : nom trop long (100 caractères au maximum)'],
+    });
+  });
+});
+
 describe('teamWipThreshold', () => {
   it('utilise le maximum propre à l\'équipe, sinon le défaut', () => {
     const s: WipSettingsValue = { ...base, defaultMaxPerDev: 2, teams: [{ team: 'A', devCount: 3, maxPerDev: null }, { team: 'B', devCount: 3, maxPerDev: 4 }] };

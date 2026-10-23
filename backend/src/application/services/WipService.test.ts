@@ -52,10 +52,18 @@ describe('WipService', () => {
     delete process.env.JIRA_WIP_PROJECT_KEYS;
     delete process.env.JIRA_SUPPORT_PROJECT_KEY;
     mockFindOne.mockReturnValue({ lean: () => Promise.resolve(null) });
-    mockGet.mockResolvedValue([
-      { name: 'Annulé', statusCategory: { key: 'done' } },
-      { name: 'QA', statusCategory: { key: 'indeterminate' } },
-    ]);
+    mockGet.mockImplementation((path: string) =>
+      Promise.resolve(
+        path === '/rest/api/3/issuetype'
+          ? [{ name: 'US' }, { name: 'Tâche Tech' }, { name: 'Bug' }, { name: 'Bug dev' }, { name: 'Epic' }]
+          : [
+              { name: 'In Progress', statusCategory: { key: 'indeterminate' } },
+              { name: 'Go Prod', statusCategory: { key: 'done' } },
+              { name: 'Annulé', statusCategory: { key: 'done' } },
+              { name: 'QA', statusCategory: { key: 'indeterminate' } },
+            ]
+      )
+    );
   });
 
   it('CT-22 : exclut le projet Support, les sous-tâches et les épics ; agrège par semaine et par équipe', async () => {
@@ -108,6 +116,29 @@ describe('WipService', () => {
     const res = await service.getWeekly('2026-09-07', '2026-09-13', NOW);
     expect(res.projectKeys).toEqual(['X', 'Y']);
     expect(res.weeks).toHaveLength(1);
+  });
+
+  it('ignore les types suivis absents de Jira', async () => {
+    mockGet.mockImplementation((path: string) =>
+      Promise.resolve(path === '/rest/api/3/issuetype' ? [{ name: 'US' }, { name: 'Bug dev' }] : [])
+    );
+    mockSearchAll.mockResolvedValue([]);
+    await service.getWeekly('2026-09-07', '2026-09-13', NOW);
+    expect(mockSearchAll.mock.calls[0][0]).toContain('issuetype in ("US", "Bug dev")');
+  });
+
+  it('statuts inconnus de Jira détectés sans tenir compte de la casse ; Jira muet → aucune vérification', async () => {
+    expect(await service.findUnknownStatuses(['in progress', 'Go-Prod'])).toEqual(['Go-Prod']);
+    globalCache.clear();
+    mockGet.mockRejectedValue(new Error('down'));
+    expect(await service.findUnknownStatuses(['Go-Prod'])).toEqual([]);
+  });
+
+  it('la mesure « maintenant » de la semaine en cours n\'est plus servie du cache après vendredi 14:00', async () => {
+    mockSearchAll.mockResolvedValue([]);
+    await service.getWeekly('2026-09-07', '2026-09-13', new Date('2026-09-11T13:50:00+02:00'));
+    await service.getWeekly('2026-09-07', '2026-09-13', new Date('2026-09-11T14:10:00+02:00'));
+    expect(mockSearchAll).toHaveBeenCalledTimes(2);
   });
 
   it('lit les réglages enregistrés, avec repli sur les statuts par défaut', async () => {

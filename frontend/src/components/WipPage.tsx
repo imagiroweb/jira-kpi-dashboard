@@ -166,10 +166,14 @@ export function WipPage() {
   const startEditing = () => {
     if (!data) return;
     const s = data.settings;
-    const teams = Array.from(new Set([...allTeams.filter((t) => t !== NO_TEAM), ...s.teams.map((t) => t.team)]));
+    // Équipes des données et des réglages, dédoublonnées sans tenir compte de la casse (comme les seuils).
+    const teams: string[] = [];
+    for (const t of [...allTeams.filter((name) => name !== NO_TEAM), ...s.teams.map((row) => row.team)]) {
+      if (!teams.some((x) => x.toLowerCase() === t.toLowerCase())) teams.push(t);
+    }
     setTeamDrafts(
       teams.map((team) => {
-        const row = s.teams.find((t) => t.team === team);
+        const row = s.teams.find((t) => t.team.toLowerCase() === team.toLowerCase());
         return { team, devCount: row ? String(row.devCount) : '', maxPerDev: row?.maxPerDev != null ? String(row.maxPerDev) : '' };
       })
     );

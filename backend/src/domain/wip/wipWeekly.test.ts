@@ -16,6 +16,7 @@ import {
   parseStatusList,
   readTeamField,
   sortTeams,
+  zonedIsoDate,
   zonedMidnight,
   type WipIssueInput,
   type WipStatusConfig,
@@ -50,12 +51,12 @@ describe('extractStatusTransitions (CT-14)', () => {
   it('ne garde que les changements de statut, triés par date, sans plantage sur toString nul', () => {
     const out = extractStatusTransitions([
       { created: '2026-09-10T10:00:00+02:00', items: [{ fieldId: 'status', toString: 'Go Prod' }, { fieldId: 'labels', toString: 'x' }] },
-      { created: '2026-09-08T10:00:00+02:00', items: [{ field: 'status', toString: 'In Progress' }] },
+      { created: '2026-09-08T10:00:00+02:00', items: [{ field: 'status', fromString: 'To Do', toString: 'In Progress' }] },
       { created: '2026-09-09T10:00:00+02:00', items: [{ fieldId: 'status', toString: null }] },
     ]);
     expect(out).toEqual([
-      { at: '2026-09-08T10:00:00+02:00', to: 'In Progress' },
-      { at: '2026-09-10T10:00:00+02:00', to: 'Go Prod' },
+      { at: '2026-09-08T10:00:00+02:00', to: 'In Progress', from: 'To Do' },
+      { at: '2026-09-10T10:00:00+02:00', to: 'Go Prod', from: null },
     ]);
   });
 });
@@ -149,6 +150,18 @@ describe('computeWipTicket : entrée, sortie, retours', () => {
     expect(t.periods).toEqual([{ start: Date.parse('2026-09-08T09:00:00+02:00'), end: null }]);
   });
 
+  it('CT-13 bis : créé en In Progress puis passé en QA et Go Prod → WIP depuis la création, puis terminé', () => {
+    const t = issue('KPI-11b', [], {
+      created: '2026-09-08T09:00:00+02:00',
+      currentStatus: 'Go Prod',
+      transitions: [
+        { at: '2026-09-15T10:00:00+02:00', to: 'QA', from: 'In Progress' },
+        { at: '2026-09-23T10:00:00+02:00', to: 'Go Prod', from: 'QA' },
+      ],
+    });
+    expect(weekly(t, '2026-09-07', '2026-09-27')).toEqual({ wip: [1, 1, 0], done: [0, 0, 1] });
+  });
+
   it('CT-49 : statuts de départ configurés → le calcul les suit', () => {
     const t = issue('KPI-1', [['2026-09-08T10:00:00+02:00', 'In Progress'], ['2026-09-11T10:00:00+02:00', 'QA']]);
     expect(weekly(t, '2026-09-07', '2026-09-13', { ...CONFIG, startStatuses: ['Dev'] }).wip).toEqual([0]);
@@ -162,6 +175,10 @@ describe('computeWipTicket : entrée, sortie, retours', () => {
 });
 
 describe('semaines en heure de Paris', () => {
+  it('zonedIsoDate : jour calendaire à Paris', () => {
+    expect(zonedIsoDate(Date.parse('2026-09-06T22:30:00Z'))).toBe('2026-09-07');
+  });
+
   it('zonedMidnight : minuit de Paris en été et en hiver', () => {
     expect(new Date(zonedMidnight('2026-09-07')).toISOString()).toBe('2026-09-06T22:00:00.000Z');
     expect(new Date(zonedMidnight('2026-11-02')).toISOString()).toBe('2026-11-01T23:00:00.000Z');

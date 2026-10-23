@@ -25,7 +25,7 @@ Suivre chaque semaine le travail en cours (WIP) des équipes de développement e
 | Élément | Règle |
 |---|---|
 | Projets | `JIRA_WIP_PROJECT_KEYS` (liste séparée par des virgules) ; sinon tous les projets Jira configurés sauf le projet Support (`JIRA_SUPPORT_PROJECT_KEY`, défaut SB). |
-| Types suivis | `JIRA_WIP_ISSUE_TYPES` ; défaut : US, Tâche Tech, Bug, Bug dev (comparaison insensible à la casse). Sous-tâches, épics et légendes toujours exclues. |
+| Types suivis | `JIRA_WIP_ISSUE_TYPES` ; défaut : US, Tâche Tech, Bug, Bug dev (comparaison insensible à la casse). Un type absent de Jira est ignoré (avertissement dans les logs). Sous-tâches, épics et légendes toujours exclues. |
 | Équipe | Valeur actuelle du champ équipe Jira (`JIRA_TEAM_FIELD`, défaut `customfield_10001` ; texte, option ou première valeur d'une liste). Vide : « Sans équipe ». |
 | Statuts | Défaut : départ « In Progress », arrivée « Go Prod ». Noms comparés sans tenir compte de la casse. |
 
@@ -36,7 +36,7 @@ Calcul sur l'historique des statuts de chaque ticket, dans l'ordre chronologique
 | Événement | Effet |
 |---|---|
 | Premier passage dans un statut de départ | Entre dans le WIP. |
-| Ticket créé directement dans un statut de départ, sans aucun changement de statut | Dans le WIP depuis sa date de création. |
+| Ticket créé directement dans un statut de départ (statut initial lu dans l'historique, ou statut actuel s'il n'a jamais changé) | Dans le WIP depuis sa date de création. |
 | Passage dans un statut d'arrivée | Sort du WIP ; compté terminé à cette date. |
 | Passage dans un autre statut de catégorie Jira « terminé » (ex. annulé) | Sort du WIP, non compté terminé. |
 | Retour dans un statut non terminé après une sortie | Revient dans le WIP (quel que soit ce statut, « À faire » compris). |
@@ -71,10 +71,10 @@ Date de terminaison d'un ticket = son **dernier** passage en statut d'arrivée (
 | Champ | Bornes |
 |---|---|
 | Période | 52 semaines au maximum (lundi → dimanche touchés), début ≤ fin. 12 semaines par défaut. |
-| Statuts de départ / d'arrivée | 1 à 20 chacun, 100 caractères max, sans `"` ni `\` ; doublons retirés ; un statut ne peut pas être à la fois de départ et d'arrivée. |
+| Statuts de départ / d'arrivée | 1 à 20 chacun, 100 caractères max, sans `"` ni `\` ; doublons retirés ; un statut ne peut pas être à la fois de départ et d'arrivée ; refusé s'il n'existe pas dans Jira (« Statut inconnu dans Jira », vérification sautée si Jira ne répond pas). |
 | Tickets max par dev (défaut et par équipe) | Entier de 1 à 20 ; par équipe, vide = défaut. |
 | Devs par équipe | Entier de 0 à 50. Laissé vide : l'équipe est retirée des réglages. |
-| Équipes | Nom obligatoire, pas de doublon (casse ignorée), pas « Sans équipe ». |
+| Équipes | 200 au maximum ; nom obligatoire, 100 caractères max, pas de doublon (casse ignorée), pas « Sans équipe ». |
 
 L'enregistrement remplace l'ensemble des réglages. Un changement de statuts relance le calcul.
 
@@ -98,11 +98,10 @@ Sources externes : Jira (tickets, champ équipe, historique des changements de s
 
 - L'équipe **actuelle** du ticket est appliquée à tout son historique : un ticket changé d'équipe bascule rétroactivement.
 - Pas d'historique des seuils : les réglages courants s'appliquent à toutes les semaines passées.
-- Résultat en cache mémoire (30 min par défaut, par instance), vidé à chaque synchronisation et à l'enregistrement des réglages. Pendant ce délai, la mesure « maintenant » de la semaine en cours n'avance pas.
+- Résultat en cache mémoire (30 min par défaut, par instance), vidé à chaque synchronisation et à l'enregistrement des réglages. Pendant ce délai, la mesure « maintenant » de la semaine en cours n'avance pas (le calcul repart de Jira au passage du vendredi 14:00).
 - Les dates de la requête Jira sont lues dans le fuseau du compte Jira : une marge d'un jour est prise de chaque côté (et la recherche part du vendredi précédant la 1re semaine) ; le filtrage exact se fait ensuite sur l'historique.
 - Les statuts de catégorie « terminé » sont lus via l'API Jira : si elle ne répond pas, seuls les statuts d'arrivée font sortir du WIP (un ticket annulé reste alors compté).
 - Performance : l'historique des statuts de chaque ticket est lu à chaque calcul ; une longue période (jusqu'à 52 semaines) peut être lente.
-- Un ticket créé dans un statut de départ puis modifié n'est daté que par ses changements de statut (la date de création n'est utilisée qu'en l'absence de tout changement).
 - Les tickets « Sans équipe » rendent le seuil global partiel dès qu'un autre seuil est défini.
 - La période par défaut est calculée sur la date du navigateur.
 

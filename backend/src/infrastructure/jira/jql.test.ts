@@ -124,7 +124,7 @@ describe('buildWipJql (suivi WIP, issue #79)', () => {
       })
     ).toBe(
       'project in ("AD", "REL") AND issuetype in ("US", "Bug dev") AND issuetype not in subTaskIssueTypes()' +
-        ' AND (status changed to ("In Progress") before "2026/10/27" OR status in ("In Progress"))' +
+        ' AND status was in ("In Progress") before "2026/10/27"' +
         ' AND ((statusCategory != Done AND status not in ("Go Prod", "Livré")) OR status changed after "2026/09/06")'
     );
   });

@@ -117,7 +117,7 @@ export interface WipJqlOptions {
 
 /**
  * JQL des tickets qui ont pu être dans le WIP sur la période (spec issue #79) : passés par un statut
- * de départ avant la fin de période (ou créés directement dedans), et soit encore en cours, soit
+ * de départ avant la fin de période (statut initial compris), et soit encore en cours, soit
  * modifiés en statut depuis le début de période. Sous-tâches exclues.
  */
 export function buildWipJql(opts: WipJqlOptions): string {
@@ -127,7 +127,8 @@ export function buildWipJql(opts: WipJqlOptions): string {
   if (opts.projectKeys.length > 0) conditions.push(`project in (${opts.projectKeys.map(quoteJql).join(', ')})`);
   if (opts.issueTypes && opts.issueTypes.length > 0) conditions.push(`issuetype in (${list(opts.issueTypes)})`);
   conditions.push('issuetype not in subTaskIssueTypes()');
-  conditions.push(`(status changed to (${starts}) before "${opts.toExclusive.replace(/-/g, '/')}" OR status in (${starts}))`);
+  // WAS IN tient compte du statut initial (ticket créé directement dans un statut de départ).
+  conditions.push(`status was in (${starts}) before "${opts.toExclusive.replace(/-/g, '/')}"`);
   conditions.push(
     `((statusCategory != Done AND status not in (${list(opts.endStatuses)})) OR status changed after "${opts.from.replace(/-/g, '/')}")`
   );

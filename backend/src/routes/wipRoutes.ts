@@ -71,6 +71,10 @@ router.put('/settings', requireSuperAdmin, async (req: Request, res: Response) =
     return res.status(400).json({ success: false, errors: result.errors });
   }
   try {
+    const unknown = await wipService.findUnknownStatuses([...result.value.startStatuses, ...result.value.endStatuses]);
+    if (unknown.length > 0) {
+      return res.status(400).json({ success: false, errors: [`Statut inconnu dans Jira : ${unknown.join(', ')}`] });
+    }
     const settings = await wipService.saveSettings(result.value, req.user!.userId);
     res.json({ success: true, settings });
   } catch (error) {

@@ -37,12 +37,14 @@ export interface StatusTransition {
   at: string;
   /** Nom du statut d'arrivée. */
   to: string;
+  /** Nom du statut de départ de la transition (statut initial pour la première). */
+  from?: string | null;
 }
 
 /** Entrée d'historique Jira réduite à ce dont on a besoin (compatible avec `JiraChangeHistory`). */
 export interface ChangeHistoryLike {
   created: string;
-  items: Array<{ field?: string; fieldId?: string; toString?: string | null }>;
+  items: Array<{ field?: string; fieldId?: string; fromString?: string | null; toString?: string | null }>;
 }
 
 export interface WipStatusConfig {
@@ -132,7 +134,7 @@ export function extractStatusTransitions(histories: ChangeHistoryLike[]): Status
   for (const h of histories) {
     for (const item of h.items ?? []) {
       const isStatus = item.fieldId === 'status' || (!item.fieldId && item.field?.toLowerCase() === 'status');
-      if (isStatus && item.toString) out.push({ at: h.created, to: item.toString });
+      if (isStatus && item.toString) out.push({ at: h.created, to: item.toString, from: item.fromString ?? null });
     }
   }
   return out.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
@@ -144,14 +146,16 @@ export function computeWipTicket(issue: WipIssueInput, config: WipStatusConfig):
   const ends = new Set(config.endStatuses.map(normalize));
   const closed = new Set((config.closedStatuses ?? []).map(normalize));
   const transitions = issue.transitions
-    .map((t) => ({ at: Date.parse(t.at), to: normalize(t.to) }))
+    .map((t) => ({ at: Date.parse(t.at), to: normalize(t.to), from: t.from ?? null }))
     .filter((t) => !Number.isNaN(t.at))
     .sort((a, b) => a.at - b.at);
 
-  // Ticket créé directement dans un statut de départ : pas de transition, on part de la création.
+  // Ticket créé directement dans un statut de départ : on part de la création. Le statut initial est
+  // celui d'où part la première transition, ou le statut actuel s'il n'y en a aucune.
   const created = issue.created ? Date.parse(issue.created) : NaN;
-  if (transitions.length === 0 && issue.currentStatus && starts.has(normalize(issue.currentStatus)) && !Number.isNaN(created)) {
-    transitions.push({ at: created, to: normalize(issue.currentStatus) });
+  const initialStatus = transitions.length > 0 ? transitions[0].from : issue.currentStatus;
+  if (initialStatus && starts.has(normalize(initialStatus)) && !Number.isNaN(created) && (transitions.length === 0 || created <= transitions[0].at)) {
+    transitions.unshift({ at: created, to: normalize(initialStatus), from: null });
   }
 
   const periods: WipTicket['periods'] = [];
@@ -205,6 +209,11 @@ export function zonedMidnight(date: string, timeZone: string = WIP_TIME_ZONE): n
   const guess = Date.parse(`${date.slice(0, 10)}T00:00:00.000Z`);
   const first = guess - timeZoneOffset(guess, timeZone);
   return guess - timeZoneOffset(first, timeZone);
+}
+
+/** Jour calendaire (YYYY-MM-DD) d'un instant dans le fuseau. */
+export function zonedIsoDate(ms: number, timeZone: string = WIP_TIME_ZONE): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(ms));
 }
 
 const addDays = (date: string, days: number) =>

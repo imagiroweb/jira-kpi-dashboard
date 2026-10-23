@@ -8,6 +8,8 @@ export const DEFAULT_MAX_TICKETS_PER_DEV = 3;
 export const MAX_DEV_COUNT = 50;
 export const MAX_TICKETS_PER_DEV = 20;
 const MAX_STATUSES = 20;
+const MAX_TEAMS = 200;
+const MAX_NAME_LENGTH = 100;
 
 export interface WipTeamSetting {
   /** Nom de l'équipe tel que dans le champ équipe Jira. */
@@ -70,6 +72,8 @@ export function validateWipSettings(raw: unknown): { ok: true; value: WipSetting
   const teams: WipTeamSetting[] = [];
   if (!Array.isArray(teamsRaw)) {
     errors.push('teams doit être une liste');
+  } else if (teamsRaw.length > MAX_TEAMS) {
+    errors.push(`${MAX_TEAMS} équipes au maximum`);
   } else {
     const seen = new Set<string>();
     teamsRaw.forEach((t, i) => {
@@ -77,6 +81,10 @@ export function validateWipSettings(raw: unknown): { ok: true; value: WipSetting
       const team = typeof row.team === 'string' ? row.team.trim() : '';
       if (!team) {
         errors.push(`Équipe n°${i + 1} : le nom est obligatoire`);
+        return;
+      }
+      if (team.length > MAX_NAME_LENGTH) {
+        errors.push(`Équipe n°${i + 1} : nom trop long (${MAX_NAME_LENGTH} caractères au maximum)`);
         return;
       }
       if (team === NO_TEAM) {
