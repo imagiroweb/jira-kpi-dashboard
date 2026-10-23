@@ -28,6 +28,7 @@ import {
 } from '../domain/performance';
 import type { Team, CreateTeamInput, UpdateTeamInput, RosterUser } from '../domain/team';
 import type { HourlyRate } from '../domain/hourlyRates';
+import type { WipSettings, WipWeeklyData } from '../domain/wipChart';
 
 const API_BASE_URL = import.meta.env.VITE_API_URL || '/api';
 
@@ -1093,6 +1094,21 @@ export const costsApi = {
   /** Retire un compte non SSO ajouté ; son coût horaire est effacé (super admin). */
   removeUser: async (userId: string): Promise<{ success: boolean }> => {
     const { data } = await api.delete(`/costs/users/${userId}`);
+    return data;
+  },
+};
+
+/** Page « Suivi WIP » (issue #79) : WIP hebdomadaire et réglages partagés des seuils. */
+export const wipApi = {
+  /** WIP et terminés par semaine (lundi → dimanche) ; `canEdit` = super admin. */
+  getWeekly: async (from: string, to: string): Promise<{ success: boolean; data: WipWeeklyData; canEdit: boolean }> => {
+    // Lecture de l'historique des statuts : peut dépasser le délai par défaut sur de longues périodes.
+    const { data } = await api.get('/wip/weekly', { params: { from, to }, timeout: 120000 });
+    return data;
+  },
+  /** Remplace les réglages (super admin). */
+  saveSettings: async (settings: WipSettings): Promise<{ success: boolean; settings: WipSettings }> => {
+    const { data } = await api.put('/wip/settings', settings);
     return data;
   },
 };

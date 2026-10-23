@@ -1087,7 +1087,8 @@ router.post(
           gestionUtilisateurs: false,
           performance: true,
           performanceDashboard: false,
-          couts: false
+          couts: false,
+          wip: true
         }
       });
       res.status(201).json({

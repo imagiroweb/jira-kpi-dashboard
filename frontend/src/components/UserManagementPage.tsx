@@ -27,7 +27,8 @@ const PAGE_LABELS: Record<keyof VisiblePages, string> = {
   gestionUtilisateurs: 'Gestion des utilisateurs',
   performance: 'Ma performance',
   performanceDashboard: 'Performance équipe',
-  couts: 'Coûts horaires'
+  couts: 'Coûts horaires',
+  wip: 'Suivi WIP'
 };
 
 /** Complète les pages absentes d'un rôle ancien (ex. `couts`, ajoutée après sa création) : non visibles. */
@@ -241,7 +242,8 @@ export function UserManagementPage() {
         gestionUtilisateurs: false,
         performance: true,
         performanceDashboard: false,
-        couts: false
+        couts: false,
+        wip: true
       };
       const created = await authApi.createRole(newRoleName.trim(), defaultPages);
       setRoles((prev) => [...prev, created]);

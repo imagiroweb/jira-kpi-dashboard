@@ -596,7 +596,8 @@ export class AuthService {
       gestionUtilisateurs: false,
       performance: true,
       performanceDashboard: false,
-      couts: false
+      couts: false,
+      wip: false
     };
   }
 

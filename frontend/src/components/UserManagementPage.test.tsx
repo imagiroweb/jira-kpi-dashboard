@@ -341,6 +341,29 @@ describe('UserManagementPage', () => {
     });
   });
 
+  it('CT-64 : propose la case « Suivi WIP » sur un rôle créé avant son ajout', async () => {
+    const pagesWithoutWip: Partial<typeof TEST_VISIBLE_PAGES_ALL> = { ...TEST_VISIBLE_PAGES_ALL };
+    delete pagesWithoutWip.wip;
+    mockGetUsersAndRoles.mockResolvedValue({
+      users: [],
+      roles: [{ id: 'role-1', name: 'Lead dev', pageVisibilities: pagesWithoutWip as typeof TEST_VISIBLE_PAGES_ALL }],
+    });
+    renderWithProviders(<UserManagementPage />, { user: SUPER_ADMIN });
+
+    fireEvent.click(await screen.findByRole('button', { name: /Modifier/i }));
+    const checkbox = screen.getByRole('checkbox', { name: 'Suivi WIP' });
+    expect(checkbox).not.toBeChecked();
+    fireEvent.click(checkbox);
+    fireEvent.click(screen.getByRole('button', { name: /Enregistrer/i }));
+
+    await waitFor(() => {
+      expect(mockUpdateRole).toHaveBeenCalledWith('role-1', {
+        name: 'Lead dev',
+        pageVisibilities: { ...TEST_VISIBLE_PAGES_ALL, wip: true },
+      });
+    });
+  });
+
   it('filtre la page pour n’afficher qu’une section', async () => {
     renderWithProviders(<UserManagementPage />, { user: SUPER_ADMIN });
 

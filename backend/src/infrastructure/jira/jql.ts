@@ -102,3 +102,34 @@ export function buildClaudeUsJql(opts: ClaudeUsJqlOptions): { allJql: string; cl
   const claudeCondition = filterId ? `filter = ${quoteJql(filterId)}` : `labels = ${quoteJql(opts.label)}`;
   return { allJql, claudeJql: `${allJql} AND ${claudeCondition}` };
 }
+
+export interface WipJqlOptions {
+  /** Clés projet du périmètre (vide = pas de restriction projet). */
+  projectKeys: string[];
+  /** Types de tickets suivis (vide = tous). */
+  issueTypes?: string[];
+  startStatuses: string[];
+  endStatuses: string[];
+  /** Période [from, toExclusive), YYYY-MM-DD. */
+  from: string;
+  toExclusive: string;
+}
+
+/**
+ * JQL des tickets qui ont pu être dans le WIP sur la période (spec issue #79) : passés par un statut
+ * de départ avant la fin de période (ou créés directement dedans), et soit encore en cours, soit
+ * modifiés en statut depuis le début de période. Sous-tâches exclues.
+ */
+export function buildWipJql(opts: WipJqlOptions): string {
+  const list = (statuses: string[]) => statuses.map(quoteJql).join(', ');
+  const starts = list(opts.startStatuses);
+  const conditions: string[] = [];
+  if (opts.projectKeys.length > 0) conditions.push(`project in (${opts.projectKeys.map(quoteJql).join(', ')})`);
+  if (opts.issueTypes && opts.issueTypes.length > 0) conditions.push(`issuetype in (${list(opts.issueTypes)})`);
+  conditions.push('issuetype not in subTaskIssueTypes()');
+  conditions.push(`(status changed to (${starts}) before "${opts.toExclusive.replace(/-/g, '/')}" OR status in (${starts}))`);
+  conditions.push(
+    `((statusCategory != Done AND status not in (${list(opts.endStatuses)})) OR status changed after "${opts.from.replace(/-/g, '/')}")`
+  );
+  return conditions.join(' AND ');
+}

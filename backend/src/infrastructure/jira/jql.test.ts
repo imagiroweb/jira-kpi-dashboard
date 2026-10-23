@@ -1,4 +1,4 @@
-import { stripOrderBy, buildBoardBacklogJql, buildProjectBacklogJql, quarterDateRange, buildClaudeUsJql, combineBoardFiltersJql } from './jql';
+import { stripOrderBy, buildBoardBacklogJql, buildProjectBacklogJql, quarterDateRange, buildClaudeUsJql, combineBoardFiltersJql, buildWipJql } from './jql';
 
 describe('jql utils', () => {
   it('stripOrderBy sépare la clause ORDER BY', () => {
@@ -108,5 +108,29 @@ describe('combineBoardFiltersJql', () => {
     });
     expect(allJql.startsWith('((team = Choco) OR (team = Cook)) AND issuetype in ("US")')).toBe(true);
     expect(allJql).not.toContain('project in');
+  });
+});
+
+describe('buildWipJql (suivi WIP, issue #79)', () => {
+  it('cible les tickets passés par un statut de départ, encore en cours ou modifiés sur la période', () => {
+    expect(
+      buildWipJql({
+        projectKeys: ['AD', 'REL'],
+        issueTypes: ['US', 'Bug dev'],
+        startStatuses: ['In Progress'],
+        endStatuses: ['Go Prod', 'Livré'],
+        from: '2026-09-06',
+        toExclusive: '2026-10-27',
+      })
+    ).toBe(
+      'project in ("AD", "REL") AND issuetype in ("US", "Bug dev") AND issuetype not in subTaskIssueTypes()' +
+        ' AND (status changed to ("In Progress") before "2026/10/27" OR status in ("In Progress"))' +
+        ' AND ((statusCategory != Done AND status not in ("Go Prod", "Livré")) OR status changed after "2026/09/06")'
+    );
+  });
+
+  it('sans projet configuré : pas de restriction projet', () => {
+    const jql = buildWipJql({ projectKeys: [], startStatuses: ['Dev'], endStatuses: ['Go Prod'], from: '2026-01-01', toExclusive: '2026-02-01' });
+    expect(jql.startsWith('issuetype not in subTaskIssueTypes()')).toBe(true);
   });
 });

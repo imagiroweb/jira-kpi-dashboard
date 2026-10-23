@@ -1,0 +1,285 @@
+/**
+ * Suivi hebdomadaire du WIP (travail en cours) : règles pures, sans I/O (spec issue #79).
+ *
+ * Un ticket entre dans le WIP à son premier passage dans un statut de départ (ex. « In Progress »).
+ * Il en sort quand il passe dans un statut d'arrivée (ex. « Go Prod », compté comme terminé) ou dans
+ * un autre statut de catégorie « terminé » (ex. annulé, non compté). S'il quitte ensuite ce statut
+ * pour un statut non terminé, il revient dans le WIP.
+ *
+ * Mesure hebdomadaire (réponse de BDR sur l'issue #79) : le vendredi à 14:00, heure de Paris. Le WIP
+ * de la semaine est celui de ce point de mesure ; les terminés sont ceux passés entre le point de
+ * mesure précédent (vendredi d'avant, 14:00) et celui-ci. Pour la semaine en cours, avant vendredi
+ * 14:00, le point de mesure est maintenant.
+ */
+
+/** Libellé utilisé pour les tickets sans valeur dans le champ équipe Jira. */
+export const NO_TEAM = 'Sans équipe';
+
+/** Nombre maximal de semaines affichables en une requête. */
+export const MAX_WIP_WEEKS = 52;
+
+/** Fuseau du point de mesure hebdomadaire. */
+export const WIP_TIME_ZONE = 'Europe/Paris';
+
+/** Point de mesure : jour (0 = lundi, 4 = vendredi) et heure locale. */
+export const WIP_MEASURE_DAY_OFFSET = 4;
+export const WIP_MEASURE_HOUR = 14;
+
+export const DEFAULT_WIP_START_STATUSES = ['In Progress'];
+export const DEFAULT_WIP_END_STATUSES = ['Go Prod'];
+/** Types de tickets suivis (réponse de BDR sur l'issue #79). */
+export const DEFAULT_WIP_ISSUE_TYPES = ['US', 'Tâche Tech', 'Bug', 'Bug dev'];
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export interface StatusTransition {
+  /** Date ISO du changement. */
+  at: string;
+  /** Nom du statut d'arrivée. */
+  to: string;
+}
+
+/** Entrée d'historique Jira réduite à ce dont on a besoin (compatible avec `JiraChangeHistory`). */
+export interface ChangeHistoryLike {
+  created: string;
+  items: Array<{ field?: string; fieldId?: string; toString?: string | null }>;
+}
+
+export interface WipStatusConfig {
+  startStatuses: string[];
+  endStatuses: string[];
+  /** Statuts de catégorie Jira « terminé » : ils sortent un ticket du WIP sans le compter terminé. */
+  closedStatuses?: string[];
+}
+
+export interface WipIssueInput {
+  key: string;
+  team: string | null;
+  /** Date de création ISO (repli si le ticket a été créé directement dans un statut de départ). */
+  created?: string | null;
+  currentStatus?: string | null;
+  transitions: StatusTransition[];
+}
+
+export interface WipTicket {
+  key: string;
+  team: string;
+  /** Périodes passées dans le WIP, en ms ; `end` null : toujours en cours. */
+  periods: Array<{ start: number; end: number | null }>;
+  /** Dernier passage dans un statut d'arrivée (ms), ou null. */
+  doneAt: number | null;
+}
+
+export interface WipCounts {
+  /** Tickets dans le WIP au point de mesure (vendredi 14:00, ou maintenant pour la semaine en cours). */
+  wip: number;
+  /** Tickets dont le dernier passage en statut d'arrivée tombe depuis le point de mesure précédent. */
+  done: number;
+}
+
+export interface WipWeek {
+  /** Lundi de la semaine (YYYY-MM-DD). */
+  weekStart: string;
+  /** Dimanche de la semaine (YYYY-MM-DD). */
+  weekEnd: string;
+  /** Instant de la mesure (ISO) : vendredi 14:00 Paris, ou maintenant pour la semaine en cours. */
+  measuredAt: string;
+  total: WipCounts;
+  byTeam: Record<string, WipCounts>;
+}
+
+/**
+ * Liste de statuts séparés par des virgules (guillemets facultatifs), ou tableau. Vide : `fallback`.
+ * Ex. `In Progress, "Go Prod"` → ['In Progress', 'Go Prod'].
+ */
+export function parseStatusList(raw: string | string[] | undefined | null, fallback: string[]): string[] {
+  const parts = Array.isArray(raw) ? raw : (raw ?? '').split(',');
+  const out = parts
+    .map((s) => String(s).trim().replace(/^["']|["']$/g, '').trim())
+    .filter((s) => s.length > 0);
+  return out.length > 0 ? Array.from(new Set(out)) : fallback;
+}
+
+const normalize = (s: string) => s.trim().toLowerCase();
+
+/** Valeur du champ équipe Jira : texte, objet `{ name }` / `{ value }`, ou tableau (première valeur). */
+export function readTeamField(raw: unknown): string | null {
+  if (raw == null) return null;
+  if (Array.isArray(raw)) return raw.length > 0 ? readTeamField(raw[0]) : null;
+  if (typeof raw === 'string') return raw.trim() || null;
+  const obj = raw as { name?: unknown; value?: unknown };
+  const v = obj.name ?? obj.value;
+  return typeof v === 'string' && v.trim() ? v.trim() : null;
+}
+
+/**
+ * Ticket dans le périmètre du WIP : ni sous-tâche, ni épic, ni légende, et, si une liste est donnée,
+ * d'un des types suivis (comparaison insensible à la casse).
+ */
+export function isWipEligibleIssueType(
+  type: { name?: string; subtask?: boolean } | null | undefined,
+  allowedTypes: string[] = []
+): boolean {
+  if (type?.subtask) return false;
+  const n = (type?.name ?? '').trim().toLowerCase();
+  if (n.includes('epic') || n.includes('épic') || n.includes('legend') || n.includes('légende')) return false;
+  return allowedTypes.length === 0 || allowedTypes.some((t) => t.trim().toLowerCase() === n);
+}
+
+/** Transitions de statut d'un historique Jira, triées par date croissante. */
+export function extractStatusTransitions(histories: ChangeHistoryLike[]): StatusTransition[] {
+  const out: StatusTransition[] = [];
+  for (const h of histories) {
+    for (const item of h.items ?? []) {
+      const isStatus = item.fieldId === 'status' || (!item.fieldId && item.field?.toLowerCase() === 'status');
+      if (isStatus && item.toString) out.push({ at: h.created, to: item.toString });
+    }
+  }
+  return out.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+}
+
+/** Périodes de WIP et date de terminaison d'un ticket (voir l'en-tête du fichier). */
+export function computeWipTicket(issue: WipIssueInput, config: WipStatusConfig): WipTicket {
+  const starts = new Set(config.startStatuses.map(normalize));
+  const ends = new Set(config.endStatuses.map(normalize));
+  const closed = new Set((config.closedStatuses ?? []).map(normalize));
+  const transitions = issue.transitions
+    .map((t) => ({ at: Date.parse(t.at), to: normalize(t.to) }))
+    .filter((t) => !Number.isNaN(t.at))
+    .sort((a, b) => a.at - b.at);
+
+  // Ticket créé directement dans un statut de départ : pas de transition, on part de la création.
+  const created = issue.created ? Date.parse(issue.created) : NaN;
+  if (transitions.length === 0 && issue.currentStatus && starts.has(normalize(issue.currentStatus)) && !Number.isNaN(created)) {
+    transitions.push({ at: created, to: normalize(issue.currentStatus) });
+  }
+
+  const periods: WipTicket['periods'] = [];
+  let doneAt: number | null = null;
+  let started = false;
+  let openSince: number | null = null;
+
+  for (const t of transitions) {
+    const isEnd = ends.has(t.to);
+    const isClosed = isEnd || closed.has(t.to);
+    if (isEnd && started) doneAt = t.at;
+    if (openSince !== null) {
+      if (isClosed) {
+        periods.push({ start: openSince, end: t.at });
+        openSince = null;
+      }
+      continue;
+    }
+    if (starts.has(t.to)) {
+      started = true;
+      openSince = t.at;
+    } else if (started && !isClosed) {
+      // Réouverture : le ticket quitte un statut terminé pour un statut non terminé.
+      openSince = t.at;
+    }
+  }
+  if (openSince !== null) periods.push({ start: openSince, end: null });
+
+  return { key: issue.key, team: issue.team?.trim() || NO_TEAM, periods, doneAt };
+}
+
+/** Décalage (ms) du fuseau par rapport à UTC à l'instant donné. */
+function timeZoneOffset(ms: number, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hourCycle: 'h23',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  }).formatToParts(new Date(ms));
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value);
+  const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
+  return asUtc - (ms - (ms % 1000));
+}
+
+/** Instant (ms) de minuit, dans le fuseau, du jour calendaire `YYYY-MM-DD`. */
+export function zonedMidnight(date: string, timeZone: string = WIP_TIME_ZONE): number {
+  const guess = Date.parse(`${date.slice(0, 10)}T00:00:00.000Z`);
+  const first = guess - timeZoneOffset(guess, timeZone);
+  return guess - timeZoneOffset(first, timeZone);
+}
+
+const addDays = (date: string, days: number) =>
+  new Date(Date.parse(`${date.slice(0, 10)}T00:00:00.000Z`) + days * DAY_MS).toISOString().slice(0, 10);
+
+/** Lundi (YYYY-MM-DD) de la semaine contenant le jour calendaire donné. */
+export function mondayOf(date: string): string {
+  const day = new Date(`${date.slice(0, 10)}T00:00:00.000Z`).getUTCDay();
+  return addDays(date, -((day + 6) % 7));
+}
+
+/** Nombre de semaines (lundi → dimanche) touchées par la période. */
+export function countWeeks(from: string, to: string): number {
+  const diff = Date.parse(`${mondayOf(to)}T00:00:00Z`) - Date.parse(`${mondayOf(from)}T00:00:00Z`);
+  return diff < 0 ? 0 : Math.round(diff / (7 * DAY_MS)) + 1;
+}
+
+/** Semaines (lundi → dimanche) qui touchent la période, première et dernière comprises. */
+export function listWeeks(from: string, to: string): Array<{ weekStart: string; weekEnd: string }> {
+  const weeks: Array<{ weekStart: string; weekEnd: string }> = [];
+  const last = mondayOf(to);
+  for (let m = mondayOf(from); m <= last; m = addDays(m, 7)) {
+    weeks.push({ weekStart: m, weekEnd: addDays(m, 6) });
+  }
+  return weeks;
+}
+
+/** Tri des équipes : ordre alphabétique, « Sans équipe » en dernier. */
+export function sortTeams(teams: Iterable<string>): string[] {
+  return Array.from(new Set(teams)).sort((a, b) => {
+    if (a === NO_TEAM) return 1;
+    if (b === NO_TEAM) return -1;
+    return a.localeCompare(b, 'fr');
+  });
+}
+
+/** Point de mesure (ms) de la semaine commençant le lundi donné : vendredi 14:00 dans le fuseau. */
+export function measurePoint(weekStart: string, timeZone: string = WIP_TIME_ZONE): number {
+  // Les changements d'heure ont lieu le dimanche : pas de décalage entre minuit et 14:00 un vendredi.
+  return zonedMidnight(addDays(weekStart, WIP_MEASURE_DAY_OFFSET), timeZone) + WIP_MEASURE_HOUR * 3600 * 1000;
+}
+
+/** Agrège les tickets par semaine, au total et par équipe. Les semaines futures sont omises. */
+export function aggregateWipByWeek(
+  tickets: WipTicket[],
+  from: string,
+  to: string,
+  now: Date = new Date(),
+  timeZone: string = WIP_TIME_ZONE
+): { weeks: WipWeek[]; teams: string[] } {
+  const nowMs = now.getTime();
+  const teams = sortTeams(tickets.map((t) => t.team));
+
+  const weeks = listWeeks(from, to)
+    .filter((w) => zonedMidnight(w.weekStart, timeZone) <= nowMs)
+    .map(({ weekStart, weekEnd }) => {
+      const snapshot = Math.min(measurePoint(weekStart, timeZone), nowMs);
+      const previous = measurePoint(addDays(weekStart, -7), timeZone);
+      const total: WipCounts = { wip: 0, done: 0 };
+      const byTeam: Record<string, WipCounts> = {};
+      for (const team of teams) byTeam[team] = { wip: 0, done: 0 };
+
+      for (const t of tickets) {
+        const counts = byTeam[t.team];
+        if (t.periods.some((p) => p.start <= snapshot && (p.end === null || p.end > snapshot))) {
+          counts.wip += 1;
+          total.wip += 1;
+        }
+        if (t.doneAt !== null && t.doneAt > previous && t.doneAt <= snapshot) {
+          counts.done += 1;
+          total.done += 1;
+        }
+      }
+      return { weekStart, weekEnd, measuredAt: new Date(snapshot).toISOString(), total, byTeam };
+    });
+
+  return { weeks, teams };
+}
