@@ -14,6 +14,7 @@ import {
   teamThreshold,
   thresholdLabel,
   validateWipPeriod,
+  WIP_WORKFLOW_CHANGE_DATE,
 } from './wipChart';
 import { WIP_DATA, WIP_SETTINGS, WIP_TEAMS } from '@/test/fixtures/wip';
 
@@ -26,11 +27,12 @@ describe('buildWipRows', () => {
     expect(rows[0]).toMatchObject({ wip: 12, done: 3 });
   });
 
-  it('CT-79 : toutes les équipes → total du serveur (ticket sur deux boards compté une fois)', () => {
+  it('CT-79 : « Toutes » → total du serveur ; équipes cochées → somme de leurs tickets', () => {
     const weeks = WIP_DATA.weeks.map((w, i) => (i === 0 ? { ...w, total: { wip: 10, done: 3 } } : w));
     const { rows } = buildWipRows({ ...WIP_DATA, weeks }, [], NOW);
     expect(rows[0]).toMatchObject({ wip: 10, done: 3 });
     expect(buildWipRows({ ...WIP_DATA, weeks }, ['Team A', 'Team B'], NOW).rows[0]).toMatchObject({ wip: 9 });
+    expect(buildWipRows({ ...WIP_DATA, weeks }, WIP_TEAMS, NOW).rows[0]).toMatchObject({ wip: 12, threshold: 21 });
   });
 
   it('CT-28 : deux équipes → somme et une série par équipe, la troisième absente', () => {
@@ -50,6 +52,12 @@ describe('buildWipRows', () => {
     const { rows } = buildWipRows(WIP_DATA, ['Team A'], NOW);
     expect(rows).toHaveLength(12);
     expect(rows.find((r) => r.weekStart === '2026-09-07')).toMatchObject({ wip: 0, done: 0, label: '07/09' });
+  });
+
+  it('marque la semaine qui contient le 12/10/2026', () => {
+    const { rows } = buildWipRows(WIP_DATA, [], NOW);
+    expect(rows.find((r) => r.workflowChange)?.weekStart).toBe(WIP_WORKFLOW_CHANGE_DATE);
+    expect(rows.filter((r) => r.workflowChange)).toHaveLength(1);
   });
 
   it('pas de semaine future ajoutée', () => {
@@ -72,6 +80,7 @@ describe('buildWipRows', () => {
   it('CT-38 : seuils 12 + 9 → 21, dépassement évalué contre 21', () => {
     const { threshold, rows } = buildWipRows(WIP_DATA, ['Team A', 'Team B'], NOW);
     expect(threshold).toEqual({ value: 21, partial: false });
+    expect(thresholdLabel(threshold, true)).toBe('Somme des seuils : 21');
     expect(rows[1]).toMatchObject({ wip: 13, over: false, gap: -8 });
   });
 

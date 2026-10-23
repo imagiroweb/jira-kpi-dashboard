@@ -28,7 +28,7 @@ Suivre chaque semaine le travail en cours (WIP) des équipes de développement e
 | Projets (repli) | Seulement si aucun board n'est exploitable : `JIRA_WIP_PROJECT_KEYS` (liste séparée par des virgules), sinon tous les projets Jira configurés sauf le projet Support (`JIRA_SUPPORT_PROJECT_KEY`, défaut SB). |
 | Types suivis | `JIRA_WIP_ISSUE_TYPES` ; défaut : US, Tâche Tech, Bug, Bug dev (comparaison insensible à la casse). Un type absent de Jira est ignoré (avertissement dans les logs). Sous-tâches, épics et légendes toujours exclues. |
 | Équipe (repli) | Sans board exploitable : valeur actuelle du champ équipe Jira (`JIRA_TEAM_FIELD`, défaut `customfield_10001` ; texte, option ou première valeur d'une liste). Vide : « Sans équipe ». |
-| Statuts | Historique lu via `changelog/bulkfetch` (dates en millisecondes epoch, converties en ISO). Défaut : départ « In Progress », arrivée « Go Prod ». Noms comparés sans tenir compte de la casse, des accents, des espaces ni de la ponctuation : « In Progress » vise aussi « --In Progress-- » et « Go Prod » vise « --Go Prod-- », « GO-PROD »… (statuts décorés des workflows Jira). |
+| Statuts | Historique lu via `changelog/bulkfetch` (dates en millisecondes epoch, converties en ISO). Défaut : départ « --In Progress-- », arrivée « --GO PROD-- » (le statut Jira « --Go Prod-- »). Les anciens défauts « In Progress » et « Go Prod » encore enregistrés sont lus comme ces deux statuts. La casse, les accents et les espaces sont ignorés ; les tirets font partie du nom : « --In Progress-- » n'est pas « In Progress », « --GO PROD-- » n'est pas « GO PROD » ni « GO-PROD ». |
 
 ### Entrée, sortie et retours dans le WIP
 
@@ -46,6 +46,15 @@ Calcul sur l'historique des statuts de chaque ticket, dans l'ordre chronologique
 
 Date de terminaison d'un ticket = son **dernier** passage en statut d'arrivée (après une entrée dans le WIP).
 
+### Changement de workflow le 12/10/2026
+
+| Période | Sortie comptée terminée | Reste dans le WIP |
+|---|---|---|
+| Avant le 12/10/2026, minuit, heure de Paris | « --Terminé-- » | « --Go Recette-- », et « --GO PROD-- » s'il apparaît (ce statut n'était pas dans le flux) |
+| Depuis le 12/10/2026 | « --GO PROD-- » (statut Jira « --Go Prod-- ») | les statuts intermédiaires, dont « --Go Recette-- ». « --Terminé-- » sort du WIP sans être compté terminé (catégorie Jira terminé) |
+
+Le graphique marque la semaine du 12/10 et rappelle ce changement. Un passage à « --Terminé-- » le 11/10 à 23:30 compte encore ; le 12/10 à 00:30, non.
+
 ### Mesure hebdomadaire
 
 | Notion | Règle |
@@ -54,7 +63,7 @@ Date de terminaison d'un ticket = son **dernier** passage en statut d'arrivée (
 | Point de mesure | Vendredi 14:00, heure de Paris. Semaine en cours avant ce point : maintenant. |
 | WIP de la semaine | Tickets dans le WIP au point de mesure : entrée ≤ point < sortie (ou pas encore sortis). |
 | Terminés de la semaine | Tickets dont la date de terminaison est dans ]point de mesure précédent (vendredi d'avant 14:00) ; point de mesure]. Un ticket terminé le samedi compte donc la semaine suivante. |
-| Plusieurs équipes | Toutes les équipes : total de la semaine (ticket compté une fois). Sélection : somme des équipes sélectionnées. |
+| Plusieurs équipes | « Toutes » : total de la semaine (ticket compté une fois, même s'il est sur plusieurs boards). Équipes cochées : somme de leurs tickets, et seuil = somme de leurs seuils (une équipe sans seuil rend cette somme partielle). |
 
 ### Seuils
 
@@ -62,7 +71,7 @@ Date de terminaison d'un ticket = son **dernier** passage en statut d'arrivée (
 |---|---|
 | Seuil d'une équipe | devs × max par dev de l'équipe (ou valeur par défaut, 3 au départ). |
 | Pas de seuil | Équipe non réglée, 0 dev, ou « Sans équipe » (ne peut pas avoir de seuil). |
-| Seuil global / de la sélection | Somme des seuils définis des équipes prises en compte. |
+| Seuil global / de la sélection | Somme des seuils définis des équipes prises en compte. Plusieurs équipes cochées : le libellé est « Somme des seuils », aligné sur la courbe « WIP sélection ». |
 | Seuil partiel | Au moins une équipe prise en compte sans seuil alors qu'une autre en a un : « Seuil partiel : N ». Aucune équipe avec seuil : « Seuil non défini ». |
 | Dépassement | WIP strictement supérieur au seuil ; écart = WIP − seuil. |
 | Correspondance équipe | Nom comparé sans tenir compte de la casse. |

@@ -7,12 +7,17 @@ import {
   computeWipTicket,
   extractStatusTransitions,
   isWipEligibleIssueType,
+  LEGACY_WIP_END_STATUSES,
+  LEGACY_WIP_START_STATUSES,
   listWeeks,
   measurePoint,
   mondayOf,
   normalizeStatusName,
   parseStatusList,
+  preferDecoratedDefaults,
+  PREVIOUS_WIP_END_STATUSES,
   resolveStatusNames,
+  WIP_WORKFLOW_CHANGE_DATE,
   zonedIsoDate,
   readTeamField,
   type WipWeek,
@@ -54,8 +59,8 @@ export class WipService {
     const doc = await WipSettings.findOne({ key: 'default' }).lean();
     if (!doc) return { ...DEFAULT_WIP_SETTINGS };
     return {
-      startStatuses: doc.startStatuses?.length ? doc.startStatuses : DEFAULT_WIP_SETTINGS.startStatuses,
-      endStatuses: doc.endStatuses?.length ? doc.endStatuses : DEFAULT_WIP_SETTINGS.endStatuses,
+      startStatuses: preferDecoratedDefaults(doc.startStatuses, LEGACY_WIP_START_STATUSES, DEFAULT_WIP_SETTINGS.startStatuses),
+      endStatuses: preferDecoratedDefaults(doc.endStatuses, LEGACY_WIP_END_STATUSES, DEFAULT_WIP_SETTINGS.endStatuses),
       defaultMaxPerDev: doc.defaultMaxPerDev ?? DEFAULT_WIP_SETTINGS.defaultMaxPerDev,
       teams: (doc.teams ?? []).map((t) => ({ team: t.team, devCount: t.devCount, maxPerDev: t.maxPerDev ?? null })),
     };
@@ -128,7 +133,7 @@ export class WipService {
       this.keepExistingIssueTypes(parseStatusList(process.env.JIRA_WIP_ISSUE_TYPES, DEFAULT_WIP_ISSUE_TYPES)),
       this.getJiraStatuses(),
     ]);
-    // « In Progress » saisi doit aussi viser « --In Progress-- » des workflows décorés (cf. normalizeStatusName).
+    // La casse seule est ignorée : « --GO PROD-- » vise « --Go Prod-- », pas « GO PROD » ni « GO-PROD ».
     const jiraStatusNames = jiraStatuses.map((s) => s.name);
     const startStatuses = resolveStatusNames(settings.startStatuses, jiraStatusNames);
     const endStatuses = resolveStatusNames(settings.endStatuses, jiraStatusNames);
@@ -172,7 +177,13 @@ export class WipService {
     );
     const changelogs = tracked.length > 0 ? await jiraClient.getFieldChangelogs(tracked.map((i) => String(i.id)), 'status') : new Map();
 
-    const config = { startStatuses, endStatuses, closedStatuses };
+    const config = {
+      startStatuses,
+      endStatuses,
+      closedStatuses,
+      previousEndStatuses: resolveStatusNames(PREVIOUS_WIP_END_STATUSES, jiraStatusNames),
+      workflowChangeOn: WIP_WORKFLOW_CHANGE_DATE,
+    };
     const tickets = tracked.map((i) =>
       computeWipTicket(
         {
@@ -199,7 +210,7 @@ export class WipService {
   }
 
   /**
-   * Statuts saisis absents de Jira (comparaison souple, cf. normalizeStatusName). Liste vide si Jira ne répond
+   * Statuts saisis absents de Jira (casse et accents ignorés, tirets conservés). Liste vide si Jira ne répond
    * pas : la vérification est alors sautée plutôt que de bloquer l'enregistrement.
    */
   async findUnknownStatuses(names: string[]): Promise<string[]> {

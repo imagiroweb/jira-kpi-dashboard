@@ -84,7 +84,9 @@ describe('WipPage', () => {
     expect(screen.getByText('Seuil : 12')).toBeInTheDocument();
 
     fireEvent.click(within(teams).getByRole('button', { name: 'Team C' }));
-    expect(screen.getByText('Seuil partiel : 12')).toBeInTheDocument();
+    expect(screen.getByText('Somme des seuils')).toBeInTheDocument();
+    expect(screen.getByText('Somme partielle des seuils : 12')).toBeInTheDocument();
+    expect(screen.getByText('Somme des équipes choisies')).toBeInTheDocument();
 
     const table = screen.getByRole('table');
     const rowC = within(table).getByText('Team C').closest('tr')!;
@@ -178,6 +180,7 @@ describe('WipTooltipContent et WipDot (CT-42, CT-69)', () => {
     threshold: 12,
     over: true,
     gap: 1,
+    workflowChange: false,
     teams: { 'Team A': 13 },
   };
 

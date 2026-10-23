@@ -1,8 +1,8 @@
 /**
  * Suivi hebdomadaire du WIP (travail en cours) : règles pures, sans I/O (spec issue #79).
  *
- * Un ticket entre dans le WIP à son premier passage dans un statut de départ (ex. « In Progress »).
- * Il en sort quand il passe dans un statut d'arrivée (ex. « Go Prod », compté comme terminé) ou dans
+ * Un ticket entre dans le WIP à son premier passage dans un statut de départ (ex. « --In Progress-- »).
+ * Il en sort quand il passe dans un statut d'arrivée (ex. « --GO PROD-- », compté comme terminé) ou dans
  * un autre statut de catégorie « terminé » (ex. annulé, non compté). S'il quitte ensuite ce statut
  * pour un statut non terminé, il revient dans le WIP.
  *
@@ -25,8 +25,19 @@ export const WIP_TIME_ZONE = 'Europe/Paris';
 export const WIP_MEASURE_DAY_OFFSET = 4;
 export const WIP_MEASURE_HOUR = 14;
 
-export const DEFAULT_WIP_START_STATUSES = ['In Progress'];
-export const DEFAULT_WIP_END_STATUSES = ['Go Prod'];
+/** Statuts du workflow courant (boards Cook, Brigade, Supply). Les tirets font partie du nom. */
+export const DEFAULT_WIP_START_STATUSES = ['--In Progress--'];
+export const DEFAULT_WIP_END_STATUSES = ['--GO PROD--'];
+/**
+ * Changement de workflow Jira (minuit, heure de Paris). Avant cette date, le flux allait de
+ * « --In Progress-- » à « --Go Recette-- » puis « --Terminé-- » : le WIP sortait à « --Terminé-- »,
+ * sans « --GO PROD-- ». Depuis, la sortie comptée terminée est « --GO PROD-- ».
+ */
+export const WIP_WORKFLOW_CHANGE_DATE = '2026-10-12';
+export const PREVIOUS_WIP_END_STATUSES = ['--Terminé--'];
+/** Anciens défauts, sans tirets : encore présents en base tant que personne n'a enregistré les réglages. */
+export const LEGACY_WIP_START_STATUSES = ['In Progress'];
+export const LEGACY_WIP_END_STATUSES = ['Go Prod'];
 /** Types de tickets suivis (réponse de BDR sur l'issue #79). */
 export const DEFAULT_WIP_ISSUE_TYPES = ['US', 'Tâche Tech', 'Bug', 'Bug dev'];
 
@@ -52,6 +63,13 @@ export interface WipStatusConfig {
   endStatuses: string[];
   /** Statuts de catégorie Jira « terminé » : ils sortent un ticket du WIP sans le compter terminé. */
   closedStatuses?: string[];
+  /**
+   * Statut d'arrivée avant `workflowChangeOn` (ex. « --Terminé-- »). À partir de cette date,
+   * seuls `endStatuses` comptent comme sortie terminée.
+   */
+  previousEndStatuses?: string[];
+  /** Jour du changement de workflow (YYYY-MM-DD, minuit dans le fuseau de mesure). */
+  workflowChangeOn?: string;
 }
 
 export interface WipIssueInput {
@@ -106,12 +124,24 @@ export function parseStatusList(raw: string | string[] | undefined | null, fallb
 }
 
 /**
- * Forme comparable d'un nom de statut : sans casse, accents, espaces ni ponctuation. Les workflows
- * Jira décorent souvent leurs statuts (« --In Progress-- », « GO-PROD ») : ils doivent correspondre
- * aux noms saisis dans les réglages (« In Progress », « Go Prod »).
+ * Forme comparable d'un nom de statut : casse, accents et espaces ignorés. Les tirets et le reste
+ * de la ponctuation font partie du nom : « --In Progress-- » n'est pas « In Progress », et
+ * « --GO PROD-- » n'est pas « GO PROD » ni « GO-PROD ». « --GO PROD-- » correspond à « --Go Prod-- ».
  */
 export const normalizeStatusName = (s: string) =>
-  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]/g, '');
+  s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().trim().replace(/\s+/g, ' ');
+
+/**
+ * Remplace les anciens défauts « In Progress » / « Go Prod » par les statuts décorés du workflow.
+ * Une liste personnalisée est conservée telle quelle.
+ */
+export function preferDecoratedDefaults(statuses: string[] | undefined, legacy: string[], decorated: string[]): string[] {
+  const list = (statuses ?? []).map((s) => s.trim()).filter((s) => s.length > 0);
+  if (list.length === 0) return decorated;
+  const sameLegacy =
+    list.length === legacy.length && list.every((s, i) => normalizeStatusName(s) === normalizeStatusName(legacy[i]));
+  return sameLegacy ? decorated : list;
+}
 
 const normalize = normalizeStatusName;
 
@@ -165,7 +195,12 @@ export function extractStatusTransitions(histories: ChangeHistoryLike[]): Status
 export function computeWipTicket(issue: WipIssueInput, config: WipStatusConfig): WipTicket {
   const starts = new Set(config.startStatuses.map(normalize));
   const ends = new Set(config.endStatuses.map(normalize));
+  const previousEnds = new Set((config.previousEndStatuses ?? []).map(normalize));
+  const changeAt = config.workflowChangeOn ? zonedMidnight(config.workflowChangeOn) : null;
   const closed = new Set((config.closedStatuses ?? []).map(normalize));
+  // Avant le changement : seule l'ancienne sortie (ex. « --Terminé-- ») compte. Après : les sorties courantes.
+  const isEndStatus = (status: string, at: number) =>
+    changeAt !== null && at < changeAt ? previousEnds.has(status) : ends.has(status);
   const transitions = issue.transitions
     .map((t) => ({ at: Date.parse(t.at), to: normalize(t.to), from: t.from ?? null }))
     .filter((t) => !Number.isNaN(t.at))
@@ -185,7 +220,7 @@ export function computeWipTicket(issue: WipIssueInput, config: WipStatusConfig):
   let openSince: number | null = null;
 
   for (const t of transitions) {
-    const isEnd = ends.has(t.to);
+    const isEnd = isEndStatus(t.to, t.at);
     const isClosed = isEnd || closed.has(t.to);
     if (isEnd && started) doneAt = t.at;
     if (openSince !== null) {

@@ -88,8 +88,8 @@ describe('WipService', () => {
     ]);
     mockGetChangelogs.mockResolvedValue(
       new Map([
-        ['1', [history('2026-09-08T10:00:00+02:00', 'In Progress')]],
-        ['4', [history('2026-09-08T10:00:00+02:00', 'In Progress'), history('2026-09-10T10:00:00+02:00', 'Annulé')]],
+        ['1', [history('2026-09-08T10:00:00+02:00', '--In Progress--')]],
+        ['4', [history('2026-09-08T10:00:00+02:00', '--In Progress--'), history('2026-09-10T10:00:00+02:00', 'Annulé')]],
       ])
     );
 
@@ -130,7 +130,7 @@ describe('WipService', () => {
     expect(res.weeks).toHaveLength(1);
   });
 
-  it('cherche aussi les statuts décorés du workflow (« --In Progress-- », « --Go Prod-- »)', async () => {
+  it('cible --In Progress-- et --GO PROD-- sans les anciens noms In Progress, GO PROD ou GO-PROD', async () => {
     mockGet.mockImplementation((path: string) =>
       Promise.resolve(
         path === '/rest/api/3/issuetype'
@@ -138,6 +138,8 @@ describe('WipService', () => {
           : [
               { name: 'In Progress', statusCategory: { key: 'indeterminate' } },
               { name: '--In Progress--', statusCategory: { key: 'indeterminate' } },
+              { name: 'GO PROD', statusCategory: { key: 'indeterminate' } },
+              { name: 'GO-PROD', statusCategory: { key: 'indeterminate' } },
               { name: '--Go Prod--', statusCategory: { key: 'indeterminate' } },
             ]
       )
@@ -148,8 +150,12 @@ describe('WipService', () => {
     const res = await service.getWeekly('2026-09-07', '2026-09-13', NOW);
 
     const jql = mockSearchAll.mock.calls[0][0];
-    expect(jql).toContain('status was in ("In Progress", "--In Progress--")');
-    expect(jql).toContain('status not in ("Go Prod", "--Go Prod--")');
+    expect(jql).toContain('status was in ("--In Progress--")');
+    expect(jql).not.toContain('"In Progress"');
+    expect(jql).toContain('"--GO PROD--"');
+    expect(jql).toContain('"--Go Prod--"');
+    expect(jql).not.toContain('"GO PROD"');
+    expect(jql).not.toContain('"GO-PROD"');
     expect(res.weeks.map((w) => w.total.wip)).toEqual([1]);
   });
 
@@ -162,8 +168,8 @@ describe('WipService', () => {
     expect(mockSearchAll.mock.calls[0][0]).toContain('issuetype in ("US", "Bug dev")');
   });
 
-  it('statuts inconnus de Jira détectés (casse et ponctuation ignorées) ; Jira muet → aucune vérification', async () => {
-    expect(await service.findUnknownStatuses(['in progress', 'Go-Prod', 'Livré'])).toEqual(['Livré']);
+  it('statuts inconnus de Jira détectés (casse ignorée, tirets conservés) ; Jira muet → aucune vérification', async () => {
+    expect(await service.findUnknownStatuses(['in progress', 'Go-Prod', 'Livré'])).toEqual(['Go-Prod', 'Livré']);
     globalCache.clear();
     mockGet.mockRejectedValue(new Error('down'));
     expect(await service.findUnknownStatuses(['Go-Prod'])).toEqual([]);
@@ -176,12 +182,22 @@ describe('WipService', () => {
     expect(mockSearchAll).toHaveBeenCalledTimes(2);
   });
 
+  it('réécrit les anciens défauts In Progress / Go Prod vers le format décoré', async () => {
+    mockFindOne.mockReturnValue({
+      lean: () => Promise.resolve({ startStatuses: ['In Progress'], endStatuses: ['Go Prod'], teams: [] }),
+    });
+    expect(await service.getSettings()).toMatchObject({
+      startStatuses: ['--In Progress--'],
+      endStatuses: ['--GO PROD--'],
+    });
+  });
+
   it('lit les réglages enregistrés, avec repli sur les statuts par défaut', async () => {
     mockFindOne.mockReturnValue({
       lean: () => Promise.resolve({ startStatuses: [], endStatuses: ['Livré'], teams: [{ team: 'A', devCount: 2 }] }),
     });
     expect(await service.getSettings()).toEqual({
-      startStatuses: ['In Progress'],
+      startStatuses: ['--In Progress--'],
       endStatuses: ['Livré'],
       defaultMaxPerDev: 3,
       teams: [{ team: 'A', devCount: 2, maxPerDev: null }],
@@ -236,8 +252,8 @@ describe('WipService', () => {
       );
       mockGetChangelogs.mockResolvedValue(
         new Map([
-          ['1', [history('2026-09-08T10:00:00+02:00', 'In Progress')]],
-          ['2', [history('2026-09-08T10:00:00+02:00', 'In Progress')]],
+          ['1', [history('2026-09-08T10:00:00+02:00', '--In Progress--')]],
+          ['2', [history('2026-09-08T10:00:00+02:00', '--In Progress--')]],
         ])
       );
 

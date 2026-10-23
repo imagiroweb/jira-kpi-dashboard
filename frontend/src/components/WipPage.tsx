@@ -18,12 +18,15 @@ import {
   buildWipRows,
   defaultWipPeriod,
   formatMeasuredAt,
+  formatDayMonth,
   formatWeekRange,
   NO_TEAM,
   parseTeamDrafts,
   teamThreshold,
   thresholdLabel,
   validateWipPeriod,
+  WIP_WORKFLOW_CHANGE_DATE,
+  WIP_WORKFLOW_CHANGE_NOTE,
   type WipRow,
   type WipSettings,
   type WipWeeklyData,
@@ -88,6 +91,7 @@ export function WipTooltipContent({ row, teams }: { row: WipRow; teams: string[]
           <AlertTriangle className="h-3 w-3" /> Seuil dépassé
         </p>
       )}
+      {row.workflowChange && <p className="mt-2 border-t border-surface-700 pt-2 text-amber-300">{WIP_WORKFLOW_CHANGE_NOTE}</p>}
       {teams.length > 1 && (
         <ul className="mt-2 space-y-0.5 border-t border-surface-700 pt-2 text-surface-400">
           {teams.map((t) => (
@@ -161,7 +165,9 @@ export function WipPage() {
   const chart = useMemo(() => (data ? buildWipRows(data, selected) : null), [data, selected]);
   const allTeams = data?.teams ?? [];
   const showTeamLines = (chart?.teams.length ?? 0) > 1 && selected.length > 1;
+  const summedThreshold = selected.length > 1 && (chart?.teams.length ?? 0) > 1;
   const lastRow = chart?.rows[chart.rows.length - 1];
+  const workflowLabel = chart?.rows.some((row) => row.workflowChange) ? formatDayMonth(WIP_WORKFLOW_CHANGE_DATE) : null;
 
   const startEditing = () => {
     if (!data) return;
@@ -224,8 +230,8 @@ export function WipPage() {
         <div>
           <h1 className="text-2xl font-bold text-surface-100">Suivi WIP</h1>
           <p className="text-sm text-surface-400">
-            Tickets en cours (de {data?.settings.startStatuses.join(', ') ?? 'In Progress'} à{' '}
-            {data?.settings.endStatuses.join(', ') ?? 'Go Prod'}), mesurés chaque vendredi à 14:00, et tickets terminés depuis la mesure précédente.
+            Tickets en cours (de {data?.settings.startStatuses.join(', ') ?? '--In Progress--'} à{' '}
+            {data?.settings.endStatuses.join(', ') ?? '--GO PROD--'}), mesurés chaque vendredi à 14:00, et tickets terminés depuis la mesure précédente.
           </p>
         </div>
       </header>
@@ -321,9 +327,11 @@ export function WipPage() {
               <p className="text-3xl font-bold tabular-nums text-surface-100">{lastRow?.done ?? 0}</p>
             </div>
             <div className="card-glass p-4">
-              <p className="text-sm text-surface-400">{selected.length === 0 ? 'Seuil global' : 'Seuil de la sélection'}</p>
+              <p className="text-sm text-surface-400">
+                {summedThreshold ? 'Somme des seuils' : selected.length === 0 ? 'Seuil global' : 'Seuil de la sélection'}
+              </p>
               <p className="text-3xl font-bold tabular-nums text-surface-100">{chart.threshold.value ?? '–'}</p>
-              <p className="mt-1 text-xs text-surface-400">{thresholdLabel(chart.threshold)}</p>
+              <p className="mt-1 text-xs text-surface-400">{thresholdLabel(chart.threshold, summedThreshold)}</p>
             </div>
           </section>
 
@@ -333,6 +341,7 @@ export function WipPage() {
               {data.ticketCount} tickets analysés ·{' '}
               {data.boards && data.boards.length > 0 ? `boards ${data.boards.join(', ')}` : `projets ${data.projectKeys.join(', ') || '—'}`} · mesure le vendredi à 14:00 (heure de Paris), semaine en cours : maintenant
             </p>
+            <p className="mb-4 text-xs text-amber-300/90">{WIP_WORKFLOW_CHANGE_NOTE}</p>
             <div className="h-80">
               <ResponsiveContainer width="100%" height="100%">
                 <ComposedChart data={chart.rows} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
@@ -375,7 +384,15 @@ export function WipPage() {
                       y={chart.threshold.value}
                       stroke={OVER_COLOR}
                       strokeDasharray="6 4"
-                      label={{ value: thresholdLabel(chart.threshold), position: 'insideTopRight', fill: '#fca5a5', fontSize: 11 }}
+                      label={{ value: thresholdLabel(chart.threshold, summedThreshold), position: 'insideTopRight', fill: '#fca5a5', fontSize: 11 }}
+                    />
+                  )}
+                  {workflowLabel && (
+                    <ReferenceLine
+                      x={workflowLabel}
+                      stroke="#fbbf24"
+                      strokeDasharray="3 3"
+                      label={{ value: '12/10', position: 'insideTopLeft', fill: '#fbbf24', fontSize: 11 }}
                     />
                   )}
                 </ComposedChart>
@@ -411,6 +428,15 @@ export function WipPage() {
                   </tr>
                 </thead>
                 <tbody>
+                  {summedThreshold && lastRow && (
+                    <tr className="border-t border-surface-800 font-medium text-surface-100">
+                      <td className="py-2" colSpan={3}>
+                        Somme des équipes choisies
+                      </td>
+                      <td className="py-2 tabular-nums">{chart.threshold.value ?? 'Seuil non défini'}</td>
+                      <td className="py-2 tabular-nums">{lastRow.wip}</td>
+                    </tr>
+                  )}
                   {allTeams.map((team) => {
                     const row = data.settings.teams.find((t) => t.team.toLowerCase() === team.toLowerCase());
                     const threshold = teamThreshold(data.settings, team);

@@ -6,6 +6,13 @@
 export const NO_TEAM = 'Sans équipe';
 export const MAX_WIP_WEEKS = 52;
 export const DEFAULT_WIP_WEEKS = 12;
+/**
+ * Même date que `WIP_WORKFLOW_CHANGE_DATE` côté backend. Avant : sortie à « --Terminé-- »
+ * (flux « --In Progress-- » → « --Go Recette-- » → « --Terminé-- »). Depuis : sortie à « --GO PROD-- ».
+ */
+export const WIP_WORKFLOW_CHANGE_DATE = '2026-10-12';
+export const WIP_WORKFLOW_CHANGE_NOTE =
+  'Avant le 12/10/2026, le flux allait de --In Progress-- à --Go Recette-- puis --Terminé-- : le WIP se terminait à --Terminé--, sans --GO PROD--. Depuis cette date, la sortie du WIP est --GO PROD--.';
 export const DEFAULT_MAX_TICKETS_PER_DEV = 3;
 export const MAX_DEV_COUNT = 50;
 export const MAX_TICKETS_PER_DEV = 20;
@@ -72,6 +79,8 @@ export interface WipRow {
   gap: number | null;
   /** WIP de chaque équipe sélectionnée, clé = nom de l'équipe. */
   teams: Record<string, number>;
+  /** Semaine qui contient le changement de workflow du 12/10/2026. */
+  workflowChange: boolean;
 }
 
 const DAY_MS = 86400000;
@@ -171,8 +180,9 @@ export function formatWeekRange(weekStart: string, weekEnd: string): string {
  */
 export function buildWipRows(data: WipWeeklyData, selected: string[], now: Date = new Date()): { rows: WipRow[]; teams: string[]; threshold: WipThreshold } {
   const teams = effectiveTeams(data.teams, selected);
-  // Toutes les équipes : total du serveur, où un ticket présent sur plusieurs boards ne compte qu'une fois.
-  const allTeams = teams.length === data.teams.length;
+  // « Toutes » : total du serveur, où un ticket présent sur plusieurs boards ne compte qu'une fois.
+  // Équipes cochées : somme de leurs tickets, comparable à la somme de leurs seuils.
+  const explicitSelection = selected.some((t) => data.teams.includes(t));
   const threshold = combinedThreshold(data.settings, teams);
   const byStart = new Map(data.weeks.map((w) => [w.weekStart, w]));
   const currentMonday = mondayOf(localIsoDate(now));
@@ -190,7 +200,7 @@ export function buildWipRows(data: WipWeeklyData, selected: string[], now: Date 
         wip += c.wip;
         done += c.done;
       }
-      if (allTeams && week) {
+      if (!explicitSelection && week) {
         wip = week.total.wip;
         done = week.total.done;
       }
@@ -206,15 +216,26 @@ export function buildWipRows(data: WipWeeklyData, selected: string[], now: Date 
         over: gap !== null && gap > 0,
         gap,
         teams: perTeam,
+        workflowChange: weekStart <= WIP_WORKFLOW_CHANGE_DATE && WIP_WORKFLOW_CHANGE_DATE <= weekEnd,
       };
     });
   return { rows, teams, threshold };
 }
 
-/** Libellé du seuil affiché : valeur, « Seuil partiel » ou « Seuil non défini ». */
-export function thresholdLabel(threshold: WipThreshold): string {
+/**
+ * Libellé du seuil. `summed` : plusieurs équipes choisies, le seuil est leur somme
+ * (comme la courbe « WIP sélection », qui additionne leurs tickets).
+ */
+export function thresholdLabel(threshold: WipThreshold, summed = false): string {
   if (threshold.value === null) return 'Seuil non défini';
-  return threshold.partial ? `Seuil partiel : ${threshold.value}` : `Seuil : ${threshold.value}`;
+  const prefix = summed
+    ? threshold.partial
+      ? 'Somme partielle des seuils'
+      : 'Somme des seuils'
+    : threshold.partial
+      ? 'Seuil partiel'
+      : 'Seuil';
+  return `${prefix} : ${threshold.value}`;
 }
 
 /** Brouillon d'édition des réglages : saisies texte converties et contrôlées avant envoi. */

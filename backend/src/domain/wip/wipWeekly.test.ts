@@ -13,8 +13,11 @@ import {
   measurePoint,
   mondayOf,
   NO_TEAM,
+  LEGACY_WIP_END_STATUSES,
+  LEGACY_WIP_START_STATUSES,
   normalizeStatusName,
   parseStatusList,
+  preferDecoratedDefaults,
   readTeamField,
   resolveStatusNames,
   sortTeams,
@@ -50,23 +53,113 @@ describe('parseStatusList', () => {
 });
 
 describe('statuts décorés des workflows Jira', () => {
-  it('normalizeStatusName ignore casse, accents, espaces et ponctuation', () => {
-    expect(normalizeStatusName('--In Progress--')).toBe(normalizeStatusName('In Progress'));
-    expect(normalizeStatusName('GO-PROD')).toBe(normalizeStatusName('Go Prod'));
+  const decorated: WipStatusConfig = {
+    startStatuses: ['--In Progress--'],
+    endStatuses: ['--GO PROD--'],
+    closedStatuses: ['Annulé', '--GO PROD--'],
+  };
+
+  it('normalizeStatusName ignore la casse et les accents, et conserve les tirets', () => {
+    expect(normalizeStatusName('--GO PROD--')).toBe(normalizeStatusName('--Go Prod--'));
+    expect(normalizeStatusName('  --In  Progress-- ')).toBe('--in progress--');
     expect(normalizeStatusName('Livré')).toBe('livre');
-    expect(normalizeStatusName('Dev In Progress')).not.toBe(normalizeStatusName('In Progress'));
+    expect(normalizeStatusName('--In Progress--')).not.toBe(normalizeStatusName('In Progress'));
+    expect(normalizeStatusName('--GO PROD--')).not.toBe(normalizeStatusName('GO PROD'));
+    expect(normalizeStatusName('--GO PROD--')).not.toBe(normalizeStatusName('GO-PROD'));
+    expect(normalizeStatusName('Dev In Progress')).not.toBe(normalizeStatusName('--In Progress--'));
   });
 
-  it('resolveStatusNames ajoute les noms Jira équivalents et garde les noms saisis', () => {
-    const jira = ['In Progress', '--In Progress--', 'Dev In Progress', '--Go Prod--', 'GO PROD'];
-    expect(resolveStatusNames(['In Progress'], jira)).toEqual(['In Progress', '--In Progress--']);
-    expect(resolveStatusNames(['Go Prod'], jira)).toEqual(['Go Prod', '--Go Prod--', 'GO PROD']);
+  it('resolveStatusNames aligne la casse sur Jira sans élargir aux anciens noms', () => {
+    const jira = ['In Progress', '--In Progress--', 'Dev In Progress', '--Go Prod--', 'GO PROD', 'GO-PROD'];
+    expect(resolveStatusNames(['--In Progress--'], jira)).toEqual(['--In Progress--']);
+    expect(resolveStatusNames(['--GO PROD--'], jira)).toEqual(['--GO PROD--', '--Go Prod--']);
     expect(resolveStatusNames(['Inconnu'], jira)).toEqual(['Inconnu']);
   });
 
-  it('un ticket passé par « --In Progress-- » compte dans le WIP réglé sur « In Progress »', () => {
-    const res = weekly(issue('AD-1', [['2026-09-08T10:00:00+02:00', '--In Progress--']]), '2026-09-07', '2026-09-13');
-    expect(res.wip).toEqual([1]);
+  it('preferDecoratedDefaults ne réécrit que les anciens défauts', () => {
+    expect(preferDecoratedDefaults(['In Progress'], LEGACY_WIP_START_STATUSES, ['--In Progress--'])).toEqual(['--In Progress--']);
+    expect(preferDecoratedDefaults(['go prod'], LEGACY_WIP_END_STATUSES, ['--GO PROD--'])).toEqual(['--GO PROD--']);
+    expect(preferDecoratedDefaults(['In Progress', 'Dev'], LEGACY_WIP_START_STATUSES, ['--In Progress--'])).toEqual(['In Progress', 'Dev']);
+    expect(preferDecoratedDefaults([], LEGACY_WIP_START_STATUSES, ['--In Progress--'])).toEqual(['--In Progress--']);
+  });
+
+  it('un ticket passé par « --In Progress-- » compte ; « In Progress » ou « GO-PROD » non', () => {
+    expect(weekly(issue('AD-1', [['2026-09-08T10:00:00+02:00', '--In Progress--']]), '2026-09-07', '2026-09-13', decorated).wip).toEqual([1]);
+    expect(weekly(issue('AD-2', [['2026-09-08T10:00:00+02:00', 'In Progress']]), '2026-09-07', '2026-09-13', decorated).wip).toEqual([0]);
+    const done = weekly(
+      issue('AD-3', [['2026-09-08T10:00:00+02:00', '--In Progress--'], ['2026-09-10T10:00:00+02:00', '--Go Prod--']]),
+      '2026-09-07',
+      '2026-09-13',
+      decorated
+    );
+    expect(done).toEqual({ wip: [0], done: [1] });
+    const oldEnd = weekly(
+      issue('AD-4', [['2026-09-08T10:00:00+02:00', '--In Progress--'], ['2026-09-10T10:00:00+02:00', 'GO-PROD']]),
+      '2026-09-07',
+      '2026-09-13',
+      decorated
+    );
+    expect(oldEnd).toEqual({ wip: [1], done: [0] });
+  });
+});
+
+describe('changement de workflow du 12/10/2026', () => {
+  const flow: WipStatusConfig = {
+    startStatuses: ['--In Progress--'],
+    endStatuses: ['--GO PROD--'],
+    closedStatuses: ['--Terminé--', 'Annulé'],
+    previousEndStatuses: ['--Terminé--'],
+    workflowChangeOn: '2026-10-12',
+  };
+  const span = (input: WipIssueInput) => weekly(input, '2026-10-05', '2026-10-18', flow, new Date('2026-10-20T12:00:00+02:00'));
+
+  it('avant le 12/10, --Go Recette-- reste dans le WIP et --Terminé-- sort en terminé', () => {
+    const recette = issue('AD-1', [
+      ['2026-10-06T10:00:00+02:00', '--In Progress--'],
+      ['2026-10-07T10:00:00+02:00', '--Go Recette--'],
+    ]);
+    expect(span(recette)).toEqual({ wip: [1, 1], done: [0, 0] });
+
+    const done = issue('AD-2', [
+      ['2026-10-06T10:00:00+02:00', '--In Progress--'],
+      ['2026-10-08T10:00:00+02:00', '--Terminé--'],
+    ]);
+    expect(span(done)).toEqual({ wip: [0, 0], done: [1, 0] });
+  });
+
+  it('avant le 12/10, --GO PROD-- ne sort pas du WIP', () => {
+    const early = issue('AD-3', [
+      ['2026-10-06T10:00:00+02:00', '--In Progress--'],
+      ['2026-10-08T10:00:00+02:00', '--Go Prod--'],
+    ]);
+    expect(span(early)).toEqual({ wip: [1, 1], done: [0, 0] });
+  });
+
+  it('à partir du 12/10, --GO PROD-- termine et --Terminé-- sort sans compter terminé', () => {
+    const prod = issue('AD-4', [
+      ['2026-10-13T10:00:00+02:00', '--In Progress--'],
+      ['2026-10-14T10:00:00+02:00', '--Go Prod--'],
+    ]);
+    expect(span(prod)).toEqual({ wip: [0, 0], done: [0, 1] });
+
+    const skipped = issue('AD-5', [
+      ['2026-10-06T10:00:00+02:00', '--In Progress--'],
+      ['2026-10-13T10:00:00+02:00', '--Terminé--'],
+    ]);
+    expect(span(skipped)).toEqual({ wip: [1, 0], done: [0, 0] });
+  });
+
+  it('la bascule est à minuit, heure de Paris, le 12/10', () => {
+    const justBefore = issue('AD-6', [
+      ['2026-10-06T10:00:00+02:00', '--In Progress--'],
+      ['2026-10-11T23:30:00+02:00', '--Terminé--'],
+    ]);
+    const justAfter = issue('AD-7', [
+      ['2026-10-06T10:00:00+02:00', '--In Progress--'],
+      ['2026-10-12T00:30:00+02:00', '--Terminé--'],
+    ]);
+    expect(span(justBefore).done).toEqual([0, 1]);
+    expect(span(justAfter)).toEqual({ wip: [1, 0], done: [0, 0] });
   });
 });
 
