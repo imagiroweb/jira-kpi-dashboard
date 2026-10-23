@@ -28,7 +28,7 @@ Suivre chaque semaine le travail en cours (WIP) des équipes de développement e
 | Projets (repli) | Seulement si aucun board n'est exploitable : `JIRA_WIP_PROJECT_KEYS` (liste séparée par des virgules), sinon tous les projets Jira configurés sauf le projet Support (`JIRA_SUPPORT_PROJECT_KEY`, défaut SB). |
 | Types suivis | `JIRA_WIP_ISSUE_TYPES` ; défaut : US, Tâche Tech, Bug, Bug dev (comparaison insensible à la casse). Un type absent de Jira est ignoré (avertissement dans les logs). Sous-tâches, épics et légendes toujours exclues. |
 | Équipe (repli) | Sans board exploitable : valeur actuelle du champ équipe Jira (`JIRA_TEAM_FIELD`, défaut `customfield_10001` ; texte, option ou première valeur d'une liste). Vide : « Sans équipe ». |
-| Statuts | Défaut : départ « In Progress », arrivée « Go Prod ». Noms comparés sans tenir compte de la casse, des accents, des espaces ni de la ponctuation : « In Progress » vise aussi « --In Progress-- » et « Go Prod » vise « --Go Prod-- », « GO-PROD »… (statuts décorés des workflows Jira). |
+| Statuts | Historique lu via `changelog/bulkfetch` (dates en millisecondes epoch, converties en ISO). Défaut : départ « In Progress », arrivée « Go Prod ». Noms comparés sans tenir compte de la casse, des accents, des espaces ni de la ponctuation : « In Progress » vise aussi « --In Progress-- » et « Go Prod » vise « --Go Prod-- », « GO-PROD »… (statuts décorés des workflows Jira). |
 
 ### Entrée, sortie et retours dans le WIP
 

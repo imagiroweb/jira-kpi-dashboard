@@ -253,5 +253,15 @@ describe('JiraClient', () => {
       });
       expect(mockPost).toHaveBeenNthCalledWith(2, '/rest/api/3/changelog/bulkfetch', expect.objectContaining({ nextPageToken: 'next' }));
     });
+
+    it('convertit en ISO les dates renvoyées en millisecondes epoch par bulkfetch', async () => {
+      mockPost.mockResolvedValueOnce({
+        data: { issueChangeLogs: [{ issueId: '1', changeHistories: [{ created: 1791784848208, items: [] }] }] }
+      });
+
+      const result = await new JiraClient().getFieldChangelogs(['1'], 'status');
+
+      expect(result.get('1')?.[0].created).toBe('2026-10-12T06:00:48.208Z');
+    });
   });
 });
