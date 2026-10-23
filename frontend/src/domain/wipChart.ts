@@ -4,15 +4,18 @@
  */
 
 export const NO_TEAM = 'Sans équipe';
+export const UNASSIGNED = 'Non assigné';
+/** Signalé dès que le collaborateur a strictement plus de tickets dans le WIP. */
+export const WIP_PER_PERSON_LIMIT = 2;
 export const MAX_WIP_WEEKS = 52;
 export const DEFAULT_WIP_WEEKS = 12;
 /**
- * Même date que `WIP_WORKFLOW_CHANGE_DATE` côté backend. Avant : sortie à « --Terminé-- »
- * (flux « --In Progress-- » → « --Go Recette-- » → « --Terminé-- »). Depuis : sortie à « --GO PROD-- ».
+ * Même date que `WIP_WORKFLOW_CHANGE_DATE` côté backend. Avant : flux jusqu'à « --Terminé-- »,
+ * sans « --GO PROD-- ». Depuis : le WIP va jusqu'à « --Terminé-- », « --Go Prod-- » reste dedans.
  */
 export const WIP_WORKFLOW_CHANGE_DATE = '2026-10-12';
 export const WIP_WORKFLOW_CHANGE_NOTE =
-  'Avant le 12/10/2026, le flux allait de --In Progress-- à --Go Recette-- puis --Terminé-- : le WIP se terminait à --Terminé--, sans --GO PROD--. Depuis cette date, la sortie du WIP est --GO PROD--.';
+  'Avant le 12/10/2026, le flux allait de --In Progress-- à --Go Recette-- puis --Terminé--. Depuis cette date, le WIP va jusqu\'à --Terminé-- : --Go Prod-- reste dans le WIP.';
 export const DEFAULT_MAX_TICKETS_PER_DEV = 3;
 export const MAX_DEV_COUNT = 50;
 export const MAX_TICKETS_PER_DEV = 20;
@@ -53,7 +56,35 @@ export interface WipWeeklyData {
   /** Boards qui délimitent les équipes ; vide : équipes lues dans le champ équipe Jira. */
   boards?: string[];
   ticketCount: number;
+  /** Tickets dans le WIP au dernier point de mesure, assigné actuel. */
+  openTickets?: WipOpenTicket[];
   settings: WipSettings;
+}
+
+export interface WipOpenTicket {
+  key: string;
+  assignee: string;
+  teams: string[];
+  /** Statut au point de mesure. */
+  status: string;
+}
+
+export interface WipAssigneeTicket {
+  key: string;
+  status: string;
+}
+
+export interface WipAssigneeRow {
+  assignee: string;
+  count: number;
+  tickets: WipAssigneeTicket[];
+  /** Strictement plus de `WIP_PER_PERSON_LIMIT` tickets. */
+  over: boolean;
+}
+
+export interface WipStatusCount {
+  status: string;
+  count: number;
 }
 
 export interface WipThreshold {
@@ -124,19 +155,27 @@ export function validateWipPeriod(from: string, to: string): string | null {
   return null;
 }
 
-/** Seuil d'une équipe (devs × max par dev), ou null : non réglée, 0 dev ou « Sans équipe ». */
+/** Seules ces équipes ont un seuil. Les autres (Cook, Choco, Calson…) n'y entrent pas et ne le rendent pas partiel. */
+export const WIP_THRESHOLD_TEAMS = ['Brigade', 'Supply'];
+
+export function isWipThresholdTeam(team: string): boolean {
+  const key = team.trim().toLowerCase();
+  return WIP_THRESHOLD_TEAMS.some((name) => name.toLowerCase() === key);
+}
+
+/** Seuil d'une équipe (devs × max par dev), ou null : hors Brigade/Supply, non réglée, 0 dev ou « Sans équipe ». */
 export function teamThreshold(settings: WipSettings, team: string): number | null {
-  if (team === NO_TEAM) return null;
+  if (team === NO_TEAM || !isWipThresholdTeam(team)) return null;
   const row = settings.teams.find((t) => t.team.toLowerCase() === team.toLowerCase());
   if (!row || row.devCount <= 0) return null;
   return row.devCount * (row.maxPerDev ?? settings.defaultMaxPerDev);
 }
 
-/** Seuil cumulé des équipes : somme des seuils définis ; partiel s'il en manque. */
+/** Seuil cumulé : somme des seuils de Brigade et Supply présents dans `teams`. */
 export function combinedThreshold(settings: WipSettings, teams: string[]): WipThreshold {
   let value: number | null = null;
   let partial = false;
-  for (const team of teams) {
+  for (const team of teams.filter(isWipThresholdTeam)) {
     const t = teamThreshold(settings, team);
     if (t === null) partial = true;
     else value = (value ?? 0) + t;
@@ -148,6 +187,20 @@ export function combinedThreshold(settings: WipSettings, teams: string[]): WipTh
 export function effectiveTeams(allTeams: string[], selected: string[]): string[] {
   const kept = selected.filter((t) => allTeams.includes(t));
   return kept.length > 0 ? kept : allTeams;
+}
+
+/**
+ * Courbes WIP du graphique. « Toutes » : une courbe « WIP global ». Une équipe : une courbe à son nom.
+ * Plusieurs équipes : une courbe par équipe, sans courbe de somme.
+ */
+export function wipChartSeries(
+  selected: string[],
+  allTeams: string[]
+): { aggregateName: string | null; aggregateTeam: string | null; teamLines: string[] } {
+  const explicit = selected.filter((t) => allTeams.includes(t));
+  if (explicit.length === 0) return { aggregateName: 'WIP global', aggregateTeam: null, teamLines: [] };
+  if (explicit.length === 1) return { aggregateName: `WIP ${explicit[0]}`, aggregateTeam: explicit[0], teamLines: [] };
+  return { aggregateName: null, aggregateTeam: null, teamLines: explicit };
 }
 
 /** « 07/09 » */
@@ -172,6 +225,46 @@ export function formatMeasuredAt(iso: string): string {
 /** « 07/09 – 13/09 » */
 export function formatWeekRange(weekStart: string, weekEnd: string): string {
   return `${formatDayMonth(weekStart)} – ${formatDayMonth(weekEnd)}`;
+}
+
+/**
+ * Collaborateurs qui portent les tickets encore dans le WIP. La sélection d'équipes filtre ;
+ * un ticket présent sur plusieurs équipes ne compte qu'une fois. `over` : plus de 2 tickets.
+ */
+export function wipByAssignee(tickets: WipOpenTicket[] | undefined, selected: string[], allTeams: string[]): WipAssigneeRow[] {
+  const explicitSelection = selected.some((t) => allTeams.includes(t));
+  const kept = (tickets ?? []).filter((t) => !explicitSelection || t.teams.some((team) => selected.includes(team)));
+  const byName = new Map<string, Map<string, string>>();
+  for (const ticket of kept) {
+    const name = ticket.assignee.trim() || UNASSIGNED;
+    const byKey = byName.get(name) ?? new Map<string, string>();
+    if (!byKey.has(ticket.key)) byKey.set(ticket.key, ticket.status?.trim() || 'Statut inconnu');
+    byName.set(name, byKey);
+  }
+  return Array.from(byName.entries())
+    .map(([assignee, byKey]) => {
+      const list = Array.from(byKey.entries())
+        .map(([key, status]) => ({ key, status }))
+        .sort((a, b) => a.key.localeCompare(b.key, 'fr'));
+      return { assignee, count: list.length, tickets: list, over: list.length > WIP_PER_PERSON_LIMIT };
+    })
+    .sort((a, b) => b.count - a.count || a.assignee.localeCompare(b.assignee, 'fr'));
+}
+
+/** Tickets encore dans le WIP, regroupés par statut actuel. Un ticket sur plusieurs équipes ne compte qu'une fois. */
+export function wipByStatus(tickets: WipOpenTicket[] | undefined, selected: string[], allTeams: string[]): WipStatusCount[] {
+  const explicitSelection = selected.some((t) => allTeams.includes(t));
+  const kept = (tickets ?? []).filter((t) => !explicitSelection || t.teams.some((team) => selected.includes(team)));
+  const byStatus = new Map<string, Set<string>>();
+  for (const ticket of kept) {
+    const status = ticket.status?.trim() || 'Statut inconnu';
+    const keys = byStatus.get(status) ?? new Set<string>();
+    keys.add(ticket.key);
+    byStatus.set(status, keys);
+  }
+  return Array.from(byStatus.entries())
+    .map(([status, keys]) => ({ status, count: keys.size }))
+    .sort((a, b) => b.count - a.count || a.status.localeCompare(b.status, 'fr'));
 }
 
 /**
@@ -223,8 +316,7 @@ export function buildWipRows(data: WipWeeklyData, selected: string[], now: Date 
 }
 
 /**
- * Libellé du seuil. `summed` : plusieurs équipes choisies, le seuil est leur somme
- * (comme la courbe « WIP sélection », qui additionne leurs tickets).
+ * Libellé du seuil. `summed` : plusieurs équipes choisies, le seuil est leur somme.
  */
 export function thresholdLabel(threshold: WipThreshold, summed = false): string {
   if (threshold.value === null) return 'Seuil non défini';

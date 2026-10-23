@@ -9,6 +9,7 @@ import {
   countWeeks,
   extractStatusTransitions,
   isWipEligibleIssueType,
+  listOpenWipTickets,
   listWeeks,
   measurePoint,
   mondayOf,
@@ -18,7 +19,9 @@ import {
   normalizeStatusName,
   parseStatusList,
   preferDecoratedDefaults,
+  buildTeamTimeline,
   readTeamField,
+  readTeamIdentity,
   resolveStatusNames,
   sortTeams,
   zonedIsoDate,
@@ -135,21 +138,21 @@ describe('changement de workflow du 12/10/2026', () => {
     expect(span(early)).toEqual({ wip: [1, 1], done: [0, 0] });
   });
 
-  it('à partir du 12/10, --GO PROD-- termine et --Terminé-- sort sans compter terminé', () => {
+  it('à partir du 12/10, --Go Prod-- reste dans le WIP et --Terminé-- sort en terminé', () => {
     const prod = issue('AD-4', [
       ['2026-10-13T10:00:00+02:00', '--In Progress--'],
       ['2026-10-14T10:00:00+02:00', '--Go Prod--'],
     ]);
-    expect(span(prod)).toEqual({ wip: [0, 0], done: [0, 1] });
+    expect(span(prod)).toEqual({ wip: [0, 1], done: [0, 0] });
 
-    const skipped = issue('AD-5', [
+    const done = issue('AD-5', [
       ['2026-10-06T10:00:00+02:00', '--In Progress--'],
       ['2026-10-13T10:00:00+02:00', '--Terminé--'],
     ]);
-    expect(span(skipped)).toEqual({ wip: [1, 0], done: [0, 0] });
+    expect(span(done)).toEqual({ wip: [1, 0], done: [0, 1] });
   });
 
-  it('la bascule est à minuit, heure de Paris, le 12/10', () => {
+  it('un passage à --Terminé-- compte juste avant et juste après minuit le 12/10', () => {
     const justBefore = issue('AD-6', [
       ['2026-10-06T10:00:00+02:00', '--In Progress--'],
       ['2026-10-11T23:30:00+02:00', '--Terminé--'],
@@ -158,8 +161,8 @@ describe('changement de workflow du 12/10/2026', () => {
       ['2026-10-06T10:00:00+02:00', '--In Progress--'],
       ['2026-10-12T00:30:00+02:00', '--Terminé--'],
     ]);
-    expect(span(justBefore).done).toEqual([0, 1]);
-    expect(span(justAfter)).toEqual({ wip: [1, 0], done: [0, 0] });
+    expect(span(justBefore)).toEqual({ wip: [1, 0], done: [0, 1] });
+    expect(span(justAfter)).toEqual({ wip: [1, 0], done: [0, 1] });
   });
 });
 
@@ -212,12 +215,67 @@ describe('computeWipTicket : entrée, sortie, retours', () => {
     expect(t.periods).toEqual([{ start: Date.parse('2026-09-08T10:00:00+02:00'), end: null }]);
   });
 
+  it('--à faire-- et --Terminé-- sont hors WIP ; le statut affiché est celui du point de mesure', () => {
+    const flow: WipStatusConfig = {
+      startStatuses: ['--In Progress--'],
+      endStatuses: ['--GO PROD--'],
+      closedStatuses: ['--Terminé--'],
+      todoStatuses: ['--à faire--'],
+      previousEndStatuses: ['--Terminé--'],
+      endStatusesSinceChange: ['--Terminé--'],
+      workflowChangeOn: '2026-10-12',
+    };
+    const parked = issue('AD-8', [
+      ['2026-10-13T10:00:00+02:00', '--In Progress--'],
+      ['2026-10-14T10:00:00+02:00', '--à faire--'],
+    ]);
+    expect(weekly(parked, '2026-10-12', '2026-10-18', flow)).toEqual({ wip: [0], done: [0] });
+
+    const laterDone = computeWipTicket(
+      issue(
+        'AD-9',
+        [
+          ['2026-10-13T10:00:00+02:00', '--Go Prod--'],
+          ['2026-10-13T11:00:00+02:00', '--In Progress--'],
+          ['2026-10-16T18:00:00+02:00', '--Terminé--'],
+        ],
+        { currentStatus: '--Terminé--' }
+      ),
+      flow
+    );
+    const atMeasure = Date.parse('2026-10-16T14:00:00+02:00');
+    expect(listOpenWipTickets([laterDone], atMeasure)).toEqual([
+      { key: 'AD-9', assignee: 'Non assigné', teams: ['Team A'], status: '--In Progress--' },
+    ]);
+  });
+
   const reopened = issue('KPI-6', [
     ['2026-09-08T10:00:00+02:00', 'In Progress'],
     ['2026-09-16T10:00:00+02:00', 'Go Prod'],
     ['2026-09-22T10:00:00+02:00', 'In Progress'],
     ['2026-10-07T10:00:00+02:00', 'Go Prod'],
   ]);
+
+  it('listOpenWipTickets garde les tickets ouverts et leur assigné', () => {
+    const open = computeWipTicket(
+      issue('AD-1', [['2026-09-08T10:00:00+02:00', 'In Progress']], { assignee: 'Alice Martin' }),
+      CONFIG
+    );
+    const closed = computeWipTicket(
+      issue('AD-2', [
+        ['2026-09-08T10:00:00+02:00', 'In Progress'],
+        ['2026-09-09T10:00:00+02:00', 'Go Prod'],
+      ]),
+      CONFIG
+    );
+    const at = Date.parse('2026-09-11T12:00:00Z');
+    expect(listOpenWipTickets([open, closed], at)).toEqual([
+      { key: 'AD-1', assignee: 'Alice Martin', teams: ['Team A'], status: 'In Progress' },
+    ]);
+    expect(listOpenWipTickets([computeWipTicket(issue('AD-3', [['2026-09-08T10:00:00+02:00', 'In Progress']]), CONFIG)], at)[0].assignee).toBe(
+      'Non assigné'
+    );
+  });
 
   it('CT-06 : revenu de Go Prod → de nouveau au WIP', () => {
     expect(weekly(reopened, '2026-09-07', '2026-10-11').wip).toEqual([1, 0, 1, 1, 0]);
@@ -411,7 +469,7 @@ describe('périmètre et équipes', () => {
     expect(weeks[0].byTeam).toEqual({ Brigade: { wip: 1, done: 0 }, Calson: { wip: 0, done: 0 }, Supply: { wip: 1, done: 0 } });
   });
 
-  it('CT-25 : lecture du champ équipe (texte, objet, tableau)', () => {
+  it('CT-25 : lecture du champ équipe (texte, objet, tableau, id Team)', () => {
     expect(readTeamField({ name: ' Team A ' })).toBe('Team A');
     expect(readTeamField({ value: 'Team B' })).toBe('Team B');
     expect(readTeamField([{ value: 'Team C' }])).toBe('Team C');
@@ -419,6 +477,105 @@ describe('périmètre et équipes', () => {
     expect(readTeamField([])).toBeNull();
     expect(readTeamField({})).toBeNull();
     expect(readTeamField(null)).toBeNull();
+    const brigade = '931e2ea1-6791-4262-ad27-a5a46b22d1fe';
+    expect(readTeamIdentity({ id: brigade, name: 'Brigade', title: 'Brigade' })).toEqual({ id: brigade, name: 'Brigade' });
+    expect(readTeamField({ id: brigade, name: 'Brigade' })).toBe('Brigade');
+  });
+
+  it('répartition dans le temps : l\'id Team au moment de la mesure, le board garde son nom actuel', () => {
+    const calson = 'deedfde0-1c90-458b-b37a-9648eaf61e04';
+    const brigade = '931e2ea1-6791-4262-ad27-a5a46b22d1fe';
+    const ticket = computeWipTicket(
+      issue(
+        'AD-1',
+        [
+          ['2026-09-08T10:00:00+02:00', 'In Progress'],
+          ['2026-10-13T10:00:00+02:00', 'Go Prod'],
+        ],
+        {
+          teams: ['Brigade'],
+          teamId: brigade,
+          teamName: 'Brigade',
+          teamChanges: [
+            {
+              at: '2026-10-04T21:58:00+02:00',
+              fromId: calson,
+              fromName: 'Calson',
+              id: brigade,
+              name: 'Brigade',
+            },
+          ],
+          boardNameByTeamId: { [brigade]: 'Brigade' },
+        }
+      ),
+      CONFIG
+    );
+    expect(ticket.teams).toEqual(['Calson', 'Brigade']);
+    const { weeks } = aggregateWipByWeek([ticket], '2026-09-28', '2026-10-18', NOW, undefined, ['Brigade']);
+    expect(weeks.map((w) => w.weekStart)).toEqual(['2026-09-28', '2026-10-05', '2026-10-12']);
+    expect(weeks[0].byTeam.Calson).toEqual({ wip: 1, done: 0 });
+    expect(weeks[0].byTeam.Brigade).toEqual({ wip: 0, done: 0 });
+    expect(weeks[1].byTeam).toMatchObject({ Calson: { wip: 0, done: 0 }, Brigade: { wip: 1, done: 0 } });
+    expect(weeks[2].byTeam.Brigade).toEqual({ wip: 0, done: 1 });
+    expect(weeks[2].byTeam.Calson).toEqual({ wip: 0, done: 0 });
+    expect(buildTeamTimeline({ currentId: brigade, currentName: 'Brigade', changes: [], boardNameByTeamId: { [brigade]: 'Brigade' } })).toEqual([
+      { at: 0, names: ['Brigade'] },
+    ]);
+  });
+
+  it('Choco reste Choco : un terminé avant le passage à Supply n\'est pas compté sur Supply', () => {
+    const choco = '972ac800-927e-42c6-a6c9-4d691ce8c87e';
+    const supply = '83219e84-63fa-4122-b927-fde8e28adf97';
+    const ticket = computeWipTicket(
+      issue(
+        'AD-1',
+        [
+          ['2026-09-08T10:00:00+02:00', 'In Progress'],
+          ['2026-10-02T10:00:00+02:00', 'Go Prod'],
+        ],
+        {
+          teamId: supply,
+          teamName: 'Supply',
+          teamChanges: [
+            {
+              at: '2026-10-13T10:00:00+02:00',
+              fromId: choco,
+              fromName: 'Choco',
+              id: supply,
+              name: 'Supply',
+            },
+          ],
+        }
+      ),
+      CONFIG
+    );
+    const { weeks } = aggregateWipByWeek([ticket], '2026-09-28', '2026-10-18', NOW, undefined, ['Supply']);
+    expect(weeks[0].byTeam.Choco).toEqual({ wip: 0, done: 1 });
+    expect(weeks[0].byTeam.Supply).toEqual({ wip: 0, done: 0 });
+  });
+
+  it('espace SB : entre à « En cours... », « Résolu » compte terminé, « Not a ticket » non', () => {
+    const support = { startStatuses: ['En cours...'], endStatuses: ['Résolu'], closedStatuses: ['Not a ticket', 'Résolu'] };
+    const resolved = weekly(
+      issue('SB-1', [
+        ['2026-09-08T10:00:00+02:00', 'En cours...'],
+        ['2026-09-10T10:00:00+02:00', 'Résolu'],
+      ]),
+      '2026-09-07',
+      '2026-09-13',
+      support
+    );
+    expect(resolved).toEqual({ wip: [0], done: [1] });
+    const rejected = weekly(
+      issue('SB-2', [
+        ['2026-09-08T10:00:00+02:00', 'En cours...'],
+        ['2026-09-10T10:00:00+02:00', 'Not a ticket'],
+      ]),
+      '2026-09-07',
+      '2026-09-13',
+      support
+    );
+    expect(rejected).toEqual({ wip: [0], done: [0] });
   });
 
   it('CT-26 : gros volume, totaux = somme des équipes', () => {

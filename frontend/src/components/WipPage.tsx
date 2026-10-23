@@ -25,8 +25,12 @@ import {
   teamThreshold,
   thresholdLabel,
   validateWipPeriod,
+  WIP_PER_PERSON_LIMIT,
   WIP_WORKFLOW_CHANGE_DATE,
   WIP_WORKFLOW_CHANGE_NOTE,
+  wipByAssignee,
+  wipByStatus,
+  wipChartSeries,
   type WipRow,
   type WipSettings,
   type WipWeeklyData,
@@ -50,9 +54,14 @@ function teamColor(allTeams: string[], team: string): string {
   return TEAM_COLORS[i % TEAM_COLORS.length];
 }
 
+function ticketHref(key: string): string | null {
+  const base = (import.meta.env.VITE_JIRA_URL || '').replace(/\/+$/, '');
+  return base ? `${base}/browse/${key}` : null;
+}
+
 /** Point de la courbe WIP : rouge et plus gros en cas de dépassement du seuil. */
-export function WipDot(props: { cx?: number; cy?: number; payload?: WipRow }) {
-  const { cx, cy, payload } = props;
+export function WipDot(props: { cx?: number; cy?: number; payload?: WipRow; stroke?: string }) {
+  const { cx, cy, payload, stroke } = props;
   if (cx == null || cy == null) return null;
   const over = payload?.over === true;
   return (
@@ -60,7 +69,7 @@ export function WipDot(props: { cx?: number; cy?: number; payload?: WipRow }) {
       cx={cx}
       cy={cy}
       r={over ? 6 : 4}
-      fill={over ? OVER_COLOR : WIP_COLOR}
+      fill={over ? OVER_COLOR : stroke || WIP_COLOR}
       stroke="#0f172a"
       strokeWidth={2}
       data-over={over ? 'true' : 'false'}
@@ -129,6 +138,7 @@ export function WipPage() {
   const [endDraft, setEndDraft] = useState('');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [openAssignee, setOpenAssignee] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -164,8 +174,12 @@ export function WipPage() {
 
   const chart = useMemo(() => (data ? buildWipRows(data, selected) : null), [data, selected]);
   const allTeams = data?.teams ?? [];
-  const showTeamLines = (chart?.teams.length ?? 0) > 1 && selected.length > 1;
-  const summedThreshold = selected.length > 1 && (chart?.teams.length ?? 0) > 1;
+  const assignees = useMemo(() => (data ? wipByAssignee(data.openTickets, selected, allTeams) : []), [data, selected, allTeams]);
+  const statusCounts = useMemo(() => (data ? wipByStatus(data.openTickets, selected, allTeams) : []), [data, selected, allTeams]);
+  const overAssignees = assignees.filter((row) => row.over);
+  const opened = overAssignees.find((row) => row.assignee === openAssignee) ?? null;
+  const series = wipChartSeries(selected, allTeams);
+  const summedThreshold = series.teamLines.length > 1;
   const lastRow = chart?.rows[chart.rows.length - 1];
   const workflowLabel = chart?.rows.some((row) => row.workflowChange) ? formatDayMonth(WIP_WORKFLOW_CHANGE_DATE) : null;
 
@@ -230,8 +244,7 @@ export function WipPage() {
         <div>
           <h1 className="text-2xl font-bold text-surface-100">Suivi WIP</h1>
           <p className="text-sm text-surface-400">
-            Tickets en cours (de {data?.settings.startStatuses.join(', ') ?? '--In Progress--'} à{' '}
-            {data?.settings.endStatuses.join(', ') ?? '--GO PROD--'}), mesurés chaque vendredi à 14:00, et tickets terminés depuis la mesure précédente.
+            Depuis le 12/10/2026, le WIP va de --In Progress-- jusqu'à --Terminé--. --Go Prod-- reste dans le WIP. Mesure chaque vendredi à 14:00.
           </p>
         </div>
       </header>
@@ -356,29 +369,29 @@ export function WipPage() {
                   />
                   <Legend wrapperStyle={{ fontSize: 12 }} />
                   <Bar dataKey="done" name="Terminés" fill={DONE_COLOR} radius={[4, 4, 0, 0]} maxBarSize={28} />
-                  <Line
-                    type="monotone"
-                    dataKey="wip"
-                    name={selected.length === 0 ? 'WIP global' : 'WIP sélection'}
-                    stroke={WIP_COLOR}
-                    strokeWidth={2}
-                    dot={<WipDot />}
-                    isAnimationActive={false}
-                  />
-                  {showTeamLines &&
-                    chart.teams.map((team) => (
-                      <Line
-                        key={team}
-                        type="monotone"
-                        dataKey={(row: WipRow) => row.teams[team] ?? 0}
-                        name={`WIP ${team}`}
-                        stroke={teamColor(allTeams, team)}
-                        strokeWidth={1.5}
-                        strokeDasharray="4 3"
-                        dot={false}
-                        isAnimationActive={false}
-                      />
-                    ))}
+                  {series.aggregateName && (
+                    <Line
+                      type="monotone"
+                      dataKey="wip"
+                      name={series.aggregateName}
+                      stroke={series.aggregateTeam ? teamColor(allTeams, series.aggregateTeam) : WIP_COLOR}
+                      strokeWidth={2}
+                      dot={<WipDot />}
+                      isAnimationActive={false}
+                    />
+                  )}
+                  {series.teamLines.map((team) => (
+                    <Line
+                      key={team}
+                      type="monotone"
+                      dataKey={(row: WipRow) => row.teams[team] ?? 0}
+                      name={`WIP ${team}`}
+                      stroke={teamColor(allTeams, team)}
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive={false}
+                    />
+                  ))}
                   {chart.threshold.value !== null && (
                     <ReferenceLine
                       y={chart.threshold.value}
@@ -398,6 +411,85 @@ export function WipPage() {
                 </ComposedChart>
               </ResponsiveContainer>
             </div>
+          </section>
+
+          <section className="card-glass p-6" aria-label="Répartition par statut">
+            <h2 className="text-lg font-semibold text-surface-100">Répartition par statut</h2>
+            <p className="mb-4 text-xs text-surface-400">
+              Nombre de tickets encore dans le WIP au dernier point de mesure, selon le statut qu'ils avaient à cet instant.
+              Même filtre d'équipes que le graphique. Un ticket sur plusieurs équipes ne compte qu'une fois.
+            </p>
+            {statusCounts.length === 0 ? (
+              <p className="text-sm text-surface-500">Aucun ticket dans le WIP sur cette sélection.</p>
+            ) : (
+              <ul className="flex flex-wrap gap-3">
+                {statusCounts.map((row) => (
+                  <li key={row.status} className="w-44 rounded-xl border border-surface-700 bg-surface-900/40 px-3 py-3">
+                    <span className="block truncate text-sm text-surface-200" title={row.status}>
+                      {row.status}
+                    </span>
+                    <span className="mt-1 block text-3xl font-semibold tabular-nums text-surface-100">{row.count}</span>
+                    <span className="text-xs text-surface-400">{row.count > 1 ? 'tickets' : 'ticket'}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="card-glass p-6" aria-label="WIP par collaborateur">
+            <h2 className="text-lg font-semibold text-surface-100">Plus de {WIP_PER_PERSON_LIMIT} tickets</h2>
+            <p className="mb-4 text-xs text-surface-400">
+              Collaborateurs au-dessus du seuil, sur les tickets encore dans le WIP au dernier point de mesure. Même filtre
+              d'équipes que le graphique. Un ticket sur plusieurs équipes ne compte qu'une fois.
+            </p>
+            {overAssignees.length === 0 ? (
+              <p className="text-sm text-surface-500">
+                Aucun collaborateur n'a plus de {WIP_PER_PERSON_LIMIT} tickets dans le WIP.
+              </p>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-3">
+                  {overAssignees.map((row) => {
+                    const isOpen = opened?.assignee === row.assignee;
+                    return (
+                      <button
+                        key={row.assignee}
+                        type="button"
+                        aria-expanded={isOpen}
+                        aria-controls={isOpen ? 'wip-assignee-detail' : undefined}
+                        onClick={() => setOpenAssignee(isOpen ? null : row.assignee)}
+                        className={`w-40 rounded-xl border px-3 py-3 text-left transition ${
+                          isOpen ? 'border-red-400 bg-red-500/15' : 'border-red-500/40 bg-red-500/5 hover:border-red-400'
+                        }`}
+                      >
+                        <span className="block truncate text-sm font-medium text-surface-100">{row.assignee}</span>
+                        <span className="mt-1 block text-3xl font-semibold tabular-nums text-red-400">{row.count}</span>
+                        <span className="text-xs text-surface-400">tickets en WIP</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {opened && (
+                  <ul id="wip-assignee-detail" aria-label={`Tickets de ${opened.assignee}`} className="mt-4 space-y-1 text-sm">
+                    {opened.tickets.map((ticket) => {
+                      const href = ticketHref(ticket.key);
+                      return (
+                        <li key={ticket.key} className="flex items-center justify-between gap-3 rounded-lg border border-surface-800 px-3 py-2">
+                          {href ? (
+                            <a href={href} target="_blank" rel="noreferrer" className="text-primary-400 hover:underline">
+                              {ticket.key}
+                            </a>
+                          ) : (
+                            <span className="text-surface-200">{ticket.key}</span>
+                          )}
+                          <span className="text-surface-300">{ticket.status}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </>
+            )}
           </section>
 
           <section className="card-glass p-6" aria-label="Seuils par équipe">

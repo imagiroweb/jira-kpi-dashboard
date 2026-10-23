@@ -642,7 +642,14 @@ export interface JiraSearchResponse {
 /** Entrée d'historique Jira (changelog) : date + champs modifiés. */
 export interface JiraChangeHistory {
   created: string;
-  items: Array<{ field?: string; fieldId?: string; fromString?: string | null; toString?: string | null }>;
+  items: Array<{
+    field?: string;
+    fieldId?: string;
+    from?: string | null;
+    to?: string | null;
+    fromString?: string | null;
+    toString?: string | null;
+  }>;
 }
 
 interface JiraBulkChangelogResponse {

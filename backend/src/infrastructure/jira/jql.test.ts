@@ -1,4 +1,4 @@
-import { stripOrderBy, buildBoardBacklogJql, buildProjectBacklogJql, quarterDateRange, buildClaudeUsJql, combineBoardFiltersJql, buildWipJql } from './jql';
+import { stripOrderBy, buildBoardBacklogJql, buildProjectBacklogJql, quarterDateRange, buildClaudeUsJql, combineBoardFiltersJql, buildWipJql, extractTeamIdsFromJql } from './jql';
 
 describe('jql utils', () => {
   it('stripOrderBy sépare la clause ORDER BY', () => {
@@ -132,6 +132,18 @@ describe('buildWipJql (suivi WIP, issue #79)', () => {
   it('sans projet configuré : pas de restriction projet', () => {
     const jql = buildWipJql({ projectKeys: [], startStatuses: ['Dev'], endStatuses: ['Go Prod'], from: '2026-01-01', toExclusive: '2026-02-01' });
     expect(jql.startsWith('issuetype not in subTaskIssueTypes()')).toBe(true);
+  });
+
+  it('extrait les ids Team du filtre, pas un nom d\'équipe', () => {
+    expect(
+      extractTeamIdsFromJql(
+        'project in (ADORIA26, "support board") AND Team in (972ac800-927e-42c6-a6c9-4d691ce8c87e, 83219e84-63fa-4122-b927-fde8e28adf97)'
+      )
+    ).toEqual(['972ac800-927e-42c6-a6c9-4d691ce8c87e', '83219e84-63fa-4122-b927-fde8e28adf97']);
+    expect(extractTeamIdsFromJql('"Team[Team]" = 931e2ea1-6791-4262-ad27-a5a46b22d1fe')).toEqual([
+      '931e2ea1-6791-4262-ad27-a5a46b22d1fe',
+    ]);
+    expect(extractTeamIdsFromJql('project = AD AND team = Supply ORDER BY Rank ASC')).toEqual([]);
   });
 
   it('avec le filtre d\'un board : remplace la restriction projet', () => {

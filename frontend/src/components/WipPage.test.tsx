@@ -43,7 +43,7 @@ describe('WipPage', () => {
     expect(await screen.findByRole('button', { name: 'Toutes' })).toHaveAttribute('aria-pressed', 'true');
     expect(screen.getByTestId('recharts-responsive-container')).toBeInTheDocument();
     expect(screen.getByText('Seuil global')).toBeInTheDocument();
-    expect(screen.getByText('Seuil partiel : 21')).toBeInTheDocument();
+    expect(screen.getByText('Seuil : 21')).toBeInTheDocument();
   });
 
   it('CT-78 : affiche les boards qui délimitent les équipes, sinon les projets', async () => {
@@ -79,18 +79,58 @@ describe('WipPage', () => {
     renderWithProviders(<WipPage />, { user: TEST_USER });
     const teams = await screen.findByRole('group', { name: 'Équipes' });
 
-    fireEvent.click(within(teams).getByRole('button', { name: 'Team A' }));
+    fireEvent.click(within(teams).getByRole('button', { name: 'Brigade' }));
     expect(screen.getByText('Seuil de la sélection')).toBeInTheDocument();
     expect(screen.getByText('Seuil : 12')).toBeInTheDocument();
 
-    fireEvent.click(within(teams).getByRole('button', { name: 'Team C' }));
+    fireEvent.click(within(teams).getByRole('button', { name: 'Choco' }));
     expect(screen.getByText('Somme des seuils')).toBeInTheDocument();
-    expect(screen.getByText('Somme partielle des seuils : 12')).toBeInTheDocument();
+    expect(screen.getByText('Somme des seuils : 12')).toBeInTheDocument();
     expect(screen.getByText('Somme des équipes choisies')).toBeInTheDocument();
 
     const table = screen.getByRole('table');
-    const rowC = within(table).getByText('Team C').closest('tr')!;
-    expect(within(rowC).getByText('Seuil non défini')).toBeInTheDocument();
+    const rowChoco = within(table).getByText('Choco').closest('tr')!;
+    expect(within(rowChoco).getByText('Seuil non défini')).toBeInTheDocument();
+  });
+
+  it('détaille le WIP par collaborateur et signale plus de 2 tickets', async () => {
+    mockGetWeekly.mockResolvedValue({
+      success: true,
+      canEdit: false,
+      data: {
+        ...WIP_DATA,
+        openTickets: [
+          { key: 'AD-1', assignee: 'Alice Martin', teams: ['Brigade'], status: '--In Progress--' },
+          { key: 'AD-2', assignee: 'Alice Martin', teams: ['Brigade'], status: '--Code Review--' },
+          { key: 'AD-3', assignee: 'Alice Martin', teams: ['Brigade'], status: '--Go Recette--' },
+          { key: 'AD-4', assignee: 'Bob', teams: ['Supply'], status: '--In Progress--' },
+          { key: 'AD-5', assignee: 'Bob', teams: ['Supply'], status: '--QA TestX--' },
+        ],
+      },
+    });
+    renderWithProviders(<WipPage />, { user: TEST_USER });
+
+    const section = await screen.findByRole('region', { name: 'WIP par collaborateur' });
+    const statuses = screen.getByRole('region', { name: 'Répartition par statut' });
+    expect(within(statuses).getByText('--In Progress--').closest('li')).toHaveTextContent('2');
+    expect(within(statuses).getByText('--Go Recette--').closest('li')).toHaveTextContent('1');
+    expect(within(section).getByRole('button', { name: /Alice Martin/ })).toBeInTheDocument();
+    expect(within(section).queryByRole('button', { name: /Bob/ })).not.toBeInTheDocument();
+    expect(within(section).queryByText('AD-1')).not.toBeInTheDocument();
+
+    fireEvent.click(within(section).getByRole('button', { name: /Alice Martin/ }));
+    const detail = within(section).getByRole('list', { name: 'Tickets de Alice Martin' });
+    expect(within(detail).getByText('AD-1')).toBeInTheDocument();
+    expect(within(detail).getByText('--In Progress--')).toBeInTheDocument();
+    expect(within(detail).getByText('--Code Review--')).toBeInTheDocument();
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'Équipes' })).getByRole('button', { name: 'Supply' }));
+    expect(within(section).queryByText('Alice Martin')).not.toBeInTheDocument();
+    expect(within(section).queryByText('Bob')).not.toBeInTheDocument();
+    expect(within(section).getByText("Aucun collaborateur n'a plus de 2 tickets dans le WIP.")).toBeInTheDocument();
+    expect(within(statuses).queryByText('--Go Recette--')).not.toBeInTheDocument();
+    expect(within(statuses).getByText('--In Progress--').closest('li')).toHaveTextContent('1');
+    expect(within(statuses).getByText('--QA TestX--').closest('li')).toHaveTextContent('1');
   });
 
   it('CT-70 : non super admin → lecture seule', async () => {
@@ -102,19 +142,19 @@ describe('WipPage', () => {
 
   it('CT-71 : un super admin modifie les devs et enregistre ; saisie hors bornes bloquée', async () => {
     mockGetWeekly.mockResolvedValue({ success: true, data: WIP_DATA, canEdit: true });
-    const saved = { ...WIP_DATA.settings, teams: [{ team: 'Team A', devCount: 5, maxPerDev: null }] };
+    const saved = { ...WIP_DATA.settings, teams: [{ team: 'Brigade', devCount: 5, maxPerDev: null }] };
     mockSaveSettings.mockResolvedValue({ success: true, settings: saved });
     renderWithProviders(<WipPage />, { user: { ...TEST_USER, role: 'super_admin' } });
 
     fireEvent.click(await screen.findByRole('button', { name: /Modifier les réglages/ }));
-    fireEvent.change(screen.getByLabelText('Devs Team A'), { target: { value: '51' } });
+    fireEvent.change(screen.getByLabelText('Devs Brigade'), { target: { value: '51' } });
     fireEvent.click(screen.getByRole('button', { name: /Enregistrer/ }));
-    expect(screen.getByRole('alert')).toHaveTextContent('Team A : le nombre de devs doit être un entier entre 0 et 50');
+    expect(screen.getByRole('alert')).toHaveTextContent('Brigade : le nombre de devs doit être un entier entre 0 et 50');
     expect(mockSaveSettings).not.toHaveBeenCalled();
 
-    fireEvent.change(screen.getByLabelText('Devs Team A'), { target: { value: '5' } });
-    fireEvent.change(screen.getByLabelText('Devs Team B'), { target: { value: '' } });
-    fireEvent.change(screen.getByLabelText('Devs Team C'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Devs Brigade'), { target: { value: '5' } });
+    fireEvent.change(screen.getByLabelText('Devs Supply'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Devs Choco'), { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: /Enregistrer/ }));
 
     await waitFor(() =>
@@ -122,7 +162,7 @@ describe('WipPage', () => {
         startStatuses: ['In Progress'],
         endStatuses: ['Go Prod'],
         defaultMaxPerDev: 3,
-        teams: [{ team: 'Team A', devCount: 5, maxPerDev: null }],
+        teams: [{ team: 'Brigade', devCount: 5, maxPerDev: null }],
       })
     );
     // Seuil recalculé pour toutes les semaines, sans recharger Jira (statuts inchangés).
@@ -181,11 +221,11 @@ describe('WipTooltipContent et WipDot (CT-42, CT-69)', () => {
     over: true,
     gap: 1,
     workflowChange: false,
-    teams: { 'Team A': 13 },
+    teams: { Brigade: 13 },
   };
 
   it('infobulle : dates, mesure, WIP, terminés, seuil, écart et dépassement', () => {
-    render(<WipTooltipContent row={row} teams={['Team A']} />);
+    render(<WipTooltipContent row={row} teams={['Brigade']} />);
     expect(screen.getByText('Semaine du 07/09 – 13/09')).toBeInTheDocument();
     expect(screen.getByText('Mesure : vendredi 11/09 à 14:00')).toBeInTheDocument();
     expect(screen.getByText('13')).toBeInTheDocument();

@@ -15,6 +15,10 @@ import {
   thresholdLabel,
   validateWipPeriod,
   WIP_WORKFLOW_CHANGE_DATE,
+  wipByAssignee,
+  wipByStatus,
+  wipChartSeries,
+  WIP_PER_PERSON_LIMIT,
 } from './wipChart';
 import { WIP_DATA, WIP_SETTINGS, WIP_TEAMS } from '@/test/fixtures/wip';
 
@@ -31,25 +35,25 @@ describe('buildWipRows', () => {
     const weeks = WIP_DATA.weeks.map((w, i) => (i === 0 ? { ...w, total: { wip: 10, done: 3 } } : w));
     const { rows } = buildWipRows({ ...WIP_DATA, weeks }, [], NOW);
     expect(rows[0]).toMatchObject({ wip: 10, done: 3 });
-    expect(buildWipRows({ ...WIP_DATA, weeks }, ['Team A', 'Team B'], NOW).rows[0]).toMatchObject({ wip: 9 });
+    expect(buildWipRows({ ...WIP_DATA, weeks }, ['Brigade', 'Supply'], NOW).rows[0]).toMatchObject({ wip: 9 });
     expect(buildWipRows({ ...WIP_DATA, weeks }, WIP_TEAMS, NOW).rows[0]).toMatchObject({ wip: 12, threshold: 21 });
   });
 
   it('CT-28 : deux équipes → somme et une série par équipe, la troisième absente', () => {
-    const { rows, teams } = buildWipRows(WIP_DATA, ['Team A', 'Team B'], NOW);
-    expect(teams).toEqual(['Team A', 'Team B']);
-    expect(rows[0]).toMatchObject({ wip: 9, done: 3, teams: { 'Team A': 5, 'Team B': 4 } });
-    expect(rows[0].teams).not.toHaveProperty('Team C');
+    const { rows, teams } = buildWipRows(WIP_DATA, ['Brigade', 'Supply'], NOW);
+    expect(teams).toEqual(['Brigade', 'Supply']);
+    expect(rows[0]).toMatchObject({ wip: 9, done: 3, teams: { Brigade: 5, Supply: 4 } });
+    expect(rows[0].teams).not.toHaveProperty('Choco');
   });
 
   it('CT-29 : une seule équipe → son seuil, sans mention partielle', () => {
-    const { threshold, rows } = buildWipRows(WIP_DATA, ['Team A'], NOW);
+    const { threshold, rows } = buildWipRows(WIP_DATA, ['Brigade'], NOW);
     expect(threshold).toEqual({ value: 12, partial: false });
     expect(rows.every((r) => r.threshold === 12)).toBe(true);
   });
 
   it('CT-34 : une semaine absente de la réponse apparaît à 0, sans trou', () => {
-    const { rows } = buildWipRows(WIP_DATA, ['Team A'], NOW);
+    const { rows } = buildWipRows(WIP_DATA, ['Brigade'], NOW);
     expect(rows).toHaveLength(12);
     expect(rows.find((r) => r.weekStart === '2026-09-07')).toMatchObject({ wip: 0, done: 0, label: '07/09' });
   });
@@ -67,51 +71,56 @@ describe('buildWipRows', () => {
 
   it('ignore une équipe sélectionnée absente des données', () => {
     expect(effectiveTeams(WIP_TEAMS, ['Inconnue'])).toEqual(WIP_TEAMS);
-    expect(effectiveTeams(WIP_TEAMS, ['Inconnue', 'Team B'])).toEqual(['Team B']);
+    expect(effectiveTeams(WIP_TEAMS, ['Inconnue', 'Supply'])).toEqual(['Supply']);
   });
 
   it('CT-36 / CT-37 : dépassement strictement au-dessus du seuil, avec l\'écart', () => {
-    const { rows } = buildWipRows(WIP_DATA, ['Team A'], NOW);
+    const { rows } = buildWipRows(WIP_DATA, ['Brigade'], NOW);
     expect(rows[1]).toMatchObject({ wip: 13, over: true, gap: 1 });
     expect(rows[2]).toMatchObject({ wip: 12, over: false, gap: 0 });
     expect(rows[4]).toMatchObject({ wip: 3, over: false, gap: -9 });
   });
 
   it('CT-38 : seuils 12 + 9 → 21, dépassement évalué contre 21', () => {
-    const { threshold, rows } = buildWipRows(WIP_DATA, ['Team A', 'Team B'], NOW);
+    const { threshold, rows } = buildWipRows(WIP_DATA, ['Brigade', 'Supply'], NOW);
     expect(threshold).toEqual({ value: 21, partial: false });
     expect(thresholdLabel(threshold, true)).toBe('Somme des seuils : 21');
     expect(rows[1]).toMatchObject({ wip: 13, over: false, gap: -8 });
   });
 
   it('CT-43 : sans seuil → pas de dépassement, écart absent', () => {
-    const { rows } = buildWipRows(WIP_DATA, ['Team C'], NOW);
+    const { rows } = buildWipRows(WIP_DATA, ['Choco'], NOW);
     expect(rows[0]).toMatchObject({ threshold: null, over: false, gap: null });
   });
 });
 
 describe('seuils', () => {
-  it('CT-35 : 4 devs × 3 → 12', () => {
-    expect(teamThreshold(WIP_SETTINGS, 'Team A')).toBe(12);
-    expect(teamThreshold(WIP_SETTINGS, 'team b')).toBe(9);
+  it('CT-35 : 4 devs × 3 → 12, seulement Brigade et Supply', () => {
+    expect(teamThreshold(WIP_SETTINGS, 'Brigade')).toBe(12);
+    expect(teamThreshold(WIP_SETTINGS, 'supply')).toBe(9);
+    expect(teamThreshold(WIP_SETTINGS, 'Choco')).toBeNull();
   });
 
-  it('CT-39 : équipe sans réglage ou à 0 dev → non défini', () => {
-    expect(teamThreshold(WIP_SETTINGS, 'Team C')).toBeNull();
+  it('CT-39 : équipe sans réglage ou hors seuil → non défini', () => {
+    expect(teamThreshold(WIP_SETTINGS, 'Cook')).toBeNull();
     expect(teamThreshold(WIP_SETTINGS, 'Team Z')).toBeNull();
-    expect(thresholdLabel(combinedThreshold(WIP_SETTINGS, ['Team C']))).toBe('Seuil non défini');
+    expect(thresholdLabel(combinedThreshold(WIP_SETTINGS, ['Choco']))).toBe('Seuil non défini');
   });
 
-  it('CT-40 : seuil partiel quand une équipe n\'a pas de seuil ; « Sans équipe » seule → non défini', () => {
-    expect(combinedThreshold(WIP_SETTINGS, ['Team A', 'Team C'])).toEqual({ value: 12, partial: true });
-    expect(combinedThreshold(WIP_SETTINGS, ['Team A', 'Sans équipe'])).toEqual({ value: 12, partial: true });
+  it('CT-40 : Choco et « Sans équipe » ne rendent pas le seuil partiel ; Supply sans réglage, oui', () => {
+    expect(combinedThreshold(WIP_SETTINGS, ['Brigade', 'Choco'])).toEqual({ value: 12, partial: false });
+    expect(combinedThreshold(WIP_SETTINGS, ['Brigade', 'Sans équipe'])).toEqual({ value: 12, partial: false });
     expect(combinedThreshold(WIP_SETTINGS, ['Sans équipe'])).toEqual({ value: null, partial: false });
+    expect(combinedThreshold({ ...WIP_SETTINGS, teams: [{ team: 'Brigade', devCount: 4, maxPerDev: null }] }, ['Brigade', 'Supply'])).toEqual({
+      value: 12,
+      partial: true,
+    });
     expect(thresholdLabel({ value: 12, partial: true })).toBe('Seuil partiel : 12');
     expect(thresholdLabel({ value: 21, partial: false })).toBe('Seuil : 21');
   });
 
-  it('CT-41 : vue globale avec « Sans équipe » → somme des seuils définis, partielle', () => {
-    expect(buildWipRows(WIP_DATA, [], NOW).threshold).toEqual({ value: 21, partial: true });
+  it('CT-41 : vue globale → somme Brigade + Supply, Choco ignoré', () => {
+    expect(buildWipRows(WIP_DATA, [], NOW).threshold).toEqual({ value: 21, partial: false });
   });
 });
 
@@ -137,6 +146,91 @@ describe('période', () => {
 
   it('CT-42 : dates de l\'infobulle', () => {
     expect(formatWeekRange('2026-09-07', '2026-09-13')).toBe('07/09 – 13/09');
+  });
+});
+
+describe('wipByAssignee', () => {
+  const tickets = [
+    { key: 'AD-3', assignee: 'Alice Martin', teams: ['Team A'], status: '--Code Review--' },
+    { key: 'AD-1', assignee: 'Alice Martin', teams: ['Team A', 'Team B'], status: '--In Progress--' },
+    { key: 'AD-2', assignee: 'Alice Martin', teams: ['Team A'], status: '--Go Recette--' },
+    { key: 'AD-4', assignee: 'Bob', teams: ['Team B'], status: '--QA TestX--' },
+    { key: 'AD-5', assignee: 'Bob', teams: ['Team B'], status: '--In Progress--' },
+    { key: 'AD-6', assignee: '  ', teams: ['Team C'], status: '' },
+  ];
+
+  it('regroupe par assigné, une fois par ticket, et signale plus de 2', () => {
+    const rows = wipByAssignee(tickets, [], ['Team A', 'Team B', 'Team C']);
+    expect(rows[0]).toEqual({
+      assignee: 'Alice Martin',
+      count: 3,
+      tickets: [
+        { key: 'AD-1', status: '--In Progress--' },
+        { key: 'AD-2', status: '--Go Recette--' },
+        { key: 'AD-3', status: '--Code Review--' },
+      ],
+      over: true,
+    });
+    expect(rows.find((r) => r.assignee === 'Bob')).toMatchObject({ count: 2, over: false });
+    expect(rows.find((r) => r.assignee === 'Non assigné')?.tickets).toEqual([{ key: 'AD-6', status: 'Statut inconnu' }]);
+    expect(WIP_PER_PERSON_LIMIT).toBe(2);
+  });
+
+  it('filtre sur les équipes choisies', () => {
+    const rows = wipByAssignee(tickets, ['Team B'], ['Team A', 'Team B', 'Team C']);
+    expect(rows.map((r) => r.assignee)).toEqual(['Bob', 'Alice Martin']);
+    expect(rows.find((r) => r.assignee === 'Alice Martin')).toMatchObject({
+      count: 1,
+      tickets: [{ key: 'AD-1', status: '--In Progress--' }],
+      over: false,
+    });
+  });
+});
+
+describe('wipChartSeries', () => {
+  const teams = ['Cook', 'Brigade', 'Supply'];
+
+  it('« Toutes » : une courbe globale, sans courbe par équipe', () => {
+    expect(wipChartSeries([], teams)).toEqual({ aggregateName: 'WIP global', aggregateTeam: null, teamLines: [] });
+  });
+
+  it('une équipe : une courbe à son nom', () => {
+    expect(wipChartSeries(['Brigade'], teams)).toEqual({
+      aggregateName: 'WIP Brigade',
+      aggregateTeam: 'Brigade',
+      teamLines: [],
+    });
+  });
+
+  it('plusieurs équipes : une courbe par équipe, sans somme', () => {
+    expect(wipChartSeries(['Brigade', 'Supply'], teams)).toEqual({
+      aggregateName: null,
+      aggregateTeam: null,
+      teamLines: ['Brigade', 'Supply'],
+    });
+  });
+});
+
+describe('wipByStatus', () => {
+  const tickets = [
+    { key: 'AD-1', assignee: 'Alice Martin', teams: ['Team A', 'Team B'], status: '--In Progress--' },
+    { key: 'AD-2', assignee: 'Alice Martin', teams: ['Team A'], status: '--In Progress--' },
+    { key: 'AD-3', assignee: 'Bob', teams: ['Team B'], status: '--Go Prod--' },
+    { key: 'AD-1', assignee: 'Alice Martin', teams: ['Team A'], status: '--In Progress--' },
+  ];
+
+  it('compte les tickets par statut, une fois par clé', () => {
+    expect(wipByStatus(tickets, [], ['Team A', 'Team B', 'Team C'])).toEqual([
+      { status: '--In Progress--', count: 2 },
+      { status: '--Go Prod--', count: 1 },
+    ]);
+  });
+
+  it('filtre sur les équipes choisies', () => {
+    expect(wipByStatus(tickets, ['Team B'], ['Team A', 'Team B', 'Team C'])).toEqual([
+      { status: '--Go Prod--', count: 1 },
+      { status: '--In Progress--', count: 1 },
+    ]);
   });
 });
 
