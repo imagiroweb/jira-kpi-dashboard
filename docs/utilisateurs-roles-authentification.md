@@ -22,12 +22,12 @@ Contrôler qui accède à l'application et à quelles pages : connexion (locale 
 
 ### Pages et rôles
 
-Pages pilotables : dashboard, users, support, epics, marketing, produit, pointHebdo, gestionUtilisateurs, performance, performanceDashboard, couts.
+Pages pilotables : dashboard, users, support, epics, marketing, produit, pointHebdo, gestionUtilisateurs, performance, performanceDashboard, couts, wip (« Suivi WIP », voir [Suivi WIP](wip.md)).
 
 - `dashboard` et `performance` sont toujours visibles pour les rôles semés.
-- Nouveau rôle : tout à vrai sauf `gestionUtilisateurs`, `performanceDashboard` et `couts`.
+- Nouveau rôle : tout à vrai (`wip` compris) sauf `gestionUtilisateurs`, `performanceDashboard` et `couts`.
 - Un rôle porte aussi un indicateur `performanceGlobalAccess` (portée « CTO » sur la performance, faux par défaut).
-- Utilisateur sans rôle : `dashboard` et `performance` seulement.
+- Utilisateur sans rôle : `dashboard` et `performance` seulement (donc pas `wip`).
 - Super admin (`role = super_admin`) : toutes les pages et accès global performance. Jamais attribué automatiquement ; créé par le script `admin:bootstrap` ou par un autre super admin.
 
 Rôles créés au démarrage (en plus de `dashboard` et `performance`) :
@@ -35,12 +35,26 @@ Rôles créés au démarrage (en plus de `dashboard` et `performance`) :
 | Rôle | Pages supplémentaires |
 |---|---|
 | Utilisateur | aucune |
-| Dev | support, pointHebdo |
-| PO | users, epics, pointHebdo |
+| Dev | support, pointHebdo, wip |
+| PO | users, epics, pointHebdo, wip |
 | Product | produit, pointHebdo |
 | Marketing | marketing |
 
 Aucun rôle semé n'a `gestionUtilisateurs`, `performanceDashboard` ni `couts`. Les visibilités de ces rôles sont réécrites à chaque démarrage du serveur.
+
+Page `wip` (« Suivi WIP ») :
+
+| Cas | Page visible |
+|---|---|
+| Rôles semés Dev et PO | oui |
+| Rôles semés Utilisateur, Product, Marketing | non |
+| Nouveau rôle | oui (coché par défaut) |
+| Rôle personnalisé existant dont le nom contient le **mot** « lead » ou « leads » (casse ignorée : « Lead dev », « Tech leads » oui, « Leadership » non) | oui, activée une seule fois au démarrage si le champ est absent ; un réglage ultérieur n'est jamais écrasé |
+| Autre rôle créé avant l'ajout de la page | non (champ absent) |
+| Sans rôle | non |
+| Super admin | oui |
+
+Seuls les super admins modifient les réglages de la page Suivi WIP (statuts, seuils).
 
 ### Contrôle d'accès
 
@@ -139,5 +153,6 @@ Sources externes : Microsoft Entra ID (SSO), SMTP (emails d'invitation et de res
 - `backend/src/middleware/rateLimits.ts` : limites de débit.
 - `backend/src/application/services/personalDataService.ts` : export et anonymisation.
 - `backend/src/routes/organizationRoutes.ts` : organisation et rétention.
+- `backend/src/application/services/wipPageAccess.ts` : activation de la page `wip` pour les rôles de lead.
 - `frontend/src/components/Sidebar.tsx`, `frontend/src/domain/sidebarNav.ts` : menu.
 - `frontend/src/components/UserManagementPage.tsx`, `LoginPage.tsx`, `InviteLocalUserForm.tsx` : écrans.

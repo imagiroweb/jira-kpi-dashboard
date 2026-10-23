@@ -550,6 +550,26 @@ describe('authRoutes — admin (TI)', () => {
     });
   });
 
+  describe('POST /api/auth/roles — page Suivi WIP (issue #79)', () => {
+    const allPages = {
+      dashboard: true, users: true, support: true, epics: true, marketing: true, produit: true, pointHebdo: true,
+      gestionUtilisateurs: false, performance: true, performanceDashboard: false, couts: false, wip: true,
+    };
+
+    it('CT-62 : un rôle créé sans pages précisées voit la page wip', async () => {
+      mockRoleFindOne.mockResolvedValue(null);
+      mockRoleCreate.mockResolvedValue({ _id: { toString: () => 'r' }, name: 'Lead dev', pageVisibilities: allPages });
+
+      const res = await request(app).post('/api/auth/roles').send({ name: 'Lead dev' });
+
+      expect(res.status).toBe(201);
+      expect(mockRoleCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ pageVisibilities: expect.objectContaining({ wip: true }) })
+      );
+    });
+
+  });
+
   describe('PATCH /api/auth/roles/:id', () => {
     it('retourne 404 si le rôle n’existe pas', async () => {
       mockRoleFindById.mockResolvedValue(null);

@@ -49,6 +49,8 @@ export interface VisiblePages {
   performanceDashboard: boolean;
   /** Page « Coûts horaires » ; donne aussi l'affichage des coûts dans le Suivi épic. */
   couts: boolean;
+  /** Page « Suivi WIP » : WIP hebdomadaire et seuils par équipe. */
+  wip: boolean;
 }
 
 /** Filtres par défaut Roadmap Adoria 2026 (préférences utilisateur) */

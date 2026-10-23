@@ -25,6 +25,9 @@ import { meetingRoutes } from './routes/meetingRoutes';
 import { performanceRoutes } from './routes/performanceRoutes';
 import { teamRoutes } from './routes/teamRoutes';
 import { costRoutes } from './routes/costRoutes';
+import { wipRoutes } from './routes/wipRoutes';
+import { grantWipPageToLeadRoles } from './application/services/wipPageAccess';
+import { SEEDED_ROLES } from './domain/user/seededRoles';
 import { organizationRoutes } from './routes/organizationRoutes';
 import { registerAccountAnonymizer, startRetentionSchedule } from './application/services/retentionService';
 import { anonymizePerformanceReviews, anonymizeUser } from './application/services/personalDataService';
@@ -68,89 +71,7 @@ const connectMongoDB = async () => {
       );
     }
     // Seed default roles (create or update)
-    const defaultRoles = [
-      {
-        name: 'Utilisateur',
-        pageVisibilities: {
-          dashboard: true,
-          users: false,
-          support: false,
-          epics: false,
-          marketing: false,
-          produit: false,
-          pointHebdo: false,
-          gestionUtilisateurs: false,
-          performance: true,
-          performanceDashboard: false,
-          couts: false
-        }
-      },
-      {
-        name: 'Dev',
-        pageVisibilities: {
-          dashboard: true,
-          users: false,
-          support: true,
-          epics: false,
-          marketing: false,
-          produit: false,
-          pointHebdo: true,
-          gestionUtilisateurs: false,
-          performance: true,
-          performanceDashboard: false,
-          couts: false
-        }
-      },
-      {
-        name: 'PO',
-        pageVisibilities: {
-          dashboard: true,
-          users: true,
-          support: false,
-          epics: true,
-          marketing: false,
-          produit: false,
-          pointHebdo: true,
-          gestionUtilisateurs: false,
-          performance: true,
-          performanceDashboard: false,
-          couts: false
-        }
-      },
-      {
-        name: 'Product',
-        pageVisibilities: {
-          dashboard: true,
-          users: false,
-          support: false,
-          epics: false,
-          marketing: false,
-          produit: true,
-          pointHebdo: true,
-          gestionUtilisateurs: false,
-          performance: true,
-          performanceDashboard: false,
-          couts: false
-        }
-      },
-      {
-        name: 'Marketing',
-        pageVisibilities: {
-          dashboard: true,
-          users: false,
-          support: false,
-          epics: false,
-          marketing: true,
-          produit: false,
-          pointHebdo: false,
-          gestionUtilisateurs: false,
-          performance: true,
-          performanceDashboard: false,
-          couts: false
-        }
-      }
-    ];
-    for (const r of defaultRoles) {
+    for (const r of SEEDED_ROLES) {
       await Role.findOneAndUpdate(
         { name: r.name },
         { $set: { name: r.name, pageVisibilities: r.pageVisibilities } },
@@ -158,6 +79,7 @@ const connectMongoDB = async () => {
       );
     }
     logger.info('Default roles seeded: Utilisateur, Dev, PO, Product, Marketing');
+    await grantWipPageToLeadRoles();
     await ensureDefaultOrganization();
     await applyStoredIntegrationSettings();
   } catch (error) {
@@ -244,6 +166,7 @@ app.use('/api/meetings', meetingRoutes);
 app.use('/api/performance', performanceRoutes);
 app.use('/api/teams', teamRoutes);
 app.use('/api/costs', costRoutes);
+app.use('/api/wip', wipRoutes);
 app.use('/api/organizations', organizationRoutes);
 
 // Setup WebSocket handlers

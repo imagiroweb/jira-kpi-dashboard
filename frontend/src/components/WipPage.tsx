@@ -1,0 +1,641 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { AlertTriangle, Gauge, Loader2, Pencil, RefreshCw, Save, X } from 'lucide-react';
+import {
+  Bar,
+  CartesianGrid,
+  ComposedChart,
+  Legend,
+  Line,
+  ReferenceLine,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from 'recharts';
+import { wipApi } from '../services/api';
+import { useStore } from '../store/useStore';
+import {
+  buildWipRows,
+  defaultWipPeriod,
+  formatMeasuredAt,
+  formatDayMonth,
+  formatWeekRange,
+  NO_TEAM,
+  parseTeamDrafts,
+  teamThreshold,
+  thresholdLabel,
+  validateWipPeriod,
+  WIP_PER_PERSON_LIMIT,
+  WIP_WORKFLOW_CHANGE_DATE,
+  WIP_WORKFLOW_CHANGE_NOTE,
+  wipByAssignee,
+  wipByStatus,
+  wipChartSeries,
+  type WipRow,
+  type WipSettings,
+  type WipWeeklyData,
+} from '../domain/wipChart';
+
+/** Couleurs des équipes, attribuées dans l'ordre de la liste complète (une équipe garde sa couleur quel que soit le filtre). */
+const TEAM_COLORS = ['#8b5cf6', '#10b981', '#3b82f6', '#f59e0b', '#ec4899', '#06b6d4', '#84cc16', '#f97316'];
+const NO_TEAM_COLOR = '#9ca3af';
+const WIP_COLOR = '#22d3ee';
+const DONE_COLOR = '#475569';
+const OVER_COLOR = '#ef4444';
+
+function errorMessage(e: unknown, fallback: string): string {
+  const err = e as { response?: { data?: { error?: string; errors?: string[] } }; message?: string };
+  return err?.response?.data?.errors?.join(' · ') || err?.response?.data?.error || err?.message || fallback;
+}
+
+function teamColor(allTeams: string[], team: string): string {
+  if (team === NO_TEAM) return NO_TEAM_COLOR;
+  const i = allTeams.filter((t) => t !== NO_TEAM).indexOf(team);
+  return TEAM_COLORS[i % TEAM_COLORS.length];
+}
+
+function ticketHref(key: string): string | null {
+  const base = (import.meta.env.VITE_JIRA_URL || '').replace(/\/+$/, '');
+  return base ? `${base}/browse/${key}` : null;
+}
+
+/** Point de la courbe WIP : rouge et plus gros en cas de dépassement du seuil. */
+export function WipDot(props: { cx?: number; cy?: number; payload?: WipRow; stroke?: string }) {
+  const { cx, cy, payload, stroke } = props;
+  if (cx == null || cy == null) return null;
+  const over = payload?.over === true;
+  return (
+    <circle
+      cx={cx}
+      cy={cy}
+      r={over ? 6 : 4}
+      fill={over ? OVER_COLOR : stroke || WIP_COLOR}
+      stroke="#0f172a"
+      strokeWidth={2}
+      data-over={over ? 'true' : 'false'}
+    />
+  );
+}
+
+/** Infobulle d'une semaine : dates, WIP, terminés, seuil, écart et dépassement. */
+export function WipTooltipContent({ row, teams }: { row: WipRow; teams: string[] }) {
+  return (
+    <div className="rounded-lg border border-surface-700 bg-surface-900/95 p-3 text-xs shadow-xl">
+      <p className="font-semibold text-surface-100">Semaine du {formatWeekRange(row.weekStart, row.weekEnd)}</p>
+      {row.measuredAt && <p className="mb-1 text-surface-500">Mesure : {formatMeasuredAt(row.measuredAt)}</p>}
+      <p className="text-surface-300">
+        WIP : <span className="font-semibold tabular-nums text-surface-100">{row.wip}</span>
+      </p>
+      <p className="text-surface-300">
+        Terminés : <span className="font-semibold tabular-nums text-surface-100">{row.done}</span>
+      </p>
+      <p className="text-surface-300">
+        Seuil : <span className="tabular-nums text-surface-100">{row.threshold ?? 'non défini'}</span>
+        {row.gap !== null && (
+          <span className="ml-1 tabular-nums text-surface-400">(écart {row.gap > 0 ? `+${row.gap}` : row.gap})</span>
+        )}
+      </p>
+      {row.over && (
+        <p className="mt-1 flex items-center gap-1 font-medium text-red-400">
+          <AlertTriangle className="h-3 w-3" /> Seuil dépassé
+        </p>
+      )}
+      {row.workflowChange && <p className="mt-2 border-t border-surface-700 pt-2 text-amber-300">{WIP_WORKFLOW_CHANGE_NOTE}</p>}
+      {teams.length > 1 && (
+        <ul className="mt-2 space-y-0.5 border-t border-surface-700 pt-2 text-surface-400">
+          {teams.map((t) => (
+            <li key={t}>
+              {t} : <span className="tabular-nums text-surface-200">{row.teams[t] ?? 0}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+type TeamDraft = { team: string; devCount: string; maxPerDev: string };
+
+/**
+ * Page « Suivi WIP » (spec issue #79) : WIP en fin de semaine et tickets terminés, au global et par
+ * équipe Jira, comparés au seuil devs × tickets max par dev. Réglages modifiables par le super admin.
+ */
+export function WipPage() {
+  const kpiRefreshTrigger = useStore((s) => s.kpiRefreshTrigger);
+  const [period, setPeriod] = useState(() => defaultWipPeriod());
+  const [draftFrom, setDraftFrom] = useState(period.from);
+  const [draftTo, setDraftTo] = useState(period.to);
+  const [periodError, setPeriodError] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [data, setData] = useState<WipWeeklyData | null>(null);
+  const [canEdit, setCanEdit] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [teamDrafts, setTeamDrafts] = useState<TeamDraft[]>([]);
+  const [defaultMaxDraft, setDefaultMaxDraft] = useState('3');
+  const [startDraft, setStartDraft] = useState('');
+  const [endDraft, setEndDraft] = useState('');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [openAssignee, setOpenAssignee] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await wipApi.getWeekly(period.from, period.to);
+      setData(res.data);
+      setCanEdit(res.canEdit);
+    } catch (e) {
+      setError(errorMessage(e, 'Impossible de charger le WIP'));
+    } finally {
+      setLoading(false);
+    }
+  }, [period.from, period.to]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  // Rechargement après une synchronisation (bouton « Synchroniser » ou planifiée).
+  useEffect(() => {
+    if (kpiRefreshTrigger > 0) load();
+  }, [kpiRefreshTrigger, load]);
+
+  const applyPeriod = () => {
+    const err = validateWipPeriod(draftFrom, draftTo);
+    setPeriodError(err);
+    if (!err) setPeriod({ from: draftFrom, to: draftTo });
+  };
+
+  const toggleTeam = (team: string) =>
+    setSelected((prev) => (prev.includes(team) ? prev.filter((t) => t !== team) : [...prev, team]));
+
+  const chart = useMemo(() => (data ? buildWipRows(data, selected) : null), [data, selected]);
+  const allTeams = data?.teams ?? [];
+  const assignees = useMemo(() => (data ? wipByAssignee(data.openTickets, selected, allTeams) : []), [data, selected, allTeams]);
+  const statusCounts = useMemo(() => (data ? wipByStatus(data.openTickets, selected, allTeams) : []), [data, selected, allTeams]);
+  const overAssignees = assignees.filter((row) => row.over);
+  const opened = overAssignees.find((row) => row.assignee === openAssignee) ?? null;
+  const series = wipChartSeries(selected, allTeams);
+  const summedThreshold = series.teamLines.length > 1;
+  const lastRow = chart?.rows[chart.rows.length - 1];
+  const workflowLabel = chart?.rows.some((row) => row.workflowChange) ? formatDayMonth(WIP_WORKFLOW_CHANGE_DATE) : null;
+
+  const startEditing = () => {
+    if (!data) return;
+    const s = data.settings;
+    // Équipes des données et des réglages, dédoublonnées sans tenir compte de la casse (comme les seuils).
+    const teams: string[] = [];
+    for (const t of [...allTeams.filter((name) => name !== NO_TEAM), ...s.teams.map((row) => row.team)]) {
+      if (!teams.some((x) => x.toLowerCase() === t.toLowerCase())) teams.push(t);
+    }
+    setTeamDrafts(
+      teams.map((team) => {
+        const row = s.teams.find((t) => t.team.toLowerCase() === team.toLowerCase());
+        return { team, devCount: row ? String(row.devCount) : '', maxPerDev: row?.maxPerDev != null ? String(row.maxPerDev) : '' };
+      })
+    );
+    setDefaultMaxDraft(String(s.defaultMaxPerDev));
+    setStartDraft(s.startStatuses.join(', '));
+    setEndDraft(s.endStatuses.join(', '));
+    setSaveError(null);
+    setEditing(true);
+  };
+
+  const saveSettings = async () => {
+    const parsed = parseTeamDrafts(teamDrafts);
+    if (!parsed.ok) {
+      setSaveError(parsed.error);
+      return;
+    }
+    const splitStatuses = (raw: string) => raw.split(',').map((s) => s.trim()).filter(Boolean);
+    const settings: WipSettings = {
+      startStatuses: splitStatuses(startDraft),
+      endStatuses: splitStatuses(endDraft),
+      defaultMaxPerDev: Number(defaultMaxDraft),
+      teams: parsed.teams,
+    };
+    setSaving(true);
+    setSaveError(null);
+    try {
+      const res = await wipApi.saveSettings(settings);
+      const statusesChanged =
+        data !== null &&
+        (data.settings.startStatuses.join('|') !== res.settings.startStatuses.join('|') ||
+          data.settings.endStatuses.join('|') !== res.settings.endStatuses.join('|'));
+      setData((prev) => (prev ? { ...prev, settings: res.settings } : prev));
+      setEditing(false);
+      if (statusesChanged) load();
+    } catch (e) {
+      setSaveError(errorMessage(e, "Impossible d'enregistrer les réglages"));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6 p-8">
+      <header className="flex items-center gap-3">
+        <div className="rounded-lg bg-primary-500/20 p-2">
+          <Gauge className="h-6 w-6 text-primary-400" />
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold text-surface-100">Suivi WIP</h1>
+          <p className="text-sm text-surface-400">
+            Depuis le 12/10/2026, le WIP va de --In Progress-- jusqu'à --Terminé--. --Go Prod-- reste dans le WIP. Mesure chaque vendredi à 14:00.
+          </p>
+        </div>
+      </header>
+
+      <section className="card-glass flex flex-wrap items-end gap-4 p-4" aria-label="Filtres">
+        <label className="text-sm text-surface-300">
+          Du
+          <input
+            type="date"
+            value={draftFrom}
+            onChange={(e) => setDraftFrom(e.target.value)}
+            className="ml-2 rounded-lg border border-surface-700 bg-surface-800 px-2 py-1 text-surface-100"
+          />
+        </label>
+        <label className="text-sm text-surface-300">
+          Au
+          <input
+            type="date"
+            value={draftTo}
+            onChange={(e) => setDraftTo(e.target.value)}
+            className="ml-2 rounded-lg border border-surface-700 bg-surface-800 px-2 py-1 text-surface-100"
+          />
+        </label>
+        <button type="button" onClick={applyPeriod} className="btn-primary px-3 py-1.5 text-sm">
+          Appliquer
+        </button>
+        <button type="button" onClick={load} className="flex items-center gap-1 text-sm text-surface-400 hover:text-surface-200" title="Recharger">
+          <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} /> Recharger
+        </button>
+        {periodError && (
+          <p role="alert" className="w-full text-sm text-amber-400">
+            {periodError}
+          </p>
+        )}
+        {allTeams.length > 0 && (
+          <div className="flex w-full flex-wrap items-center gap-2" role="group" aria-label="Équipes">
+            <span className="text-sm text-surface-400">Équipes :</span>
+            <button
+              type="button"
+              aria-pressed={selected.length === 0}
+              onClick={() => setSelected([])}
+              className={`rounded-full px-3 py-1 text-xs ${selected.length === 0 ? 'bg-primary-500/30 text-primary-200' : 'bg-surface-800 text-surface-400'}`}
+            >
+              Toutes
+            </button>
+            {allTeams.map((team) => (
+              <button
+                key={team}
+                type="button"
+                aria-pressed={selected.includes(team)}
+                onClick={() => toggleTeam(team)}
+                className={`flex items-center gap-1.5 rounded-full px-3 py-1 text-xs ${
+                  selected.includes(team) ? 'bg-primary-500/30 text-primary-200' : 'bg-surface-800 text-surface-400'
+                }`}
+              >
+                <span className="h-2 w-2 rounded-full" style={{ backgroundColor: teamColor(allTeams, team) }} />
+                {team}
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+
+      {error && (
+        <div role="alert" className="card-glass p-6 text-center text-amber-400">
+          <p>{error}</p>
+          <button type="button" onClick={load} className="mt-2 text-sm text-primary-400 hover:underline">
+            Réessayer
+          </button>
+        </div>
+      )}
+
+      {loading && !data && (
+        <div className="flex justify-center py-16">
+          <Loader2 className="h-8 w-8 animate-spin text-accent-500" aria-label="Chargement" />
+        </div>
+      )}
+
+      {chart && data && (
+        <>
+          <section className="grid gap-4 sm:grid-cols-3" aria-label="Indicateurs">
+            <div className="card-glass p-4">
+              <p className="text-sm text-surface-400">WIP fin de période</p>
+              <p className={`text-3xl font-bold tabular-nums ${lastRow?.over ? 'text-red-400' : 'text-surface-100'}`}>{lastRow?.wip ?? 0}</p>
+              {lastRow?.over && (
+                <p className="mt-1 flex items-center gap-1 text-xs text-red-400">
+                  <AlertTriangle className="h-3 w-3" /> Seuil dépassé de {lastRow.gap}
+                </p>
+              )}
+            </div>
+            <div className="card-glass p-4">
+              <p className="text-sm text-surface-400">Terminés dernière semaine</p>
+              <p className="text-3xl font-bold tabular-nums text-surface-100">{lastRow?.done ?? 0}</p>
+            </div>
+            <div className="card-glass p-4">
+              <p className="text-sm text-surface-400">
+                {summedThreshold ? 'Somme des seuils' : selected.length === 0 ? 'Seuil global' : 'Seuil de la sélection'}
+              </p>
+              <p className="text-3xl font-bold tabular-nums text-surface-100">{chart.threshold.value ?? '–'}</p>
+              <p className="mt-1 text-xs text-surface-400">{thresholdLabel(chart.threshold, summedThreshold)}</p>
+            </div>
+          </section>
+
+          <section className="card-glass p-6" aria-label="Graphique WIP par semaine">
+            <h2 className="mb-1 text-lg font-semibold text-surface-100">WIP et terminés par semaine</h2>
+            <p className="mb-4 text-xs text-surface-400">
+              {data.ticketCount} tickets analysés ·{' '}
+              {data.boards && data.boards.length > 0 ? `boards ${data.boards.join(', ')}` : `projets ${data.projectKeys.join(', ') || '—'}`} · mesure le vendredi à 14:00 (heure de Paris), semaine en cours : maintenant
+            </p>
+            <p className="mb-4 text-xs text-amber-300/90">{WIP_WORKFLOW_CHANGE_NOTE}</p>
+            <div className="h-80">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={chart.rows} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" vertical={false} />
+                  <XAxis dataKey="label" stroke="#94a3b8" fontSize={12} tickLine={false} />
+                  <YAxis stroke="#94a3b8" fontSize={12} allowDecimals={false} tickLine={false} axisLine={false} />
+                  <Tooltip
+                    cursor={{ fill: 'rgba(148,163,184,0.08)' }}
+                    content={({ active, payload }) =>
+                      active && payload?.[0] ? <WipTooltipContent row={payload[0].payload as WipRow} teams={chart.teams} /> : null
+                    }
+                  />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="done" name="Terminés" fill={DONE_COLOR} radius={[4, 4, 0, 0]} maxBarSize={28} />
+                  {series.aggregateName && (
+                    <Line
+                      type="monotone"
+                      dataKey="wip"
+                      name={series.aggregateName}
+                      stroke={series.aggregateTeam ? teamColor(allTeams, series.aggregateTeam) : WIP_COLOR}
+                      strokeWidth={2}
+                      dot={<WipDot />}
+                      isAnimationActive={false}
+                    />
+                  )}
+                  {series.teamLines.map((team) => (
+                    <Line
+                      key={team}
+                      type="monotone"
+                      dataKey={(row: WipRow) => row.teams[team] ?? 0}
+                      name={`WIP ${team}`}
+                      stroke={teamColor(allTeams, team)}
+                      strokeWidth={2}
+                      dot={false}
+                      isAnimationActive={false}
+                    />
+                  ))}
+                  {chart.threshold.value !== null && (
+                    <ReferenceLine
+                      y={chart.threshold.value}
+                      stroke={OVER_COLOR}
+                      strokeDasharray="6 4"
+                      label={{ value: thresholdLabel(chart.threshold, summedThreshold), position: 'insideTopRight', fill: '#fca5a5', fontSize: 11 }}
+                    />
+                  )}
+                  {workflowLabel && (
+                    <ReferenceLine
+                      x={workflowLabel}
+                      stroke="#fbbf24"
+                      strokeDasharray="3 3"
+                      label={{ value: '12/10', position: 'insideTopLeft', fill: '#fbbf24', fontSize: 11 }}
+                    />
+                  )}
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+          </section>
+
+          <section className="card-glass p-6" aria-label="Répartition par statut">
+            <h2 className="text-lg font-semibold text-surface-100">Répartition par statut</h2>
+            <p className="mb-4 text-xs text-surface-400">
+              Nombre de tickets encore dans le WIP au dernier point de mesure, selon le statut qu'ils avaient à cet instant.
+              Même filtre d'équipes que le graphique. Un ticket sur plusieurs équipes ne compte qu'une fois.
+            </p>
+            {statusCounts.length === 0 ? (
+              <p className="text-sm text-surface-500">Aucun ticket dans le WIP sur cette sélection.</p>
+            ) : (
+              <ul className="flex flex-wrap gap-3">
+                {statusCounts.map((row) => (
+                  <li key={row.status} className="w-44 rounded-xl border border-surface-700 bg-surface-900/40 px-3 py-3">
+                    <span className="block truncate text-sm text-surface-200" title={row.status}>
+                      {row.status}
+                    </span>
+                    <span className="mt-1 block text-3xl font-semibold tabular-nums text-surface-100">{row.count}</span>
+                    <span className="text-xs text-surface-400">{row.count > 1 ? 'tickets' : 'ticket'}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+
+          <section className="card-glass p-6" aria-label="WIP par collaborateur">
+            <h2 className="text-lg font-semibold text-surface-100">Plus de {WIP_PER_PERSON_LIMIT} tickets</h2>
+            <p className="mb-4 text-xs text-surface-400">
+              Collaborateurs au-dessus du seuil, sur les tickets encore dans le WIP au dernier point de mesure. Même filtre
+              d'équipes que le graphique. Un ticket sur plusieurs équipes ne compte qu'une fois.
+            </p>
+            {overAssignees.length === 0 ? (
+              <p className="text-sm text-surface-500">
+                Aucun collaborateur n'a plus de {WIP_PER_PERSON_LIMIT} tickets dans le WIP.
+              </p>
+            ) : (
+              <>
+                <div className="flex flex-wrap gap-3">
+                  {overAssignees.map((row) => {
+                    const isOpen = opened?.assignee === row.assignee;
+                    return (
+                      <button
+                        key={row.assignee}
+                        type="button"
+                        aria-expanded={isOpen}
+                        aria-controls={isOpen ? 'wip-assignee-detail' : undefined}
+                        onClick={() => setOpenAssignee(isOpen ? null : row.assignee)}
+                        className={`w-40 rounded-xl border px-3 py-3 text-left transition ${
+                          isOpen ? 'border-red-400 bg-red-500/15' : 'border-red-500/40 bg-red-500/5 hover:border-red-400'
+                        }`}
+                      >
+                        <span className="block truncate text-sm font-medium text-surface-100">{row.assignee}</span>
+                        <span className="mt-1 block text-3xl font-semibold tabular-nums text-red-400">{row.count}</span>
+                        <span className="text-xs text-surface-400">tickets en WIP</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                {opened && (
+                  <ul id="wip-assignee-detail" aria-label={`Tickets de ${opened.assignee}`} className="mt-4 space-y-1 text-sm">
+                    {opened.tickets.map((ticket) => {
+                      const href = ticketHref(ticket.key);
+                      return (
+                        <li key={ticket.key} className="flex items-center justify-between gap-3 rounded-lg border border-surface-800 px-3 py-2">
+                          {href ? (
+                            <a href={href} target="_blank" rel="noreferrer" className="text-primary-400 hover:underline">
+                              {ticket.key}
+                            </a>
+                          ) : (
+                            <span className="text-surface-200">{ticket.key}</span>
+                          )}
+                          <span className="text-surface-300">{ticket.status}</span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </>
+            )}
+          </section>
+
+          <section className="card-glass p-6" aria-label="Seuils par équipe">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <h2 className="text-lg font-semibold text-surface-100">Seuils par équipe</h2>
+                <p className="text-xs text-surface-400">
+                  Seuil = nombre de devs × tickets max par dev (défaut {data.settings.defaultMaxPerDev}).
+                  {!canEdit && ' Seuls les super admins peuvent les modifier.'}
+                </p>
+              </div>
+              {canEdit && !editing && (
+                <button type="button" onClick={startEditing} className="flex items-center gap-1 text-sm text-primary-400 hover:underline">
+                  <Pencil className="h-4 w-4" /> Modifier les réglages
+                </button>
+              )}
+            </div>
+
+            {!editing ? (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-surface-400">
+                    <th className="py-2 font-medium">Équipe</th>
+                    <th className="py-2 font-medium">Devs</th>
+                    <th className="py-2 font-medium">Max / dev</th>
+                    <th className="py-2 font-medium">Seuil</th>
+                    <th className="py-2 font-medium">WIP fin de période</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {summedThreshold && lastRow && (
+                    <tr className="border-t border-surface-800 font-medium text-surface-100">
+                      <td className="py-2" colSpan={3}>
+                        Somme des équipes choisies
+                      </td>
+                      <td className="py-2 tabular-nums">{chart.threshold.value ?? 'Seuil non défini'}</td>
+                      <td className="py-2 tabular-nums">{lastRow.wip}</td>
+                    </tr>
+                  )}
+                  {allTeams.map((team) => {
+                    const row = data.settings.teams.find((t) => t.team.toLowerCase() === team.toLowerCase());
+                    const threshold = teamThreshold(data.settings, team);
+                    const wip = data.weeks[data.weeks.length - 1]?.byTeam[team]?.wip ?? 0;
+                    const over = threshold !== null && wip > threshold;
+                    return (
+                      <tr key={team} className="border-t border-surface-800 text-surface-200">
+                        <td className="py-2">{team}</td>
+                        <td className="py-2 tabular-nums">{row?.devCount ?? '–'}</td>
+                        <td className="py-2 tabular-nums">{row ? row.maxPerDev ?? data.settings.defaultMaxPerDev : '–'}</td>
+                        <td className="py-2 tabular-nums">{threshold ?? <span className="text-surface-500">Seuil non défini</span>}</td>
+                        <td className={`py-2 tabular-nums ${over ? 'font-semibold text-red-400' : ''}`}>
+                          {wip}
+                          {over && <span className="ml-2 text-xs">Seuil dépassé</span>}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <div className="space-y-4">
+                <div className="grid gap-4 sm:grid-cols-3">
+                  <label className="text-sm text-surface-300">
+                    Statuts de départ
+                    <input
+                      value={startDraft}
+                      onChange={(e) => setStartDraft(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-800 px-2 py-1 text-surface-100"
+                    />
+                  </label>
+                  <label className="text-sm text-surface-300">
+                    Statuts d&apos;arrivée
+                    <input
+                      value={endDraft}
+                      onChange={(e) => setEndDraft(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-800 px-2 py-1 text-surface-100"
+                    />
+                  </label>
+                  <label className="text-sm text-surface-300">
+                    Tickets max par dev (défaut)
+                    <input
+                      type="number"
+                      min={1}
+                      max={20}
+                      value={defaultMaxDraft}
+                      onChange={(e) => setDefaultMaxDraft(e.target.value)}
+                      className="mt-1 w-full rounded-lg border border-surface-700 bg-surface-800 px-2 py-1 text-surface-100"
+                    />
+                  </label>
+                </div>
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-surface-400">
+                      <th className="py-2 font-medium">Équipe</th>
+                      <th className="py-2 font-medium">Devs</th>
+                      <th className="py-2 font-medium">Max / dev (vide = défaut)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {teamDrafts.map((d, i) => (
+                      <tr key={d.team} className="border-t border-surface-800 text-surface-200">
+                        <td className="py-2">{d.team}</td>
+                        <td className="py-2">
+                          <input
+                            type="number"
+                            min={0}
+                            max={50}
+                            aria-label={`Devs ${d.team}`}
+                            value={d.devCount}
+                            onChange={(e) => setTeamDrafts((prev) => prev.map((p, j) => (j === i ? { ...p, devCount: e.target.value } : p)))}
+                            className="w-20 rounded-lg border border-surface-700 bg-surface-800 px-2 py-1 text-surface-100"
+                          />
+                        </td>
+                        <td className="py-2">
+                          <input
+                            type="number"
+                            min={1}
+                            max={20}
+                            aria-label={`Max par dev ${d.team}`}
+                            value={d.maxPerDev}
+                            onChange={(e) => setTeamDrafts((prev) => prev.map((p, j) => (j === i ? { ...p, maxPerDev: e.target.value } : p)))}
+                            className="w-20 rounded-lg border border-surface-700 bg-surface-800 px-2 py-1 text-surface-100"
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {saveError && (
+                  <p role="alert" className="text-sm text-amber-400">
+                    {saveError}
+                  </p>
+                )}
+                <div className="flex gap-3">
+                  <button type="button" onClick={saveSettings} disabled={saving} className="btn-primary flex items-center gap-1 px-3 py-1.5 text-sm">
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />} Enregistrer
+                  </button>
+                  <button type="button" onClick={() => setEditing(false)} className="flex items-center gap-1 text-sm text-surface-400 hover:text-surface-200">
+                    <X className="h-4 w-4" /> Annuler
+                  </button>
+                </div>
+              </div>
+            )}
+          </section>
+        </>
+      )}
+    </div>
+  );
+}

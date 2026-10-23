@@ -22,6 +22,7 @@ describe('getFirstVisiblePage', () => {
       performance: false,
       performanceDashboard: false,
       couts: false,
+      wip: false,
     };
     expect(getFirstVisiblePage(visible)).toBe('dashboard');
   });
@@ -39,6 +40,7 @@ describe('getFirstVisiblePage', () => {
       performance: false,
       performanceDashboard: false,
       couts: false,
+      wip: false,
     };
     expect(getFirstVisiblePage(visible)).toBe('users');
   });
@@ -56,6 +58,7 @@ describe('getFirstVisiblePage', () => {
       performance: false,
       performanceDashboard: false,
       couts: false,
+      wip: false,
     };
     expect(getFirstVisiblePage(visible)).toBeNull();
   });
@@ -73,6 +76,7 @@ describe('getFirstVisiblePage', () => {
       performance: false,
       performanceDashboard: false,
       couts: false,
+      wip: false,
     };
     expect(getFirstVisiblePage(visible)).toBe('support');
   });
@@ -188,6 +192,7 @@ describe('useStore (auth)', () => {
         performance: false,
         performanceDashboard: false,
         couts: false,
+        wip: false,
       },
     });
     useStore.getState().setCurrentPage('support');
@@ -206,6 +211,7 @@ describe('useStore (auth)', () => {
         performance: false,
         performanceDashboard: false,
         couts: false,
+        wip: false,
       },
     });
 

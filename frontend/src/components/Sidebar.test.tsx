@@ -69,6 +69,16 @@ describe('Sidebar', () => {
     expect(screen.queryByText('Support Board')).not.toBeInTheDocument();
     expect(screen.queryByText('Utilisateurs')).not.toBeInTheDocument();
     expect(screen.queryByText('Gestion des utilisateurs')).not.toBeInTheDocument();
+    expect(screen.queryByText('Suivi WIP')).not.toBeInTheDocument();
+  });
+
+  it('CT-65 : propose « Suivi WIP » seulement si le rôle a la page wip', () => {
+    renderWithProviders(<Sidebar currentPage="dashboard" onNavigate={onNavigate} />, {
+      user: { ...TEST_USER, visiblePages: { ...TEST_VISIBLE_PAGES_DASHBOARD_ONLY, wip: true } },
+      socket: true,
+    });
+    fireEvent.click(screen.getByText('Suivi WIP'));
+    expect(onNavigate).toHaveBeenCalledWith('wip');
   });
 
   it('affiche toutes les pages quand visiblePages autorise tout', () => {
@@ -88,6 +98,7 @@ describe('Sidebar', () => {
     expect(screen.getByText('Suivi epics')).toBeInTheDocument();
     expect(screen.getByText('Marketing')).toBeInTheDocument();
     expect(screen.getByText('Produit')).toBeInTheDocument();
+    expect(screen.getByText('Suivi WIP')).toBeInTheDocument();
     // Pages regroupées : visibles une fois le groupe ouvert.
     expect(screen.getByRole('button', { name: /Suivi performance/ })).toHaveAttribute('aria-expanded', 'false');
     expect(screen.getByRole('button', { name: /Paramètres/ })).toHaveAttribute('aria-expanded', 'false');
