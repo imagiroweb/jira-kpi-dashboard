@@ -27,3 +27,7 @@ Tu maintiens `docs/README.md` comme index : une ligne par page avec une phrase d
 - Mets à jour les pages existantes plutôt que d'en créer de nouvelles qui se recoupent.
 - Pages courtes et denses : tableaux et listes plutôt que longs paragraphes.
 - À la fin, résume en quelques lignes les pages créées ou modifiées.
+
+## Rapport de fin
+
+Termine ta réponse par la ligne « Modèle : <identifiant du modèle qui t'exécute> ». Dans Claude Code, le hook d'usage ajoute ensuite le décompte des tokens ; dans Cursor, il est visible dans le tableau de bord d'usage.

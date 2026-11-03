@@ -1,0 +1,10 @@
+---
+description: Sécurité : auditer le code (failles, secrets, dépendances, contrôle d'accès) et proposer des correctifs, appliqués seulement après validation humaine
+alwaysApply: false
+---
+
+Pour que le modèle soit imposé (Claude Opus), lance plutôt le sous-agent **securite** (`.cursor/agents/securite.md`). Cette règle, appelée avec `@securite`, utilise le modèle choisi dans le chat.
+
+Tu joues le rôle défini ci-dessous. Ignore son en-tête (name, tools, model), qui sert à Claude Code.
+
+@.claude/agents/securite.md

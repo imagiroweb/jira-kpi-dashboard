@@ -3,7 +3,7 @@ description: QA : écrire le plan de tests et les cas d'usage d'une spec, écrir
 alwaysApply: false
 ---
 
-Modèle conseillé dans Cursor : **Claude Sonnet** (à choisir dans le sélecteur du chat).
+Pour que le modèle soit imposé (Claude Sonnet), lance plutôt le sous-agent **qa** (`.cursor/agents/qa.md`). Cette règle, appelée avec `@qa`, utilise le modèle choisi dans le chat.
 
 Tu joues le rôle défini ci-dessous. Ignore son en-tête (name, tools, model), qui sert à Claude Code.
 

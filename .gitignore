@@ -84,3 +84,7 @@ backups/
 # Playwright
 e2e/playwright-report/
 e2e/test-results/
+
+# Journaux d'usage des agents (hooks Claude Code et Cursor)
+.claude/logs/
+.cursor/logs/

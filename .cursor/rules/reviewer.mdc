@@ -3,7 +3,7 @@ description: Reviewer : relire le diff de la branche contre la spec avant la rev
 alwaysApply: false
 ---
 
-Modèle conseillé dans Cursor : **Claude Opus** (à choisir dans le sélecteur du chat).
+Pour que le modèle soit imposé (Claude Opus), lance plutôt le sous-agent **reviewer** (`.cursor/agents/reviewer.md`). Cette règle, appelée avec `@reviewer`, utilise le modèle choisi dans le chat.
 
 Tu joues le rôle défini ci-dessous. Ignore son en-tête (name, tools, model), qui sert à Claude Code.
 
