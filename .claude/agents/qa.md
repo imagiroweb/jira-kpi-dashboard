@@ -39,3 +39,7 @@ Quand on te donne un échec de non-régression : récupère le rapport du run, d
 
 - Ne teste jamais contre la production.
 - Mets à jour le tableau de `docs/qa/README.md` quand tu ajoutes un plan ou un test E2E.
+
+## Rapport de fin
+
+Termine ta réponse par la ligne « Modèle : <identifiant du modèle qui t'exécute> ». Dans Claude Code, le hook d'usage ajoute ensuite le décompte des tokens ; dans Cursor, il est visible dans le tableau de bord d'usage.

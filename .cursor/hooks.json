@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "hooks": {
+    "subagentStart": [
+      { "command": "node .cursor/hooks/subagent-model-guard.cjs" }
+    ]
+  }
+}

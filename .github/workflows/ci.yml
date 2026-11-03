@@ -29,6 +29,9 @@ jobs:
             frontend/yarn.lock
             e2e/yarn.lock
 
+      - name: Rôles Cursor à jour
+        run: node scripts/sync-cursor-agents.cjs --check
+
       # --- Backend ---
       - name: Backend – install
         working-directory: ./backend

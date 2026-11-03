@@ -34,3 +34,7 @@ Tu lis **uniquement** le dossier `docs/` (commence par `docs/README.md`). Tu n'o
 ```
 
 Écris en français, simplement, sans jargon technique. La spec doit pouvoir être relue et validée par une personne non technique.
+
+## Rapport de fin
+
+Termine ta réponse par la ligne « Modèle : <identifiant du modèle qui t'exécute> ». Dans Claude Code, le hook d'usage ajoute ensuite le décompte des tokens ; dans Cursor, il est visible dans le tableau de bord d'usage.
