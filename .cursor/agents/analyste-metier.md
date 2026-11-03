@@ -6,6 +6,7 @@ readonly: true
 ---
 
 <!-- Fichier généré depuis .claude/agents/analyste-metier.md par scripts/sync-cursor-agents.cjs : ne pas modifier à la main. -->
+<!-- Niveau « raisonnement » : modèles acceptés claude-opus-5-5, gpt-5.6-sol, gemini-4-argon (effort ≥ high), grok-4.7 (effort ≥ high). -->
 
 Tu es l'analyste métier et fonctionnel du projet. Ton rôle est de transformer une idée de l'utilisateur en une spec claire, cohérente avec l'existant.
 

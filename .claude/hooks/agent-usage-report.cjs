@@ -3,7 +3,7 @@
 // à partir de son transcript, l'affiche à l'utilisateur et l'ajoute à .claude/logs/usage.jsonl.
 const fs = require('fs');
 const path = require('path');
-const { projectDir, readAgent, modelMatches, readStdin } = require('./lib-agents.cjs');
+const { projectDir, readAgent, readTiers, tierOf, tierAccepts, readStdin } = require('./lib-agents.cjs');
 
 const input = readStdin();
 const role = input.agent_type || 'sous-agent';
@@ -42,13 +42,21 @@ if (total.requests === 0) process.exit(0);
 const agent = readAgent(role);
 const expected = agent && agent.model;
 const modelList = [...models];
-const respected = modelList.every((m) => modelMatches(expected, m));
+let tiers = null;
+try { tiers = readTiers(); } catch { tiers = null; }
+const tier = tiers && expected ? tierOf(expected, tiers) : null;
+const checks = modelList.map((m) => (tier ? tierAccepts(tier, m, tiers) : { ok: !expected || m.includes(expected), equivalent: false }));
+const respected = checks.every((c) => c.ok);
+const equivalent = respected && checks.some((c) => c.equivalent);
 
 const fmt = (n) => n.toLocaleString('fr-FR');
 const inputTotal = total.input + total.cacheWrite + total.cacheRead;
 let message = `Usage ${role} : ${modelList.join(', ') || 'modèle inconnu'}, ${total.requests} requêtes, ` +
   `${fmt(inputTotal)} tokens en entrée (dont ${fmt(total.cacheRead)} lus en cache), ${fmt(total.output)} en sortie.`;
-if (expected && !respected) message += ` ⚠ Modèle attendu : ${expected}.`;
+if (equivalent) message += ` Équivalent du niveau « ${tier.name} » utilisé à la place de ${expected} : bascule à noter.`;
+if (expected && !respected) {
+  message += ` ⚠ Modèle hors niveau : attendu ${tier ? `${expected} ou un équivalent du niveau « ${tier.name} »` : expected}.`;
+}
 
 try {
   const dir = path.join(projectDir(), '.claude', 'logs');
@@ -57,6 +65,8 @@ try {
     date: new Date().toISOString(),
     agent: role,
     attendu: expected || null,
+    niveau: tier ? tier.name : null,
+    equivalent,
     modeles: modelList,
     respecte: respected,
     ...total,

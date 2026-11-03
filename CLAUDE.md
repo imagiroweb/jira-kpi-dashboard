@@ -49,17 +49,21 @@ La chaîne de travail est **Documentation → Analyse → Plan de tests → Dev 
 
 Après chaque changement fonctionnel, mettre à jour la page concernée de `docs/` dans la même PR (ou déléguer au documentaliste).
 
-### Modèles imposés et usage
+### Modèles imposés par niveau
 
-| Rôle | Modèle |
-|---|---|
-| documentaliste, qa | Sonnet |
-| analyste-metier, securite, reviewer | Opus |
-| session principale (Dev) | Sonnet (`model` de `.claude/settings.json`) |
-| routines (triage, veille PR, dépendances) | Haiku |
+Chaque rôle a un **niveau** de modèle. Il tourne sur le modèle par défaut de ce niveau ou sur un équivalent de capacité et d'effort comparables, pour ne pas dépendre d'un seul modèle ni d'un seul fournisseur. Les niveaux et leurs équivalents sont dans `.claude/model-tiers.json`.
 
-- Le modèle d'un rôle est celui de l'en-tête de `.claude/agents/<rôle>.md`. Le hook `PreToolUse` `.claude/hooks/agent-model-guard.cjs` refuse tout lancement d'un rôle avec un autre modèle (paramètre `model` de l'appel, ou `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`).
-- À la fin de chaque sous-agent, le hook `SubagentStop` `.claude/hooks/agent-usage-report.cjs` affiche le modèle réellement utilisé et les tokens consommés, signale un modèle non respecté et ajoute une ligne à `.claude/logs/usage.jsonl` (non versionné). La session principale reprend cette ligne d'usage dans son compte rendu.
+| Rôle | Niveau | Par défaut | Équivalents acceptés (Cursor) |
+|---|---|---|---|
+| analyste-metier, securite, reviewer | raisonnement | Opus (`claude-opus-5-5`) | `gpt-5.6-sol`, `gemini-4-argon` (effort ≥ high), `grok-4.7` (effort ≥ high) |
+| documentaliste, qa | exécution | Sonnet (`claude-sonnet-5-5`) | `gpt-5.6-terra`, `gemini-3.8-flash` (effort ≥ high), `composer-2.5` |
+| session principale (Dev) | exécution | Sonnet (`model` de `.claude/settings.json`) | idem |
+| routines (triage, veille PR, dépendances) | routine | Haiku (`claude-haiku-5-5`) | `gemini-3.8-flash` |
+
+- Le niveau d'un rôle se déduit du `model:` de l'en-tête de `.claude/agents/<rôle>.md`. Le hook `PreToolUse` `.claude/hooks/agent-model-guard.cjs` refuse tout lancement d'un rôle sur un modèle d'un autre niveau (paramètre `model` de l'appel, ou `CLAUDE_CODE_SUBAGENT_MODEL_FORCE`). Une autre version de la même famille Claude (par exemple une future Sonnet) reste acceptée.
+- Les variantes « fast » (prix doublé) sont refusées, ainsi qu'un équivalent lancé sous son effort minimal quand l'effort est connu.
+- Pour changer les équivalents, modifier `.claude/model-tiers.json`, puis relancer `node scripts/sync-cursor-agents.cjs`.
+- À la fin de chaque sous-agent, le hook `SubagentStop` `.claude/hooks/agent-usage-report.cjs` affiche le modèle réellement utilisé et les tokens consommés, signale un modèle hors niveau ou un équivalent utilisé (bascule à noter) et ajoute une ligne à `.claude/logs/usage.jsonl` (non versionné). La session principale reprend cette ligne d'usage dans son compte rendu.
 - Le modèle de la session principale est un choix initial : `/model` permet d'en changer pour une tâche qui le justifie.
 
 ### Économie de contexte
@@ -72,10 +76,10 @@ Après chaque changement fonctionnel, mettre à jour la page concernée de `docs
 
 Cursor charge ce fichier via `.cursor/rules/projet.mdc`.
 
-- **Sous-agents (modèle imposé)** : `.cursor/agents/<rôle>.md` est généré depuis `.claude/agents/` par `node scripts/sync-cursor-agents.cjs`, avec l'identifiant de modèle Cursor (`claude-opus-5-5`, `claude-sonnet-5-5`) et `readonly: true` pour les rôles sans écriture. Lancer un rôle en sous-agent (par exemple « utilise le sous-agent securite ») pour que son modèle soit appliqué. Relancer le script après toute modification d'un rôle ; la CI vérifie que la copie est à jour.
-- **Contrôle** : le hook `.cursor/hooks.json` bloque un sous-agent qui démarrerait sur un autre modèle et note chaque démarrage dans `.cursor/logs/usage.jsonl`. Cursor peut basculer sur un autre modèle si l'offre ou l'équipe ne l'autorise pas ; le hook le signale alors au lieu de laisser passer.
+- **Sous-agents (modèle imposé)** : `.cursor/agents/<rôle>.md` est généré depuis `.claude/agents/` par `node scripts/sync-cursor-agents.cjs`, avec l'identifiant Cursor par défaut du niveau (`claude-opus-5-5`, `claude-sonnet-5-5`) et, en commentaire, les équivalents acceptés, et `readonly: true` pour les rôles sans écriture. Lancer un rôle en sous-agent (par exemple « utilise le sous-agent securite ») pour que son modèle soit appliqué. Relancer le script après toute modification d'un rôle ; la CI vérifie que la copie est à jour.
+- **Contrôle** : le hook `.cursor/hooks.json` accepte le modèle par défaut du niveau ou un équivalent, bloque tout autre modèle (par exemple une bascule de Cursor vers un modèle plus faible pour cause de quota) et note chaque démarrage, avec le niveau et l'équivalent éventuel, dans `.cursor/logs/usage.jsonl`.
 - **Usage** : Cursor ne donne pas les tokens à l'agent ; ils sont dans le tableau de bord https://cursor.com/dashboard/usage, ligne par modèle.
-- **Règles** : `@analyste-metier`, `@documentaliste`, `@qa`, `@securite` et `@reviewer` restent disponibles, mais une règle utilise le modèle choisi dans le chat.
+- **Règles** : `@analyste-metier`, `@documentaliste`, `@qa`, `@securite` et `@reviewer` restent disponibles, mais une règle utilise le modèle choisi dans le chat : en choisir un du niveau du rôle.
 - **Contexte** : un nouveau chat par tâche.
 
 Les fichiers `.claude/agents/*.md` restent la source unique des rôles.

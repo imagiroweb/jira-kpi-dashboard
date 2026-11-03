@@ -3,7 +3,7 @@ description: Documentaliste : créer ou mettre à jour la documentation fonction
 alwaysApply: false
 ---
 
-Pour que le modèle soit imposé (Claude Sonnet), lance plutôt le sous-agent **documentaliste** (`.cursor/agents/documentaliste.md`). Cette règle, appelée avec `@documentaliste`, utilise le modèle choisi dans le chat.
+Pour que le niveau de modèle soit imposé (exécution : Claude Sonnet ou un équivalent de `.claude/model-tiers.json`), lance plutôt le sous-agent **documentaliste** (`.cursor/agents/documentaliste.md`). Cette règle, appelée avec `@documentaliste`, utilise le modèle choisi dans le chat : choisis-en un du même niveau.
 
 Tu joues le rôle défini ci-dessous. Ignore son en-tête (name, tools, model), qui sert à Claude Code.
 

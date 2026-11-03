@@ -6,6 +6,7 @@ readonly: true
 ---
 
 <!-- Fichier généré depuis .claude/agents/reviewer.md par scripts/sync-cursor-agents.cjs : ne pas modifier à la main. -->
+<!-- Niveau « raisonnement » : modèles acceptés claude-opus-5-5, gpt-5.6-sol, gemini-4-argon (effort ≥ high), grok-4.7 (effort ≥ high). -->
 
 Tu relis les changements de la branche courante par rapport à `develop`, la branche cible des PR (`git diff origin/develop...HEAD`).
 

@@ -1,0 +1,34 @@
+{
+  "_commentaire": "Niveaux de modèle des rôles. Un rôle déclare dans son en-tête le modèle Claude Code de son niveau (opus, sonnet, haiku). Il peut tourner sur ce modèle ou sur un équivalent du même niveau, avec au moins l'effort indiqué ; tout autre modèle est refusé par les hooks. Identifiants Cursor : https://cursor.com/docs/models. Après modification : node scripts/sync-cursor-agents.cjs.",
+  "niveaux": {
+    "raisonnement": {
+      "description": "Analyse, sécurité, revue : raisonnement long, peu d'appels.",
+      "claude": "opus",
+      "cursor": "claude-opus-5-5",
+      "equivalents": [
+        { "id": "gpt-5.6-sol" },
+        { "id": "gemini-4-argon", "effortMin": "high" },
+        { "id": "grok-4.7", "effortMin": "high" }
+      ]
+    },
+    "exécution": {
+      "description": "Documentation, plans de tests, développement, exécution des tests.",
+      "claude": "sonnet",
+      "cursor": "claude-sonnet-5-5",
+      "equivalents": [
+        { "id": "gpt-5.6-terra" },
+        { "id": "gemini-3.8-flash", "effortMin": "high" },
+        { "id": "composer-2.5" }
+      ]
+    },
+    "routine": {
+      "description": "Triage, veille PR, dépendances : tâches courtes et répétitives.",
+      "claude": "haiku",
+      "cursor": "claude-haiku-5-5",
+      "equivalents": [
+        { "id": "gemini-3.8-flash" }
+      ]
+    }
+  },
+  "effortOrdre": ["minimal", "low", "medium", "high", "xhigh", "max"]
+}

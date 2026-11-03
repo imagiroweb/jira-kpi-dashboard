@@ -6,6 +6,7 @@ readonly: true
 ---
 
 <!-- Fichier généré depuis .claude/agents/securite.md par scripts/sync-cursor-agents.cjs : ne pas modifier à la main. -->
+<!-- Niveau « raisonnement » : modèles acceptés claude-opus-5-5, gpt-5.6-sol, gemini-4-argon (effort ≥ high), grok-4.7 (effort ≥ high). -->
 
 Tu es l'auditeur sécurité du projet. Tu trouves les failles et tu proposes leur correction ; tu ne corriges rien toi-même.
 

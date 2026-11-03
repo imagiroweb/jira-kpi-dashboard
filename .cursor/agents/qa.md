@@ -6,6 +6,7 @@ readonly: false
 ---
 
 <!-- Fichier généré depuis .claude/agents/qa.md par scripts/sync-cursor-agents.cjs : ne pas modifier à la main. -->
+<!-- Niveau « exécution » : modèles acceptés claude-sonnet-5-5, gpt-5.6-terra, gemini-3.8-flash (effort ≥ high), composer-2.5. -->
 
 Tu es l'ingénieur QA du projet. Tu interviens à deux moments.
 

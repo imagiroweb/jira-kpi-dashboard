@@ -1,19 +1,15 @@
 #!/usr/bin/env node
 // Génère .cursor/agents/<rôle>.md à partir de .claude/agents/<rôle>.md, seule source des rôles.
 // Cursor lit aussi .claude/agents/, mais ne comprend pas les alias de modèle de Claude Code
-// (sonnet, opus, haiku) : la copie générée porte l'identifiant de modèle Cursor et prend le pas.
+// (sonnet, opus, haiku) : la copie générée porte l'identifiant Cursor du niveau du rôle
+// (.claude/model-tiers.json) et prend le pas. Les équivalents acceptés sont rappelés dans le fichier.
 // Usage : node scripts/sync-cursor-agents.cjs [--check]
 const fs = require('fs');
 const path = require('path');
 
-// Alias Claude Code → identifiant de modèle Cursor (https://cursor.com/docs/models).
-const CURSOR_MODELS = {
-  opus: 'claude-opus-5-5',
-  sonnet: 'claude-sonnet-5-5',
-  haiku: 'claude-haiku-5-5',
-};
-
 const root = path.resolve(__dirname, '..');
+const { readTiers, tierOf, acceptedList } = require(path.join(root, '.claude', 'hooks', 'lib-agents.cjs'));
+const tiers = readTiers(root);
 const source = path.join(root, '.claude', 'agents');
 const target = path.join(root, '.cursor', 'agents');
 const check = process.argv.includes('--check');
@@ -26,7 +22,11 @@ function convert(content, file) {
     const m = line.match(/^(\w+):\s*(.*)$/);
     if (m) header[m[1]] = m[2].trim();
   }
-  const model = CURSOR_MODELS[header.model] || header.model || 'inherit';
+  const tier = tierOf(header.model, tiers);
+  if (header.model && header.model !== 'inherit' && !tier) {
+    throw new Error(`${file} : modèle « ${header.model} » absent de .claude/model-tiers.json`);
+  }
+  const model = tier ? tier.cursor : 'inherit';
   const tools = (header.tools || '').split(',').map((t) => t.trim());
   const readonly = header.tools !== undefined && !tools.includes('Write') && !tools.includes('Edit');
   return [
@@ -38,6 +38,7 @@ function convert(content, file) {
     '---',
     '',
     `<!-- Fichier généré depuis .claude/agents/${path.basename(file)} par scripts/sync-cursor-agents.cjs : ne pas modifier à la main. -->`,
+    ...(tier ? [`<!-- Niveau « ${tier.name} » : modèles acceptés ${acceptedList(tier)}. -->`] : []),
     '',
     match[2].trimStart(),
   ].join('\n');

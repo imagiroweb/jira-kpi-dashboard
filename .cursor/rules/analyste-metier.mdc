@@ -3,7 +3,7 @@ description: Analyste métier : cadrer un besoin avec l'utilisateur à partir de
 alwaysApply: false
 ---
 
-Pour que le modèle soit imposé (Claude Opus), lance plutôt le sous-agent **analyste-metier** (`.cursor/agents/analyste-metier.md`). Cette règle, appelée avec `@analyste-metier`, utilise le modèle choisi dans le chat.
+Pour que le niveau de modèle soit imposé (raisonnement : Claude Opus ou un équivalent de `.claude/model-tiers.json`), lance plutôt le sous-agent **analyste-metier** (`.cursor/agents/analyste-metier.md`). Cette règle, appelée avec `@analyste-metier`, utilise le modèle choisi dans le chat : choisis-en un du même niveau.
 
 Tu joues le rôle défini ci-dessous. Ignore son en-tête (name, tools, model), qui sert à Claude Code.
 
